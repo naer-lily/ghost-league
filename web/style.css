@@ -630,6 +630,21 @@ a { color: var(--mint); }
   border-radius: 50%;
   object-fit: cover;
 }
+.avatar.has-frame-art { overflow: visible; }
+.avatar img.avatar-frame-art {
+  inset: auto;
+  top: 50%;
+  left: 50%;
+  width: 112%;
+  height: 112%;
+  max-width: none;
+  border-radius: 0;
+  object-fit: contain;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 2;
+  filter: drop-shadow(0 0 5px rgba(255, 132, 64, 0.32));
+}
 .avatar-large { width: 3.05rem; height: 3.05rem; font-size: 1.05rem; }
 .avatar-xl { width: 5.2rem; height: 5.2rem; font-size: 1.7rem; }
 .streak-card {

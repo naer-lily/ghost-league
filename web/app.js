@@ -795,10 +795,49 @@
     return `${url}${separator}v=${version}`;
   }
 
-  function paintAvatar(container, url, name) {
+  const FRAME_ART_SOURCES = Object.freeze({
+    frame_ember: "/assets/frames/frame_ember.png",
+  });
+
+  function resolveFrameId(frame) {
+    const raw = String(frame || "").trim();
+    if (!raw) return "";
+    if (FRAME_ART_SOURCES[raw]) return raw;
+    const items = Array.isArray(state.collection?.items) ? state.collection.items : [];
+    const match = items.find(
+      (entry) => entry?.slot === "frame" && String(entry.name || "").trim() === raw,
+    );
+    return match ? String(match.id || "") : "";
+  }
+
+  function paintAvatarFrame(container, frameId) {
+    const source = FRAME_ART_SOURCES[resolveFrameId(frameId)] || "";
+    let overlay = container.querySelector("img.avatar-frame-art");
+    if (!source) {
+      if (overlay) overlay.remove();
+      container.classList.remove("has-frame-art");
+      return;
+    }
+    if (!overlay) {
+      overlay = document.createElement("img");
+      overlay.className = "avatar-frame-art";
+      overlay.alt = "";
+      overlay.setAttribute("aria-hidden", "true");
+      overlay.decoding = "async";
+      overlay.draggable = false;
+      container.append(overlay);
+    }
+    if (overlay.getAttribute("src") !== source) {
+      overlay.setAttribute("src", source);
+    }
+    container.classList.add("has-frame-art");
+  }
+
+  function paintAvatar(container, url, name, frameId) {
     if (!container) return;
+    paintAvatarFrame(container, frameId);
     const fallback = container.querySelector(".avatar-fallback");
-    const image = container.querySelector("img");
+    const image = container.querySelector("img:not(.avatar-frame-art)");
     if (fallback) fallback.textContent = initialOf(name);
     if (!image) return;
     if (!url) {
@@ -1180,8 +1219,18 @@
     el["home-name"].textContent = name;
     el["home-group"].textContent = groupText;
     el["header-group"].textContent = groupText;
-    paintAvatar(el["home-avatar"], profile.avatar_url, name);
-    paintAvatar(el["profile-avatar"], profile.avatar_url, name);
+    paintAvatar(
+      el["home-avatar"],
+      profile.avatar_url,
+      name,
+      state.collection?.equipped?.frame_id,
+    );
+    paintAvatar(
+      el["profile-avatar"],
+      profile.avatar_url,
+      name,
+      state.collection?.equipped?.frame_id,
+    );
     paintAvatar(el["header-avatar-button"], profile.avatar_url, name);
     el["profile-user-id"].textContent = profile.user_id;
     el["profile-group"].textContent = groupText;
@@ -1503,9 +1552,10 @@
       row.className = "standing-row";
       row.dataset.userId = memberKey;
       if (member.is_me) row.classList.add("is-me");
-      if (member.is_me && member.frame) {
+      const ownFrameId = member.is_me ? resolveFrameId(member.frame) : "";
+      if (ownFrameId) {
         row.classList.add("has-frame");
-        row.dataset.frame = String(member.frame);
+        row.dataset.frame = ownFrameId;
       }
       if (isPromotion) row.classList.add("is-promotion");
       if (isDemotion) row.classList.add("is-demotion");
@@ -1550,7 +1600,7 @@
       image.alt = "";
       image.hidden = true;
       avatar.append(fallback, image);
-      paintAvatar(avatar, member.avatar_url, member.name || member.display_name);
+      paintAvatar(avatar, member.avatar_url, member.name || member.display_name, ownFrameId);
       const copy = document.createElement("span");
       copy.className = "standing-copy";
       const nameLine = document.createElement("span");
@@ -1991,7 +2041,12 @@
     el["user-error"].hidden = true;
     el["user-content"].hidden = false;
     const name = detail.display_name || detail.user_id;
-    paintAvatar(el["user-detail-avatar"], detail.avatar_url, name);
+    paintAvatar(
+      el["user-detail-avatar"],
+      detail.avatar_url,
+      name,
+      detail.frame_id || detail.frame,
+    );
     const isMe = Boolean(detail.is_me) || detail.user_id === state.profile?.user_id;
     el["user-detail-name"].textContent = name;
     el["user-detail-handle"].textContent = `@${detail.user_id}`;

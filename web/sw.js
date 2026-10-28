@@ -1,18 +1,19 @@
 "use strict";
 
 // Bump this version whenever any shell asset below changes.
-const CACHE_VERSION = "gl-shell-v31-2026-10-28";
-// Previous cache generations: gl-shell-v30-2026-10-28, gl-shell-v29-2026-10-28, gl-shell-v28-2026-10-28, gl-shell-v27-2026-10-28, gl-shell-v26-2026-10-28, gl-shell-v25-2026-10-27
+const CACHE_VERSION = "gl-shell-v32-2026-10-28";
+// Previous cache generations: gl-shell-v31-2026-10-28, gl-shell-v30-2026-10-28, gl-shell-v29-2026-10-28, gl-shell-v28-2026-10-28, gl-shell-v27-2026-10-28, gl-shell-v26-2026-10-28, gl-shell-v25-2026-10-27
 const SHELL = [
   "/",
   "/index.html",
-  "/style.css?v=31",
-  "/app.js?v=31",
+  "/style.css?v=32",
+  "/app.js?v=32",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
   "/icons/maskable-512.png",
   "/icons/apple-touch-icon.png",
+  "/assets/frames/frame_ember.png",
   "/assets/tiers/bronze.png",
   "/assets/tiers/silver.png",
   "/assets/tiers/gold.png",

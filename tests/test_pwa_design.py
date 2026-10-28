@@ -146,7 +146,7 @@ class PWADesignMotionTests(unittest.TestCase):
         self.assertIn("minmax(0, 1fr)", self.css)
 
     def test_07_shell_cache_is_bumped_without_removing_previous_marker(self) -> None:
-        self.assertIn('const CACHE_VERSION = "gl-shell-v31-2026-10-28";', self.sw)
+        self.assertIn('const CACHE_VERSION = "gl-shell-v32-2026-10-28";', self.sw)
         self.assertIn("gl-shell-v30-2026-10-28", self.sw)
         self.assertIn("gl-shell-v29-2026-10-28", self.sw)
         self.assertIn("gl-shell-v28-2026-10-28", self.sw)
@@ -154,8 +154,31 @@ class PWADesignMotionTests(unittest.TestCase):
         self.assertIn("gl-shell-v26-2026-10-28", self.sw)
         self.assertIn("gl-shell-v25-2026-10-27", self.sw)
         self.assertIn("caches.delete", self.sw)
-        self.assertIn("/style.css?v=31", self.sw)
-        self.assertIn("/app.js?v=31", self.sw)
+        self.assertIn("/style.css?v=32", self.sw)
+        self.assertIn("/app.js?v=32", self.sw)
+
+    def test_10_ember_frame_art_is_scoped_to_owned_avatars(self) -> None:
+        self.assertIn('frame_ember: "/assets/frames/frame_ember.png"', self.js)
+        self.assertIn("function paintAvatarFrame(container, frameId)", self.js)
+        self.assertIn('container.querySelector("img.avatar-frame-art")', self.js)
+        self.assertIn('container.querySelector("img:not(.avatar-frame-art)")', self.js)
+        self.assertIn("state.collection?.equipped?.frame_id", self.js)
+        self.assertIn('const ownFrameId = member.is_me ? resolveFrameId(member.frame) : "";', self.js)
+        self.assertIn(
+            "paintAvatar(avatar, member.avatar_url, member.name || member.display_name, ownFrameId);",
+            self.js,
+        )
+        self.assertIn("detail.frame_id || detail.frame", self.js)
+        # The header avatar stays plain; only owned large avatars get the art.
+        self.assertIn('paintAvatar(el["header-avatar-button"], profile.avatar_url, name);', self.js)
+        for declaration in (
+            ".avatar.has-frame-art { overflow: visible; }",
+            ".avatar img.avatar-frame-art {",
+            "width: 112%;",
+            "pointer-events: none;",
+        ):
+            self.assertIn(declaration, self.css)
+        self.assertIn("/assets/frames/frame_ember.png", self.sw)
 
     def test_09_ember_and_repair_surfaces_keep_mobile_layout(self) -> None:
         for element_id in (
