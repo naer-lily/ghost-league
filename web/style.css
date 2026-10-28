@@ -640,8 +640,8 @@ a { color: var(--mint); }
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 157.464%;
-  height: 157.464%;
+  width: 146.88%;
+  height: 146.88%;
   border-radius: 50%;
   background: radial-gradient(
     circle,
@@ -649,6 +649,14 @@ a { color: var(--mint); }
     rgba(255, 90, 31, 0.1428) 78%,
     rgba(255, 90, 31, 0) 100%
   );
+  -webkit-mask-image: radial-gradient(circle, transparent 0 34.04%, #000 34.05%);
+  mask-image: radial-gradient(circle, transparent 0 34.04%, #000 34.05%);
+  -webkit-mask-size: 141.42% 141.42%;
+  mask-size: 141.42% 141.42%;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
   transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 1;
@@ -659,11 +667,19 @@ a { color: var(--mint); }
   inset: auto;
   top: 50%;
   left: 50%;
-  width: 145.8%;
-  height: 145.8%;
+  width: 136%;
+  height: 136%;
   max-width: none;
   border-radius: 0;
   object-fit: contain;
+  -webkit-mask-image: radial-gradient(circle, transparent 0 36.76%, #000 36.77%);
+  mask-image: radial-gradient(circle, transparent 0 36.76%, #000 36.77%);
+  -webkit-mask-size: 141.42% 141.42%;
+  mask-size: 141.42% 141.42%;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
   transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 2;

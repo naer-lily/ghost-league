@@ -1,13 +1,13 @@
 "use strict";
 
 // Bump this version whenever any shell asset below changes.
-const CACHE_VERSION = "gl-shell-v33-2026-10-29";
-// Previous cache generations: gl-shell-v32-2026-10-28, gl-shell-v31-2026-10-28, gl-shell-v30-2026-10-28, gl-shell-v29-2026-10-28, gl-shell-v28-2026-10-28, gl-shell-v27-2026-10-28, gl-shell-v26-2026-10-28, gl-shell-v25-2026-10-27
+const CACHE_VERSION = "gl-shell-v34-2026-10-29";
+// Previous cache generations: gl-shell-v33-2026-10-29, gl-shell-v32-2026-10-28, gl-shell-v31-2026-10-28, gl-shell-v30-2026-10-28, gl-shell-v29-2026-10-28, gl-shell-v28-2026-10-28, gl-shell-v27-2026-10-28, gl-shell-v26-2026-10-28, gl-shell-v25-2026-10-27
 const SHELL = [
   "/",
   "/index.html",
-  "/style.css?v=33",
-  "/app.js?v=33",
+  "/style.css?v=34",
+  "/app.js?v=34",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
   "/icons/icon-512.png",

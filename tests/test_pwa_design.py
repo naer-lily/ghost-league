@@ -146,7 +146,8 @@ class PWADesignMotionTests(unittest.TestCase):
         self.assertIn("minmax(0, 1fr)", self.css)
 
     def test_07_shell_cache_is_bumped_without_removing_previous_marker(self) -> None:
-        self.assertIn('const CACHE_VERSION = "gl-shell-v33-2026-10-29";', self.sw)
+        self.assertIn('const CACHE_VERSION = "gl-shell-v34-2026-10-29";', self.sw)
+        self.assertIn("gl-shell-v33-2026-10-29", self.sw)
         self.assertIn("gl-shell-v32-2026-10-28", self.sw)
         self.assertIn("gl-shell-v30-2026-10-28", self.sw)
         self.assertIn("gl-shell-v29-2026-10-28", self.sw)
@@ -155,8 +156,8 @@ class PWADesignMotionTests(unittest.TestCase):
         self.assertIn("gl-shell-v26-2026-10-28", self.sw)
         self.assertIn("gl-shell-v25-2026-10-27", self.sw)
         self.assertIn("caches.delete", self.sw)
-        self.assertIn("/style.css?v=33", self.sw)
-        self.assertIn("/app.js?v=33", self.sw)
+        self.assertIn("/style.css?v=34", self.sw)
+        self.assertIn("/app.js?v=34", self.sw)
 
     def test_10_ember_frame_art_is_scoped_to_owned_avatars(self) -> None:
         self.assertIn('frame_ember: "/assets/frames/frame_ember.png"', self.js)
@@ -183,12 +184,16 @@ class PWADesignMotionTests(unittest.TestCase):
         for declaration in (
             ".avatar.has-frame-art,\n.header-avatar.has-frame-art { overflow: visible; }",
             ".avatar img.avatar-frame-art,\n.header-avatar img.avatar-frame-art {",
-            "width: 145.8%;",
-            "height: 145.8%;",
-            "width: 157.464%;",
-            "rgba(255, 90, 31, 0.34) 0 52%",
-            "rgba(255, 90, 31, 0.1428) 78%",
-            "rgba(255, 90, 31, 0) 100%",
+            "width: 136%;",
+            "height: 136%;",
+            "width: 146.88%;",
+            "-webkit-mask-image: radial-gradient(circle, transparent 0 36.76%, #000 36.77%);",
+            "mask-image: radial-gradient(circle, transparent 0 36.76%, #000 36.77%);",
+            "-webkit-mask-image: radial-gradient(circle, transparent 0 34.04%, #000 34.05%);",
+            "mask-image: radial-gradient(circle, transparent 0 34.04%, #000 34.05%);",
+            "-webkit-mask-size: 141.42% 141.42%;",
+            "mask-size: 141.42% 141.42%;",
+            "object-fit: contain;",
             "pointer-events: none;",
         ):
             self.assertIn(declaration, self.css)

@@ -76,8 +76,6 @@ class FrameVisual:
     asset: str
     glow_color: str
     glow_opacity: float = 0.34
-    min_size: int = 210
-    icon_padding: int = 28
     top_margin: int = 4
     # Fraction of the image's half-size that contains visible pixels.  The
     # ember art has a tall flame at the top, so this keeps the whole ring
@@ -85,6 +83,13 @@ class FrameVisual:
     content_half_ratio: float = 0.99
     center_dx: float = 0.0
     center_dy: float = 0.0
+
+
+# Every frame uses the same canvas/hole geometry: the canvas is 1.36x the
+# avatar (icon) diameter, its centre is a 1.00x hole, and the glow is 1.08x the
+# canvas.  See docs/AVATAR_FRAME_SPEC.md.
+FRAME_CANVAS_SCALE = 1.36
+FRAME_GLOW_SCALE = 1.08
 
 
 # Equipped frames are a generic visual registry.  Adding an equipped frame
@@ -408,9 +413,10 @@ def _frame_markup(frame_id: object, geometry: BadgeGeometry) -> tuple[str, str]:
     """Return ``(defs, markup)`` for one equipped frame, if it has artwork.
 
     The image is centred on the icon and drawn before the icon, so the icon
-    stays crisp over the transparent middle of the frame.  The size is chosen
-    to leave the decorated ring visible while keeping its top edge inside the
-    card viewport; the title column starts to the right of the artwork.
+    stays crisp over the transparent middle of the frame.  The canvas is always
+    1.36x the icon diameter, with a 1.00x transparent centre; the frame artwork
+    itself must not add its own padding or per-asset scale.  The top margin keeps
+    the ring inside the card viewport for the tall ember flame.
     """
 
     key = str(frame_id or "").strip()
@@ -421,7 +427,7 @@ def _frame_markup(frame_id: object, geometry: BadgeGeometry) -> tuple[str, str]:
     if data_uri is None:
         return "", ""
 
-    size = max(visual.min_size, geometry.icon_size + visual.icon_padding)
+    size = geometry.icon_size * FRAME_CANVAS_SCALE
     half = size / 2
     cx = geometry.icon_center_x + visual.center_dx
     cy = geometry.icon_center_y + visual.center_dy
@@ -430,7 +436,7 @@ def _frame_markup(frame_id: object, geometry: BadgeGeometry) -> tuple[str, str]:
         cy = min_cy
     x = cx - half
     y = cy - half
-    glow_radius = half * 1.08
+    glow_radius = half * FRAME_GLOW_SCALE
 
     defs = f'''
     <radialGradient id="badge-frame-glow" cx="0.5" cy="0.5" r="0.5">
@@ -441,7 +447,7 @@ def _frame_markup(frame_id: object, geometry: BadgeGeometry) -> tuple[str, str]:
     markup = f'''
   <g class="badge-frame" data-frame="{xml_escape(key)}">
     <circle cx="{cx:.2f}" cy="{cy:.2f}" r="{glow_radius:.2f}" fill="url(#badge-frame-glow)"/>
-    <image class="badge-frame-image" x="{x:.2f}" y="{y:.2f}" width="{size}" height="{size}" preserveAspectRatio="xMidYMid meet" href="{data_uri}"/>
+    <image class="badge-frame-image" x="{x:.2f}" y="{y:.2f}" width="{size:.2f}" height="{size:.2f}" preserveAspectRatio="xMidYMid meet" href="{data_uri}"/>
   </g>'''
     return defs, markup
 

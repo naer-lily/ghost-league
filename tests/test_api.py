@@ -502,6 +502,29 @@ class BadgeAndEmbedTests(APITestBase):
         self.assertIn('class="badge-frame-image"', badge)
         self.assertIn('href="data:image/png;base64,', badge)
         self.assertIn('fill="url(#badge-frame-glow)"', badge)
+        frame = re.search(
+            r'class="badge-frame-image"[^>]*width="([0-9.]+)" height="([0-9.]+)"',
+            badge,
+        )
+        icon = re.search(
+            r'<image x="[0-9.]+" y="[0-9.]+" width="([0-9.]+)" '
+            r'height="[0-9.]+" preserveAspectRatio="xMidYMid meet" '
+            r'href="data:image/png;base64,',
+            badge,
+        )
+        glow = re.search(
+            r'<circle cx="[0-9.]+" cy="[0-9.]+" r="([0-9.]+)" '
+            r'fill="url\(#badge-frame-glow\)"',
+            badge,
+        )
+        self.assertIsNotNone(frame)
+        self.assertIsNotNone(icon)
+        self.assertIsNotNone(glow)
+        assert frame is not None and icon is not None and glow is not None
+        frame_size = float(frame.group(1))
+        self.assertAlmostEqual(frame_size, float(frame.group(2)), places=1)
+        self.assertAlmostEqual(frame_size / float(icon.group(1)), 1.36, places=2)
+        self.assertAlmostEqual(float(glow.group(1)) * 2 / frame_size, 1.08, places=2)
         self.assertIn("称号 · 点火", badge)
         self.assertIn("青铜", badge)
         self.assertNotIn('href="http', badge)

@@ -108,6 +108,8 @@ token。systemd 模板把 token 放在 `/etc/ghost-league/waka.env`（0600）；
 - [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md)：webhook 事件、签名、重试和 CLI。
 - PWA：`web/` 是移动优先的静态应用，`ghost_league/pwa.py` 先注册 API 路由，再挂载
   静态根；`/v1/...`、`/avatars/...` 始终走 API。
+- [`docs/AVATAR_FRAME_SPEC.md`](docs/AVATAR_FRAME_SPEC.md)：头像框的 `1.36D` 画布、
+  `1.00D` 开孔和 `1.08×` 辉光规范，PWA 与 SVG 状态卡共用同一组数字。
 - 状态卡片：`GET /badge/{user_id}.svg` 返回公开 SVG，包含段位、称号和已装备边框；
   `GET /embed/{user_id}` 返回 60 秒自动刷新的 iframe。
 
