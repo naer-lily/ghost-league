@@ -1,0 +1,13 @@
+[Unit]
+Description=Ghost League WakaChannel weekly roster sync
+After=network-online.target ghost-league-source-fetch.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/ghost-league
+EnvironmentFile=/etc/ghost-league/waka.env
+ExecStart=/usr/bin/python3 -m waka_channel.cli sync-roster
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

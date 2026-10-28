@@ -1,0 +1,10 @@
+[Unit]
+Description=Ghost League weekly full leaderboard fetch timer
+
+[Timer]
+OnCalendar=Mon 00:02
+Persistent=true
+Unit=ghost-league-source-fetch.service
+
+[Install]
+WantedBy=timers.target

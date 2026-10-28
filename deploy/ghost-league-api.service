@@ -1,0 +1,19 @@
+[Unit]
+Description=Ghost League API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/ghost-league
+ExecStart=/srv/ghost-league/scripts/run_api.sh
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/ghost-league/api.env
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

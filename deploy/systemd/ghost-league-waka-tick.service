@@ -1,0 +1,13 @@
+[Unit]
+Description=Ghost League WakaChannel hourly tick
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/ghost-league
+EnvironmentFile=/etc/ghost-league/waka.env
+ExecStart=/usr/bin/python3 -m waka_channel.cli tick
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

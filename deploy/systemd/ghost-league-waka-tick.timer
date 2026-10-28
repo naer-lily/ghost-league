@@ -1,0 +1,10 @@
+[Unit]
+Description=Ghost League WakaChannel hourly tick timer
+
+[Timer]
+OnCalendar=*-*-* *:01:00
+Persistent=true
+Unit=ghost-league-waka-tick.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=Ghost League PWA
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/ghost-league
+ExecStart=/srv/ghost-league/scripts/run_pwa.sh
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/ghost-league/web.env
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,883 @@
+<!doctype html>
+<html lang="zh-CN" data-icon-theme="classic">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#6c4cff">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="把每天的活动变成连胜、打卡和小组排名。">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="联赛">
+  <title>联赛</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/style.css?v=31">
+</head>
+<body>
+  <a class="skip-link" href="#app-shell">跳到主要内容</a>
+  <div id="pull-refresh" class="pull-refresh" aria-hidden="true"><span>下拉刷新</span></div>
+  <div class="ambient" aria-hidden="true">
+    <span class="orb orb-one"></span>
+    <span class="orb orb-two"></span>
+    <span class="orb orb-three"></span>
+    <span class="ambient-grid"></span>
+  </div>
+
+  <div id="boot-loader" class="boot-loader" role="status" aria-live="polite">
+    <div class="boot-stage">
+      <div class="boot-logo" aria-hidden="true">联</div>
+      <div class="boot-copy">
+        <strong>正在进入本周联赛</strong>
+        <span>读取你的段位、今日进度与小组名次…</span>
+      </div>
+    </div>
+    <div class="boot-meter" aria-hidden="true"><span></span></div>
+    <p>正在进入联赛…</p>
+  </div>
+
+  <section id="login-view" class="login-view" hidden>
+    <div class="login-card">
+      <div class="login-mark" aria-hidden="true">
+        <span class="login-mark-ring"></span>
+        <span class="login-mark-flame"></span>
+      </div>
+      <p class="eyebrow">你的每周联赛</p>
+      <h1>联赛</h1>
+      <p class="login-tagline">把今天的努力，变成看得见的连胜。</p>
+      <form id="login-form" novalidate>
+        <label for="token-input">个人访问令牌</label>
+        <div class="token-field">
+          <input id="token-input" type="password" inputmode="text" autocomplete="off"
+                 autocapitalize="off" spellcheck="false" placeholder="粘贴你的 Bearer token">
+          <button id="toggle-token" class="token-toggle" type="button" aria-label="显示令牌">显示</button>
+        </div>
+        <p class="form-hint">令牌只保存在这台设备，不会出现在地址栏。</p>
+        <button id="login-button" class="primary-button" type="submit">
+          <span>进入我的联赛</span>
+          <span class="button-spinner" hidden aria-hidden="true"></span>
+        </button>
+        <p id="login-error" class="form-error" role="alert" hidden></p>
+      </form>
+      <p class="login-foot">没有账号？让管理员用命令行给你开一个。</p>
+    </div>
+  </section>
+
+  <div id="offline-banner" class="offline-banner" hidden>
+    <span class="offline-dot"></span>
+    当前离线，正在显示已加载的数据
+  </div>
+
+  <div id="app-shell" class="app-shell" hidden>
+    <header class="app-header">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">联</span>
+        <div class="brand-copy">
+          <strong>联赛</strong>
+          <span id="header-group">正在载入…</span>
+        </div>
+        <span id="sync-status" class="sync-status" hidden>已更新</span>
+      </div>
+      <div class="header-actions">
+        <button id="install-button" class="icon-button install-button" type="button" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14"/></svg>
+          <span>安装</span>
+        </button>
+        <button id="refresh-button" class="icon-button refresh-button" type="button" aria-label="刷新联赛数据">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
+        </button>
+        <button id="sound-button" class="icon-button sound-button" type="button" aria-label="关闭声音" aria-pressed="true">
+          <svg class="sound-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h4l5 4V5L9 9H5Zm12.5-1.5a6 6 0 0 1 0 9M20 5a10 10 0 0 1 0 14"/></svg>
+          <svg class="sound-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h4l5 4V5L9 9H5Zm12 1 4 4m0-4-4 4"/></svg>
+        </button>
+        <button id="header-avatar-button" class="header-avatar" type="button" data-nav="me" aria-label="个人页">
+          <span id="header-avatar-fallback" class="avatar-fallback">?</span>
+          <img id="header-avatar-image" alt="" hidden>
+        </button>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <section class="page home-page" data-page="home">
+        <div class="home-grid">
+          <section id="tier-card" class="card tier-card tier-bronze">
+            <div class="tier-card-top">
+              <div class="tier-title-block">
+                <p class="eyebrow"><span class="signal-dot" aria-hidden="true"></span>本周段位</p>
+                <div id="tier-badge" class="tier-badge">青铜</div>
+                <p class="tier-caption">你的小组竞技席位</p>
+              </div>
+              <img id="tier-gem" class="tier-icon" alt="" aria-hidden="true">
+            </div>
+            <div class="identity-line">
+              <div id="home-avatar" class="avatar avatar-large">
+                <span class="avatar-fallback">?</span>
+                <img alt="" hidden>
+              </div>
+              <div class="identity-copy">
+                <h2 id="home-name">—</h2>
+                <p id="home-group">—</p>
+              </div>
+            </div>
+            <div class="streak-card">
+              <div class="flame" aria-hidden="true">
+                <svg viewBox="0 0 64 64"><path d="M33 3c5 12 15 18 15 31 0 10-7 17-16 17S16 44 16 34c0-7 4-12 9-17 2 6 5 9 8 11-1-9 1-17 0-25Z"/><path class="flame-inner" d="M33 31c3 5 8 8 8 14 0 5-4 9-8 9s-8-4-8-9c0-4 3-7 8-14Z"/></svg>
+              </div>
+              <div class="streak-copy-wrap">
+                <div class="streak-number"><span id="streak-number">0</span><small>天连胜</small><span id="streak-delta" class="delta-chip delta-gold" hidden></span></div>
+                <p id="streak-copy">今天累积满 100 XP，点亮火焰。</p>
+              </div>
+            </div>
+            <button id="share-card-button" class="share-button" type="button" aria-label="生成本周战绩分享卡片">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 14v5h14v-5"/></svg>
+              <span class="share-label">分享战绩</span>
+              <span class="button-spinner" hidden aria-hidden="true"></span>
+            </button>
+          </section>
+
+          <section id="ring-card" class="card ring-card">
+            <span id="today-progress" class="sr-only" role="progressbar" aria-label="今日打卡进度"
+                  aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></span>
+            <div class="card-topline">
+              <p class="eyebrow">今日打卡</p>
+              <span id="xp-delta" class="delta-chip delta-mint" hidden></span>
+            </div>
+            <div class="ring-wrap">
+              <svg class="progress-ring" viewBox="0 0 240 240" aria-hidden="true">
+                <circle class="ring-track" cx="120" cy="120" r="98"></circle>
+                <circle id="ring-progress" class="ring-progress" cx="120" cy="120" r="98"></circle>
+              </svg>
+              <div class="ring-center">
+                <div class="ring-number"><span id="today-seconds">0</span><small>XP</small></div>
+                <span id="ring-goal" class="ring-goal">今日目标 100 XP</span>
+                <span id="checkin-label" class="checkin-label">还没打卡</span>
+              </div>
+            </div>
+            <div class="ring-meta">
+              <span id="ring-status-text">满 100 XP 即可打卡</span>
+              <span id="next-checkin">每天 00:00 开始新一天</span>
+            </div>
+            <div id="repair-box" class="repair-box">
+              <div class="repair-copy">
+                <strong>补签</strong>
+                <p id="repair-hint">选择最近可补日期，消耗 1 枚余烬。</p>
+              </div>
+              <div class="repair-controls">
+                <label class="sr-only" for="repair-date">补签日期</label>
+                <select id="repair-date"></select>
+                <button id="repair-button" class="secondary-button compact" type="button" disabled>消耗 1 枚余烬补签</button>
+              </div>
+            </div>
+          </section>
+
+          <section id="rank-card" class="card rank-card">
+            <div class="card-topline">
+              <p class="eyebrow">本周小组</p>
+              <span id="rank-change" class="delta-chip rank-delta" hidden></span>
+            </div>
+            <div class="rank-scoreline">
+              <span class="rank-prefix">#</span>
+              <span id="week-rank" class="rank-big">—</span>
+              <span id="group-size" class="rank-of">/15</span>
+            </div>
+            <p class="rank-caption">小组当前排名</p>
+            <div class="week-total"><span id="week-seconds">0</span><small>XP</small></div>
+            <p class="rank-caption">本周累计</p>
+            <div class="mini-progress" role="progressbar" aria-label="与小组第一的进度对比" aria-valuemin="0" aria-valuemax="100">
+              <span id="rank-progress"></span>
+            </div>
+            <p id="rank-helper" class="rank-helper">继续行动，名次会往上走。</p>
+          </section>
+        </div>
+
+        <section class="card list-card home-board">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">我的小组</p>
+              <h2>当前小组</h2>
+            </div>
+            <div class="heading-actions">
+              <button id="home-ember-button" class="pill ember-pill" type="button" data-page="embers">
+                余烬 <strong id="home-ember-balance">0</strong>
+              </button>
+              <span id="home-group-pill" class="pill">等待数据</span>
+            </div>
+          </div>
+          <div class="board-zone-key" aria-hidden="true">
+            <span><i class="zone-dot is-promotion"></i>晋级区</span>
+            <span><i class="zone-dot is-demotion"></i>降级区</span>
+            <span class="board-zone-key-note">点按成员查看资料</span>
+          </div>
+          <ol id="home-standings" class="standings-list" aria-live="polite"></ol>
+          <p id="home-standings-empty" class="empty-inline" hidden>等待数据</p>
+          <button id="home-full-standings" class="board-more-button" type="button" data-page="league">
+            查看完整小组榜 <span aria-hidden="true">→</span>
+          </button>
+        </section>
+
+        <section class="card list-card home-feed" aria-labelledby="home-feed-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">组内动态</p>
+              <h2 id="home-feed-title">最近的动静</h2>
+            </div>
+            <button id="home-feed-all" class="board-more-button feed-more-button" type="button" data-page="feed">
+              查看全部 <span aria-hidden="true">→</span>
+            </button>
+          </div>
+          <ol id="home-feed-list" class="feed-list" aria-live="polite"></ol>
+          <p id="home-feed-empty" class="empty-inline" hidden>组里还没人动</p>
+        </section>
+      </section>
+
+      <section class="page league-page" data-page="league" hidden>
+        <header class="league-page-head">
+          <div class="league-title-row">
+            <div>
+              <p class="eyebrow">联赛 · 本周赛程</p>
+              <h1>小组榜</h1>
+            </div>
+            <div class="league-tabs" role="tablist" aria-label="榜单类型">
+              <button id="league-tab-group" class="league-tab is-active" type="button"
+                      role="tab" aria-selected="true" aria-controls="league-standings">我的小组</button>
+              <button id="league-tab-friends" class="league-tab" type="button"
+                      role="tab" aria-selected="false" aria-controls="league-standings">好友榜</button>
+            </div>
+          </div>
+          <p class="league-page-sub">
+            <span id="league-subtitle">只显示你所在的小组</span>
+            <span class="league-sub-dot" aria-hidden="true">·</span>
+            <span id="league-group-name">等待数据</span>
+            <span class="league-sub-dot" aria-hidden="true">·</span>
+            <span id="league-snapshot">等待数据</span>
+            <span class="league-sub-dot" aria-hidden="true">·</span>
+            <span id="league-count">等待数据</span>
+          </p>
+        </header>
+
+        <section class="league-hero" aria-labelledby="league-tier-name">
+          <div class="league-hero-top">
+            <div class="league-tier-emblem">
+              <img id="league-tier-icon" class="league-tier-icon" alt="" width="1024" height="1024">
+            </div>
+            <div class="league-hero-copy">
+              <p class="eyebrow">当前段位</p>
+              <h2 id="league-tier-name">青铜</h2>
+              <p id="league-group-meta" class="league-group-meta">小组青铜 · W53-G01</p>
+              <div class="league-hero-meta">
+                <span id="league-days-left" class="league-days-left">本周剩余 — 天</span>
+                <span id="tier-rail-summary" class="tier-rail-summary">已解锁 — / 10</span>
+              </div>
+            </div>
+          </div>
+          <div class="tier-rail-heading">
+            <p id="league-tier-hint" class="league-tier-hint">10 个段位 · 左右滑动查看</p>
+            <div class="tier-rail-legend" aria-hidden="true">
+              <span><i class="rail-key is-reached"></i>已解锁</span>
+              <span><i class="rail-key is-current"></i>当前</span>
+              <span><i class="rail-key is-fogged"></i>未解锁</span>
+            </div>
+          </div>
+          <div id="league-tier-slots" class="league-tier-slots" role="list" aria-label="段位进度，左右滑动查看"></div>
+        </section>
+
+        <section class="league-board" aria-label="小组排名">
+          <div class="league-board-head">
+            <div>
+              <p class="eyebrow">本周分组</p>
+              <h2>小组排名</h2>
+            </div>
+            <div class="league-board-guide" aria-hidden="true">
+              <span><i class="zone-dot is-promotion"></i>前 3 晋级</span>
+              <span><i class="zone-dot is-demotion"></i>后 3 降级</span>
+            </div>
+          </div>
+          <ol id="league-standings" class="standings-list league-standings" aria-live="polite"></ol>
+          <p id="league-standings-empty" class="empty-inline" hidden>等待数据</p>
+        </section>
+      </section>
+
+      <section class="page feed-page" data-page="feed" hidden>
+        <button id="feed-back-button" class="back-button" type="button">← 返回</button>
+        <div class="page-heading feed-page-heading">
+          <p class="eyebrow">组内动态</p>
+          <h1>组内动态</h1>
+          <p>同组和关注的人，最近的动静。</p>
+        </div>
+        <section class="card list-card feed-card">
+          <ol id="feed-list" class="feed-list feed-list-full" aria-live="polite"></ol>
+          <p id="feed-empty" class="empty-inline" hidden>组里还没人动</p>
+          <p id="feed-loading" class="empty-inline" hidden>正在载入动态…</p>
+        </section>
+      </section>
+
+      <section class="page me-page" data-page="me" hidden>
+        <div class="page-heading me-page-heading">
+          <p class="eyebrow">个人</p>
+          <h1>个人页</h1>
+          <p>只影响你自己的资料和体验。</p>
+        </div>
+        <div class="me-layout">
+          <section class="card me-overview-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">概览</p>
+                <h2>本周状态</h2>
+              </div>
+              <span class="pill">我的</span>
+            </div>
+            <div class="overview-grid me-overview-grid">
+              <div class="overview-stat"><span>本周 XP</span><strong id="me-week-xp">—</strong></div>
+              <div class="overview-stat"><span>当前段位</span><strong id="me-tier">—</strong></div>
+              <div class="overview-stat"><span>连续打卡</span><strong id="me-streak">—</strong></div>
+              <div class="overview-stat"><span>今日 XP</span><strong id="me-today-xp">—</strong></div>
+              <div class="overview-stat"><span>关注</span><strong id="me-following-count">—</strong></div>
+              <div class="overview-stat"><span>关注者</span><strong id="me-followers-count">—</strong></div>
+            </div>
+          </section>
+
+          <section class="card profile-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">资料</p>
+                <h2>公开身份</h2>
+              </div>
+              <span class="pill">仅自己可改</span>
+            </div>
+            <div class="profile-avatar-row">
+              <div id="profile-avatar" class="avatar avatar-xl">
+                <span class="avatar-fallback">?</span>
+                <img alt="" hidden>
+              </div>
+              <div class="profile-avatar-actions">
+                <input id="avatar-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+                <button id="choose-avatar-button" class="secondary-button" type="button">选择图片</button>
+                <button id="upload-avatar-button" class="primary-button compact" type="button" disabled>
+                  <span>上传头像</span>
+                  <span class="button-spinner" hidden aria-hidden="true"></span>
+                </button>
+                <p class="form-hint">PNG / JPEG / WebP，最大 2MB，自动裁成 256×256。</p>
+              </div>
+            </div>
+
+            <form id="profile-form" class="stack-form" novalidate>
+              <label for="display-name-input">显示名</label>
+              <input id="display-name-input" type="text" maxlength="32" autocomplete="nickname">
+              <label for="activity-label-input">活动（填动词）</label>
+              <input id="activity-label-input" type="text" maxlength="16"
+                     autocomplete="off" placeholder="画画 / 骑行 / 游泳 / 健身">
+              <fieldset class="theme-fieldset">
+                <legend>图标主题</legend>
+                <p class="form-hint">保存后立即更新你的段位滑轨和公开状态卡。</p>
+                <div id="icon-theme-options" class="theme-options">
+                  <label class="theme-option is-selected" data-theme="classic">
+                    <input type="radio" name="icon_theme" value="classic" checked>
+                    <span class="theme-option-head">
+                      <strong>经典</strong>
+                      <span class="theme-option-state">已选择</span>
+                    </span>
+                    <span class="theme-previews" aria-hidden="true">
+                      <img class="theme-preview" data-theme="classic" data-slug="bronze"
+                           src="/assets/tiers/bronze.png" alt="" width="48" height="48" loading="lazy">
+                      <img class="theme-preview" data-theme="classic" data-slug="gold"
+                           src="/assets/tiers/gold.png" alt="" width="48" height="48" loading="lazy">
+                      <img class="theme-preview" data-theme="classic" data-slug="diamond"
+                           src="/assets/tiers/diamond.png" alt="" width="48" height="48" loading="lazy">
+                    </span>
+                  </label>
+                  <label class="theme-option" data-theme="material">
+                    <input type="radio" name="icon_theme" value="material">
+                    <span class="theme-option-head">
+                      <strong>Material</strong>
+                      <span class="theme-option-state">选择</span>
+                    </span>
+                    <span class="theme-previews" aria-hidden="true">
+                      <img class="theme-preview" data-theme="material" data-slug="bronze"
+                           src="/assets/tiers/material/bronze.png" alt="" width="48" height="48" loading="lazy">
+                      <img class="theme-preview" data-theme="material" data-slug="gold"
+                           src="/assets/tiers/material/gold.png" alt="" width="48" height="48" loading="lazy">
+                      <img class="theme-preview" data-theme="material" data-slug="diamond"
+                           src="/assets/tiers/material/diamond.png" alt="" width="48" height="48" loading="lazy">
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+              <div class="form-row">
+                <button id="save-name-button" class="primary-button" type="submit">保存资料</button>
+                <span id="name-save-status" class="inline-status" hidden></span>
+              </div>
+            </form>
+          </section>
+
+          <section id="collection-card" class="card collection-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">收藏</p>
+                <h2>称号与外观</h2>
+              </div>
+              <span id="collection-equipped" class="pill">未装备</span>
+            </div>
+            <p class="form-hint">只显示已经解锁的称号和物品；装备只改变展示，不影响 XP、排名或分组。</p>
+            <div class="collection-group">
+              <h3>称号</h3>
+              <div id="collection-titles" class="collection-grid"></div>
+            </div>
+            <div class="collection-group">
+              <h3>边框 / 背景 / 冠军环</h3>
+              <div id="collection-items" class="collection-grid"></div>
+            </div>
+            <p id="collection-empty" class="empty-inline" hidden>还没有解锁的称号或物品，继续完成里程碑。</p>
+          </section>
+
+          <section class="card preference-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">体验</p>
+                <h2>反馈与连接</h2>
+              </div>
+              <span class="pill">偏好</span>
+            </div>
+            <div class="settings-list">
+              <button id="integration-docs-row" class="setting-row" type="button">
+                <span>
+                  <strong>集成文档</strong>
+                  <small>把活动记录接入你的脚本或工具</small>
+                </span>
+                <span class="setting-arrow" aria-hidden="true">›</span>
+              </button>
+              <button id="nearby-people-row" class="setting-row" type="button">
+                <span>
+                  <strong>附近的人</strong>
+                  <small>看看附近还有谁在参赛</small>
+                </span>
+                <span class="setting-arrow" aria-hidden="true">›</span>
+              </button>
+              <button id="sound-toggle-row" class="setting-row" type="button" role="switch" aria-checked="true">
+                <span>
+                  <strong>声音反馈</strong>
+                  <small>点击、打卡、晋升时播放短音效</small>
+                </span>
+                <span class="switch" aria-hidden="true"><span></span></span>
+              </button>
+              <button id="haptics-toggle-row" class="setting-row" type="button" role="switch" aria-checked="true">
+                <span>
+                  <strong>轻触反馈</strong>
+                  <small>设备支持时使用轻微振动</small>
+                </span>
+                <span class="switch" aria-hidden="true"><span></span></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="card account-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">账号</p>
+                <h2>本机登录</h2>
+              </div>
+              <span class="pill">私密</span>
+            </div>
+            <div class="account-box">
+              <div><span class="muted">用户 ID</span><strong id="profile-user-id">—</strong></div>
+              <div><span class="muted">小组</span><strong id="profile-group">—</strong></div>
+              <div><span class="muted">加入轮次</span><strong id="profile-joined">—</strong></div>
+            </div>
+            <div class="danger-zone">
+              <div>
+                <strong>危险操作</strong>
+                <p>退出后需要重新输入个人令牌。</p>
+              </div>
+              <button id="logout-button" class="danger-button" type="button">退出登录</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="page user-page" data-page="user" hidden>
+        <button id="user-back-button" class="back-button" type="button">← 返回</button>
+        <div id="user-loading" class="empty-inline">正在载入用户…</div>
+        <div id="user-error" class="empty-state" hidden>
+          <div class="empty-icon" aria-hidden="true">!</div>
+          <h2>用户加载失败</h2>
+          <p>请稍后重试。</p>
+        </div>
+        <div id="user-content" hidden>
+          <section class="card user-hero">
+            <div id="user-detail-avatar" class="avatar avatar-xl">
+              <span class="avatar-fallback">?</span>
+              <img alt="" hidden>
+            </div>
+            <div class="user-hero-copy">
+              <h1 id="user-detail-name">—</h1>
+              <p id="user-detail-handle">@—</p>
+              <p id="user-detail-joined" class="muted">—</p>
+              <div class="user-hero-tags">
+                <span id="user-detail-activity" class="pill" hidden></span>
+                <span id="user-detail-title" class="title-chip" hidden></span>
+              </div>
+            </div>
+            <button id="user-follow-button" class="primary-button compact user-follow-button"
+                    type="button" hidden>关注</button>
+          </section>
+
+          <div class="user-social-counts">
+            <div><strong id="user-following-count">0</strong><span>关注</span></div>
+            <div><strong id="user-followers-count">0</strong><span>关注者</span></div>
+            <div><strong id="user-week-minutes">0</strong><span>本周 XP</span></div>
+          </div>
+
+          <section class="card detail-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">本周状态</p>
+                <h2>联赛数据</h2>
+              </div>
+              <span class="user-detail-tier-mark">
+                <img id="user-detail-tier-icon" class="user-detail-tier-icon" alt="">
+                <span id="user-detail-tier" class="pill">—</span>
+              </span>
+            </div>
+            <div class="overview-grid">
+              <div class="overview-stat"><span>本周 XP</span><strong id="user-week-total">0 XP</strong></div>
+              <div class="overview-stat"><span>小组排名</span><strong id="user-stat-rank">—</strong></div>
+              <div class="overview-stat"><span>连续打卡</span><strong id="user-stat-streak">—</strong></div>
+              <div class="overview-stat"><span>今日打卡</span><strong id="user-stat-checkin">—</strong></div>
+              <div class="overview-stat"><span>当前段位</span><strong id="user-stat-tier">—</strong></div>
+              <div class="overview-stat"><span>小组</span><strong id="user-detail-group">—</strong></div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="page people-page" data-page="people" hidden>
+        <button id="people-back-button" class="back-button" type="button">← 返回</button>
+        <div class="page-heading">
+          <p class="eyebrow">发现</p>
+          <h1>附近的人</h1>
+          <p>附近的参赛者</p>
+        </div>
+        <section class="card list-card">
+          <ol id="people-list" class="people-list" aria-live="polite"></ol>
+          <p id="people-empty" class="empty-inline" hidden>附近还没有其他参赛者</p>
+          <p id="people-loading" class="empty-inline">正在载入附近的人…</p>
+          <div id="people-error" class="empty-state" hidden>
+            <div class="empty-icon" aria-hidden="true">!</div>
+            <h2>加载失败</h2>
+            <p>请检查网络后重试。</p>
+          </div>
+        </section>
+      </section>
+
+      <section class="page integration-page" data-page="integration" hidden>
+        <button id="integration-back-button" class="back-button" type="button">← 返回设置</button>
+        <div class="page-heading">
+          <p class="eyebrow">开发者</p>
+          <h1>集成文档</h1>
+          <p>用 Bearer token 记录活动进度，并读取自己的状态与榜单。</p>
+        </div>
+
+        <section class="card integration-card">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">开始之前</p>
+              <h2>认证</h2>
+            </div>
+            <span class="pill">Bearer</span>
+          </div>
+          <p>所有 <code>/v1/me/*</code> 请求都使用请求头：</p>
+          <div class="code-block">
+            <button class="copy-code-button" type="button" data-copy-code>复制</button>
+            <pre><code>Authorization: Bearer $GHOST_LEAGUE_TOKEN</code></pre>
+          </div>
+          <p>在这里查看或生成你的个人访问令牌。令牌只保存在当前设备；生成新令牌后，旧令牌会立即失效，请同步更新其他客户端。</p>
+          <div class="integration-token-field">
+            <input id="integration-token-input" type="password" readonly autocomplete="off"
+                   autocapitalize="off" spellcheck="false" aria-label="个人访问令牌">
+            <button id="integration-token-reveal" class="secondary-button compact" type="button">显示</button>
+            <button id="integration-token-copy" class="secondary-button compact" type="button">复制</button>
+          </div>
+          <button id="rotate-token-button" class="primary-button compact" type="button">生成新令牌</button>
+          <p class="form-hint">不要把完整令牌写入代码、日志或公开仓库。客户端可从 <code>GHOST_LEAGUE_TOKEN</code> 环境变量读取。</p>
+        </section>
+
+        <section class="card integration-card">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">写入</p>
+              <h2>记录进度</h2>
+            </div>
+            <span class="pill">POST</span>
+          </div>
+          <p><code>POST /v1/me/increments</code> 接收焦点时长增量。请求体示例：</p>
+          <div class="code-block">
+            <button class="copy-code-button" type="button" data-copy-code>复制</button>
+            <pre><code>{
+  "event_id": "unique-event-id",
+  "seconds": 137
+}</code></pre>
+          </div>
+          <ul class="integration-list">
+            <li><code>event_id</code> 是幂等键：同一事件重复发送不会重复累计。</li>
+            <li><code>seconds</code> 为正整数，没有 180 秒上限；客户端可按自己的节奏批量或增量发送。</li>
+            <li>活动标签在个人资料页配置，服务端只存专注时长；第一版不处理距离、配速或组数。</li>
+          </ul>
+          <h3>curl</h3>
+          <div class="code-block">
+            <button class="copy-code-button" type="button" data-copy-code>复制</button>
+            <pre><code>curl -X POST "https://your-host.example/v1/me/increments" \
+  -H "Authorization: Bearer $GHOST_LEAGUE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event_id":"unique-event-id","seconds":137}'</code></pre>
+          </div>
+          <h3>Python</h3>
+          <div class="code-block">
+            <button class="copy-code-button" type="button" data-copy-code>复制</button>
+            <pre><code>import os
+import requests
+
+base_url = "https://your-host.example"
+headers = {"Authorization": f"Bearer {os.environ['GHOST_LEAGUE_TOKEN']}"}
+payload = {"event_id": "unique-event-id", "seconds": 137}
+response = requests.post(
+    f"{base_url}/v1/me/increments",
+    headers=headers,
+    json=payload,
+    timeout=10,
+)
+response.raise_for_status()
+print(response.json())</code></pre>
+          </div>
+          <h3>JavaScript</h3>
+          <div class="code-block">
+            <button class="copy-code-button" type="button" data-copy-code>复制</button>
+            <pre><code>const token = localStorage.getItem("gl.token.v1");
+const baseUrl = window.location.origin;
+
+async function recordIncrement(eventId, seconds) {
+  const response = await fetch(`${baseUrl}/v1/me/increments`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ event_id: eventId, seconds }),
+  });
+  if (!response.ok) throw new Error(`request failed: ${response.status}`);
+  return response.json();
+}</code></pre>
+          </div>
+        </section>
+
+        <section class="card integration-card">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">可靠性</p>
+              <h2>先入队，再重试</h2>
+            </div>
+          </div>
+          <p>网络失败时不要丢掉事件。先把事件写入本地持久队列，再按顺序发送；重试必须复用同一个 <code>event_id</code>，服务端会去重。发送成功后从队列删除，失败则保留并退避重试。日志里只记录事件 ID 和状态，不要打印完整令牌或请求头。</p>
+          <div class="code-block">
+            <button class="copy-code-button" type="button" data-copy-code>复制</button>
+            <pre><code>// 简化示例：队列持久化在 localStorage，event_id 在入队时生成一次。
+const QUEUE_KEY = "gl.increment.queue.v1";
+
+function enqueue(seconds) {
+  const queue = JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]");
+  queue.push({
+    event_id: crypto.randomUUID(),
+    seconds,
+  });
+  localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+}
+
+async function flush(token) {
+  const queue = JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]");
+  while (queue.length) {
+    const event = queue[0];
+    const response = await fetch("/v1/me/increments", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(event),
+    });
+    if (!response.ok) throw new Error("will retry the same event_id");
+    queue.shift();
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+  }
+}</code></pre>
+          </div>
+        </section>
+
+        <section class="card integration-card">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">读取</p>
+              <h2>常用接口</h2>
+            </div>
+            <span class="pill">GET</span>
+          </div>
+          <div class="integration-endpoints">
+            <div>
+              <code>GET /v1/me/status</code>
+              <p>今日 XP、100 XP 打卡状态、本周 XP、段位、小组名次、连胜和余烬余额。</p>
+            </div>
+            <div>
+              <code>GET /v1/me/league</code>
+              <p>我的小组、当前名次和本周 XP；成员按 XP 排名。</p>
+            </div>
+            <div>
+              <code>GET /v1/league/standings</code>
+              <p>当前小组的 15 人榜单，包含 name、XP、排名、今日打卡和连胜。</p>
+            </div>
+            <div>
+              <code>GET /v1/league/history</code>
+              <p>已结算周的结果列表；未结算时返回空的 <code>results</code>。</p>
+            </div>
+            <div>
+              <code>GET /v1/me/embers</code>
+              <p>余烬余额、上限、本周已赚和 ledger 明细。</p>
+            </div>
+            <div>
+              <code>POST /v1/me/repair</code>
+              <p>消耗 1 枚余烬补签最近的有效日期，需要 <code>date</code> 与 <code>idempotency_key</code>。</p>
+            </div>
+            <div>
+              <code>GET /v1/me/checkins?week_start=</code>
+              <p>按周查询每日打卡状态、XP 与来源。</p>
+            </div>
+            <div>
+              <code>GET /v1/me/friends/standings</code>
+              <p>跨段位好友榜。</p>
+            </div>
+          </div>
+          <h3>轮询状态</h3>
+          <div class="code-block">
+            <button class="copy-code-button" type="button" data-copy-code>复制</button>
+            <pre><code>curl -sS "https://your-host.example/v1/me/status" \
+  -H "Authorization: Bearer $GHOST_LEAGUE_TOKEN"</code></pre>
+          </div>
+          <p class="form-hint">响应字段与状态码：缺失或错误令牌返回 401；请求体不合法返回 422。所有响应均为同源 JSON，不需要通配 CORS。</p>
+        </section>
+      </section>
+
+      <section class="page embers-page" data-page="embers" hidden>
+        <div class="page-heading">
+          <p class="eyebrow">余烬</p>
+          <h1>补签余烬</h1>
+          <p>本周 XP 会转化为余烬，用来补上错过的打卡日。</p>
+        </div>
+        <div class="embers-layout">
+          <section class="card ember-balance-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">当前余额</p>
+                <h2>可用余烬</h2>
+              </div>
+              <span class="ember-flame" aria-hidden="true">✦</span>
+            </div>
+            <div class="ember-balance">
+              <strong id="ember-balance">0</strong>
+              <span id="ember-cap">/ 3</span>
+            </div>
+            <p id="ember-hint" class="ember-hint">每 2,000 XP 获得 1 枚，每周最多 2 枚。</p>
+            <div class="overview-grid ember-overview">
+              <div class="overview-stat"><span>本周已赚</span><strong id="ember-earned">0</strong></div>
+              <div class="overview-stat"><span>本周 XP</span><strong id="ember-week-xp">0 XP</strong></div>
+              <div class="overview-stat"><span>持有上限</span><strong id="ember-cap-stat">3</strong></div>
+              <div class="overview-stat"><span>补签消耗</span><strong>1 枚 / 天</strong></div>
+            </div>
+          </section>
+          <section class="card ember-rule-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">规则</p>
+                <h2>怎么获得余烬</h2>
+              </div>
+            </div>
+            <ul class="ember-rules">
+              <li>每 2,000 XP 获得 1 枚余烬。</li>
+              <li>每周最多获得 2 枚。</li>
+              <li id="ember-cap-rule">最多持有 3 枚。</li>
+              <li>补签 1 天消耗 1 枚，只能补最近七天的有效记录。</li>
+            </ul>
+          </section>
+          <section class="card list-card ember-ledger-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">记录</p>
+                <h2>余烬明细</h2>
+              </div>
+              <span id="ember-ledger-count" class="pill">0 条</span>
+            </div>
+            <ol id="ember-ledger" class="ember-ledger" aria-live="polite"></ol>
+            <p id="ember-ledger-empty" class="empty-inline" hidden>还没有余烬记录，继续累积本周 XP。</p>
+            <p id="ember-ledger-loading" class="empty-inline" hidden>正在载入余烬…</p>
+          </section>
+        </div>
+      </section>
+
+      <section class="page history-page" data-page="history" hidden>
+        <div class="page-heading">
+          <p class="eyebrow">历史</p>
+          <h1>历史赛季</h1>
+          <p>已经结束的轮次会出现在这里。</p>
+        </div>
+        <section class="card list-card">
+          <div id="history-list" class="history-list"></div>
+          <div id="history-empty" class="empty-state" hidden>
+            <div class="empty-icon" aria-hidden="true">◇</div>
+            <h2>还没有结束的赛季</h2>
+            <p>完成第一轮后，这里会记录你的段位、名次和本周 XP。</p>
+          </div>
+          <div id="history-loading" class="empty-inline" hidden>正在载入历史…</div>
+          <div id="history-error" class="empty-state" hidden>
+            <div class="empty-icon" aria-hidden="true">!</div>
+            <h2>历史加载失败</h2>
+            <p>请检查网络后重试。</p>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="主导航">
+      <button class="nav-button is-active" type="button" data-page="home" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 8-7 8 7v8a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-8Z"/></svg>
+        <span>首页</span>
+      </button>
+      <button class="nav-button" type="button" data-page="league">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h8v4a4 4 0 0 1-8 0V4Zm0 1H4v2a4 4 0 0 0 4 4m8-6h4v2a4 4 0 0 1-4 4M12 12v6m-4 2h8"/></svg>
+        <span>小组榜</span>
+      </button>
+      <button class="nav-button" type="button" data-page="embers">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c3 5 6 7 6 12a6 6 0 0 1-12 0c0-3 2-5 4-7 0 3 1 4 2 5 0-4 0-7 0-10Z"/></svg>
+        <span>余烬</span>
+      </button>
+      <button class="nav-button" type="button" data-page="history">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5v15h16M8 15l3-4 3 2 4-6"/></svg>
+        <span>历史</span>
+      </button>
+      <button class="nav-button" type="button" data-page="me">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0"/></svg>
+        <span>我的</span>
+      </button>
+    </nav>
+  </div>
+
+  <div id="moment-overlay" class="moment-overlay" hidden aria-live="assertive" aria-atomic="true">
+    <div class="moment-burst" aria-hidden="true"></div>
+    <div class="moment-card">
+      <span id="moment-kicker" class="moment-kicker">阶段提示</span>
+      <strong id="moment-title">新的里程碑</strong>
+      <span id="moment-copy" class="moment-copy">继续保持。</span>
+    </div>
+  </div>
+  <canvas id="confetti-canvas" class="confetti-canvas" aria-hidden="true"></canvas>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <p id="live-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+  <noscript><p class="noscript">需要启用 JavaScript 才能使用联赛页面。</p></noscript>
+  <script src="/app.js?v=31" defer></script>
+</body>
+</html>

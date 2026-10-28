@@ -1,0 +1,10 @@
+[Unit]
+Description=Ghost League WakaChannel weekly roster timer
+
+[Timer]
+OnCalendar=Mon 00:03
+Persistent=true
+Unit=ghost-league-waka-roster.service
+
+[Install]
+WantedBy=timers.target

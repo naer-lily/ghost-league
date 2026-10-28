@@ -1,0 +1,11 @@
+[Unit]
+Description=Ghost League weekly settlement
+After=local-fs.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/ghost-league
+ExecStart=/usr/bin/python3 -m ghost_league.game.jobs settle
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

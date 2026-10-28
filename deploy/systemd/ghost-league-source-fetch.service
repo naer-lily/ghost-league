@@ -1,0 +1,12 @@
+[Unit]
+Description=Ghost League weekly full leaderboard fetch
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/ghost-league
+ExecStart=/usr/bin/python3 scripts/source_fetch.py --out data/cache/cn-978.json --country CN
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

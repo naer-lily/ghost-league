@@ -1,0 +1,10 @@
+[Unit]
+Description=Ghost League weekly settlement timer
+
+[Timer]
+OnCalendar=Mon 00:05
+Persistent=true
+Unit=ghost-league-settle.service
+
+[Install]
+WantedBy=timers.target

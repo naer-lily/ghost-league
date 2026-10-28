@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Fetched WakaTime data must never be committed.
+data/cache/*
+!data/cache/.gitkeep
+
+# Local league beta artifacts contain real cached names. Never commit them.
+data/league/
+reports/closed-beta-52w.md
+
+# Personal API runtime data (membership, SQLite events) stays local.
+data/api/
+data/api.backup-*/
+
+# Internal TLS leaf certificate and private key stay local.
+deploy/tls/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Local scratch
+*.log
+*.tmp
+
+# Local publish/design evidence and data snapshots stay out of Git.
+artifacts/
+data.backup-*/
+data/archive/
+*.bundle
