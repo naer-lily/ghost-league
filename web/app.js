@@ -1231,7 +1231,12 @@
       name,
       state.collection?.equipped?.frame_id,
     );
-    paintAvatar(el["header-avatar-button"], profile.avatar_url, name);
+    paintAvatar(
+      el["header-avatar-button"],
+      profile.avatar_url,
+      name,
+      state.collection?.equipped?.frame_id,
+    );
     el["profile-user-id"].textContent = profile.user_id;
     el["profile-group"].textContent = groupText;
     el["profile-joined"].textContent = profile.joined_week ? `第 ${profile.joined_week} 轮` : "—";
