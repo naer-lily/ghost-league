@@ -163,7 +163,7 @@ def format_event_injector_content(payload: dict[str, Any]) -> str:
             f"【Ghost League】检测到系统事件：{event_label}（{event_type}）。",
             f"事件时间：{occurred_at}。",
             "这里只有变化提示，不是完整数据。请查询 Ghost League 当前状态，"
-            "判断这个变化是否值得告诉主人；不要直接把本事件当作汇报。",
+            "判断这个变化是否值得通知用户；不要直接把本事件当作汇报。",
         ]
     )
 
