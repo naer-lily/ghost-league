@@ -1,12 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ArrowRight,
   CalendarPlus,
   Cable,
   Check,
+  CheckCheck,
   Flame,
   KeyRound,
+  Loader2,
+  Lock,
+  LogOut,
   RefreshCw,
+  Share2,
   Sparkles,
   Star,
   Trophy,
@@ -18,20 +23,25 @@ import {
   feed,
   friends,
   group,
+  iconThemeOptions,
   members,
   nearbyPeople,
   weeks,
+  type IconTheme,
   type Member,
+  type PathDay,
 } from '../data'
 import { useApp } from '../store'
 import { Avatar } from './Avatar'
+import { EmberSprite } from './EmberSprite'
 import { Sheet } from './Sheet'
+import { Switch } from './Switch'
 
-function DetailStat({ label, value }: { label: string; value: string }) {
+function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="detail-stat">
-      <span className="detail-stat__value">{value}</span>
-      <span className="detail-stat__label">{label}</span>
+    <div className="mini-stat">
+      <span className="mini-stat__value">{value}</span>
+      <span className="mini-stat__label">{label}</span>
     </div>
   )
 }
@@ -45,8 +55,7 @@ function UserDetail({ member, rank }: { member: Member; rank: number }) {
     <Sheet
       open
       onClose={closeSheet}
-      title={isMe ? '你的资料' : member.name}
-      subtitle={`${group.tier} · ${group.name} · 本周`}
+      title={isMe ? '你' : member.name}
       variant="right"
       testId="user-detail-sheet"
     >
@@ -61,42 +70,27 @@ function UserDetail({ member, rank }: { member: Member; rank: number }) {
           />
           <div className="user-detail__id">
             <p className="user-detail__name">{isMe ? '你' : member.name}</p>
-            <p className="user-detail__title">{member.title}</p>
-            <span className="chip chip--gold">
-              <Star className="icon-16" aria-hidden="true" />
-              本周 {member.xp.toLocaleString('en-US')} XP
+            <span className="tier-chip">
+              <img src={group.tierAsset} alt="" width={20} height={20} />
+              {group.tier}
             </span>
           </div>
         </div>
 
         <div className="detail-stats">
-          <DetailStat label="本周 XP" value={member.xp.toLocaleString('en-US')} />
-          <DetailStat label="连续点火" value={`${member.streak} 天`} />
-          <DetailStat label="榜上名次" value={`#${rank}`} />
+          <MiniStat label="名次" value={`#${rank}`} />
+          <MiniStat label="XP" value={member.xp.toLocaleString('en-US')} />
+          <MiniStat label="连续" value={`${member.streak}`} />
         </div>
 
-        <section className="sheet-section" aria-label="本周高光">
-          <h3 className="sheet-section__title">本周高光</h3>
-          <ul className="highlight-list">
-            <li>
-              <Flame className="icon-20" aria-hidden="true" />
-              点火 {Math.max(1, member.streak)} 天，火还亮着
-            </li>
-            <li>
-              <Sparkles className="icon-20" aria-hidden="true" />
-              最高单日 {Math.round(member.xp / 4).toLocaleString('en-US')} XP
-            </li>
-            <li>
-              <Trophy className="icon-20" aria-hidden="true" />
-              距离上一名还差 {Math.max(0, 80 - (rank % 3) * 20)} XP
-            </li>
-          </ul>
-        </section>
-
         {isMe ? (
-          <p className="sheet-note">这是你。自己的行永远在榜上。</p>
+          <p className="sheet-note">这是你。</p>
         ) : (
-          <button type="button" className="button button--secondary button--full" onClick={() => toggleFollow(member.id)}>
+          <button
+            type="button"
+            className={`button ${following ? 'button--secondary' : 'button--primary'} button--full`}
+            onClick={() => toggleFollow(member.id)}
+          >
             {following ? (
               <UserCheck className="icon-20" aria-hidden="true" />
             ) : (
@@ -105,6 +99,102 @@ function UserDetail({ member, rank }: { member: Member; rank: number }) {
             {following ? '已关注' : '关注'}
           </button>
         )}
+      </div>
+    </Sheet>
+  )
+}
+
+function DayIcon({ day }: { day: PathDay }) {
+  if (day.status === 'today') return <Flame className="day-detail__icon" aria-hidden="true" />
+  if (day.status === 'done') {
+    return day.repaired ? (
+      <Flame className="day-detail__icon" aria-hidden="true" />
+    ) : (
+      <CheckCheck className="day-detail__icon" aria-hidden="true" />
+    )
+  }
+  if (day.status === 'missed') return <CalendarPlus className="day-detail__icon" aria-hidden="true" />
+  return <Lock className="day-detail__icon" aria-hidden="true" />
+}
+
+function statusWord(day: PathDay): string {
+  if (day.status === 'today') return '已点火'
+  if (day.status === 'done') return day.repaired ? '已补签' : '已点火'
+  if (day.status === 'missed') return '断签'
+  return '未解锁'
+}
+
+function DaySheet({ dayId }: { dayId: string }) {
+  const { days, repair, repairDays, closeSheet, share, navigate, openSheet } = useApp()
+  const day = days.find((item) => item.id === dayId)
+  if (!day) return null
+  const canRepair = day.status === 'missed' && repairDays.some((item) => item.id === day.id)
+  const isOpen = day.status === 'today' || day.status === 'done'
+
+  return (
+    <Sheet
+      open
+      onClose={closeSheet}
+      title={`${day.weekday} ${day.date}`}
+      variant="bottom"
+      testId="day-sheet"
+    >
+      <div className={`day-detail day-detail--${day.status}`}>
+        <span className={`day-detail__orb day-detail__orb--${day.status}`} aria-hidden="true">
+          <DayIcon day={day} />
+        </span>
+        <div className="day-detail__score">
+          <span className="day-detail__xp">{day.xp}</span>
+          <span className="day-detail__unit">XP</span>
+        </div>
+        <span className={`day-detail__status day-detail__status--${day.status}`}>{statusWord(day)}</span>
+      </div>
+
+      <div className="sheet-actions">
+        {canRepair ? (
+          <button
+            type="button"
+            className="button button--primary button--full"
+            onClick={() => repair(day.id)}
+            data-testid="day-repair-button"
+          >
+            <CalendarPlus className="icon-20" aria-hidden="true" />
+            补签 · 1
+          </button>
+        ) : null}
+        {isOpen ? (
+          <button
+            type="button"
+            className="button button--secondary button--full"
+            onClick={share}
+            data-testid="day-share-button"
+          >
+            <Share2 className="icon-20" aria-hidden="true" />
+            分享
+          </button>
+        ) : null}
+        <div className="button-row">
+          <button
+            type="button"
+            className="button button--secondary"
+            onClick={() => navigate('league')}
+            data-testid="day-league-button"
+          >
+            <Trophy className="icon-20" aria-hidden="true" />
+            小组榜
+          </button>
+          {day.status === 'today' ? (
+            <button
+              type="button"
+              className="button button--secondary"
+              onClick={() => openSheet({ kind: 'feed' })}
+              data-testid="day-feed-button"
+            >
+              <Sparkles className="icon-20" aria-hidden="true" />
+              动态
+            </button>
+          ) : null}
+        </div>
       </div>
     </Sheet>
   )
@@ -127,7 +217,7 @@ function RepairSheet() {
       open
       onClose={closeSheet}
       title="补签"
-      subtitle="用 1 枚余烬补 1 天。"
+      subtitle="1 枚 = 1 天"
       variant="center"
       testId="repair-sheet"
       footer={
@@ -139,18 +229,15 @@ function RepairSheet() {
           data-testid="repair-confirm"
         >
           <CalendarPlus className="icon-20" aria-hidden="true" />
-          消耗 1 枚余烬补签
+          补签 · 1
         </button>
       }
     >
       <div className="repair">
         <div className="repair__balance">
-          <span className="repair__balance-icon" aria-hidden="true">
-            <Flame className="icon-24" />
-          </span>
-          <span>
-            现有 <strong>{embers}</strong> 枚余烬
-          </span>
+          <EmberSprite size={34} />
+          <strong>{embers}</strong>
+          <span className="repair__balance-label">余烬</span>
         </div>
 
         {repairDays.length > 0 ? (
@@ -173,12 +260,216 @@ function RepairSheet() {
             ))}
           </div>
         ) : (
-          <p className="sheet-note">这周没有可补的日子。</p>
+          <p className="sheet-note">没有可补的日子。</p>
         )}
 
         <p className={`repair__hint ${embers < 1 ? 'repair__hint--warn' : ''}`}>
-          {embers < 1 ? '余烬不够。再攒 2,000 XP。' : '补签不加 XP，只把火焰续上。'}
+          {embers < 1 ? '余烬不够。' : '只续火，不加 XP。'}
         </p>
+      </div>
+    </Sheet>
+  )
+}
+
+function FeedSheet() {
+  const { closeSheet, memberById } = useApp()
+  return (
+    <Sheet
+      open
+      onClose={closeSheet}
+      title="动态"
+      variant="right"
+      testId="feed-sheet"
+    >
+      <ul className="feed-sheet-list">
+        {feed.map((item) => {
+          const actor = memberById(item.memberId)
+          if (!actor) return null
+          return (
+            <li key={item.id} className="feed-row">
+              <Avatar initial={actor.initial} tone={actor.tone} size="sm" />
+              <span className="feed-row__body">
+                <span className="feed-row__text">
+                  <strong>{actor.name}</strong> {item.text}
+                </span>
+                <span className="feed-row__time">{item.time}</span>
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </Sheet>
+  )
+}
+
+function SettingsSheet() {
+  const {
+    closeSheet,
+    openSheet,
+    iconTheme,
+    setIconTheme,
+    sound,
+    toggleSound,
+    haptics,
+    toggleHaptics,
+  } = useApp()
+
+  return (
+    <Sheet open onClose={closeSheet} title="更多" variant="right" testId="settings-sheet">
+      <section className="settings-block" aria-labelledby="theme-title">
+        <h3 className="settings-block__title" id="theme-title">
+          图标
+        </h3>
+        <div className="theme-options" role="group" aria-label="图标主题">
+          {iconThemeOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className="theme-option"
+              aria-pressed={iconTheme === option.id}
+              onClick={() => setIconTheme(option.id as IconTheme)}
+            >
+              <Flame className="icon-22" aria-hidden="true" />
+              <span>{option.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <div className="settings-list">
+        <div className="setting-row">
+          <span className="setting-row__icon" aria-hidden="true">
+            <Sparkles className="icon-20" />
+          </span>
+          <span className="setting-row__title">声音</span>
+          <Switch checked={sound} onChange={toggleSound} label="声音" />
+        </div>
+        <div className="setting-row">
+          <span className="setting-row__icon" aria-hidden="true">
+            <Flame className="icon-20" />
+          </span>
+          <span className="setting-row__title">轻触反馈</span>
+          <Switch checked={haptics} onChange={toggleHaptics} label="轻触反馈" />
+        </div>
+        <button
+          type="button"
+          className="setting-row"
+          onClick={() => openSheet({ kind: 'integration' })}
+        >
+          <span className="setting-row__icon" aria-hidden="true">
+            <Cable className="icon-20" />
+          </span>
+          <span className="setting-row__title">集成说明</span>
+          <ArrowRight className="icon-20" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="setting-row"
+          onClick={() => openSheet({ kind: 'nearby' })}
+        >
+          <span className="setting-row__icon" aria-hidden="true">
+            <Star className="icon-20" />
+          </span>
+          <span className="setting-row__title">附近的人</span>
+          <ArrowRight className="icon-20" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="setting-row setting-row--danger"
+          onClick={() => openSheet({ kind: 'logout' })}
+          data-testid="logout-button"
+        >
+          <span className="setting-row__icon" aria-hidden="true">
+            <LogOut className="icon-20" />
+          </span>
+          <span className="setting-row__title">退出</span>
+          <ArrowRight className="icon-20" aria-hidden="true" />
+        </button>
+      </div>
+    </Sheet>
+  )
+}
+
+function EditSheet() {
+  const { profileName, avatarSrc, saveProfile, closeSheet } = useApp()
+  const [draftName, setDraftName] = useState(profileName)
+  const [draftAvatar, setDraftAvatar] = useState<string | null>(avatarSrc)
+  const [saving, setSaving] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const previewChanged = draftAvatar !== avatarSrc
+
+  const handleFile = (file: File | undefined) => {
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => setDraftAvatar(typeof reader.result === 'string' ? reader.result : null)
+    reader.readAsDataURL(file)
+  }
+
+  const handleSave = () => {
+    if (saving) return
+    setSaving(true)
+    window.setTimeout(() => {
+      saveProfile(draftName, draftAvatar)
+      setSaving(false)
+    }, 420)
+  }
+
+  return (
+    <Sheet
+      open
+      onClose={closeSheet}
+      title="编辑资料"
+      variant="center"
+      testId="edit-sheet"
+      footer={
+        <button
+          type="button"
+          className="button button--primary button--full"
+          onClick={handleSave}
+          disabled={saving}
+          data-testid="save-profile"
+        >
+          {saving ? (
+            <Loader2 className="icon-20 is-spinning" aria-hidden="true" />
+          ) : (
+            <Check className="icon-20" aria-hidden="true" />
+          )}
+          {saving ? '保存中' : '保存'}
+        </button>
+      }
+    >
+      <div className="edit-profile">
+        <div className="edit-profile__avatar">
+          <Avatar initial="你" tone="mint" size="xl" frame="ember" image={draftAvatar} name={draftName} />
+          {previewChanged ? <span className="edit-profile__preview">预览</span> : null}
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="visually-hidden"
+          onChange={(event) => handleFile(event.target.files?.[0])}
+          data-testid="avatar-input"
+        />
+        <button
+          type="button"
+          className="button button--secondary button--full"
+          onClick={() => fileRef.current?.click()}
+          data-testid="choose-avatar"
+        >
+          选择图片
+        </button>
+        <label className="field">
+          <span className="field__label">名字</span>
+          <input
+            className="field__input"
+            value={draftName}
+            maxLength={12}
+            onChange={(event) => setDraftName(event.target.value)}
+            placeholder="选手"
+            autoComplete="off"
+          />
+        </label>
       </div>
     </Sheet>
   )
@@ -190,8 +481,7 @@ function IntegrationSheet() {
     <Sheet
       open
       onClose={closeSheet}
-      title="集成说明"
-      subtitle="把活动时间接进来，XP 自动折算。"
+      title="集成"
       variant="center"
       testId="integration-sheet"
       footer={
@@ -205,31 +495,22 @@ function IntegrationSheet() {
           <span className="step-list__icon" aria-hidden="true">
             <KeyRound className="icon-20" />
           </span>
-          <span>
-            <strong>拿一枚个人令牌</strong>
-            <span>只属于你的接入凭证。</span>
-          </span>
+          <span className="step-list__text">拿令牌</span>
         </li>
         <li>
           <span className="step-list__icon" aria-hidden="true">
             <Cable className="icon-20" />
           </span>
-          <span>
-            <strong>填进活动工具</strong>
-            <span>选了哪些天，就同步哪些天。</span>
-          </span>
+          <span className="step-list__text">填进工具</span>
         </li>
         <li>
           <span className="step-list__icon" aria-hidden="true">
             <RefreshCw className="icon-20" />
           </span>
-          <span>
-            <strong>等榜刷新</strong>
-            <span>时间自动折成 XP，不用手填。</span>
-          </span>
+          <span className="step-list__text">等刷新</span>
         </li>
       </ol>
-      <p className="sheet-note">只读取活动时间，不改你的原始记录。</p>
+      <p className="sheet-note">只读活动时间。</p>
     </Sheet>
   )
 }
@@ -241,14 +522,8 @@ function NearbySheet() {
       open
       onClose={closeSheet}
       title="附近的人"
-      subtitle="同一个小组，离你不远。"
       variant="right"
       testId="nearby-sheet"
-      footer={
-        <button type="button" className="button button--secondary button--full" onClick={closeSheet}>
-          关闭
-        </button>
-      }
     >
       <ul className="people-list">
         {nearbyPeople.map((person) => {
@@ -274,7 +549,6 @@ function NearbySheet() {
           )
         })}
       </ul>
-      <p className="sheet-note">只显示同组的人，不显示精确位置。</p>
     </Sheet>
   )
 }
@@ -292,80 +566,32 @@ function WeekSheet({ weekId }: { weekId: string }) {
       subtitle={week.range}
       variant="right"
       testId="week-sheet"
-      footer={
-        <button type="button" className="button button--secondary button--full" onClick={closeSheet}>
-          关闭
-        </button>
-      }
     >
       <div className="week-detail">
-        <div className={`result-banner result-banner--${week.resultTone}`}>
-          <Trophy className="icon-24" aria-hidden="true" />
-          <span>{week.result}</span>
+        <div className="week-detail__hero">
+          <img className="week-detail__tier" src={week.tierAsset} alt="" width={48} height={48} />
+          <span className="week-detail__rank">
+            <span>#</span>
+            {week.rank}
+          </span>
+          <span className="week-detail__xp">
+            {week.xp.toLocaleString('en-US')}
+            <span>XP</span>
+          </span>
         </div>
-        <div className="detail-stats">
-          <DetailStat label="最终名次" value={`#${week.rank}`} />
-          <DetailStat label="周 XP" value={week.xp.toLocaleString('en-US')} />
-          <DetailStat label="小组人数" value={`${week.groupSize}`} />
+        <div className="top-list">
+          {week.top.map((row, index) => (
+            <div key={`${row.name}-${index}`} className="top-list__row">
+              <span className="top-list__rank">{index + 1}</span>
+              <span className="top-list__name">{row.name}</span>
+              <span className="top-list__xp">{row.xp.toLocaleString('en-US')}</span>
+            </div>
+          ))}
         </div>
-        <section className="sheet-section" aria-label="前三名">
-          <h3 className="sheet-section__title">前三名</h3>
-          <ol className="week-top">
-            {week.top.map((row, index) => (
-              <li key={`${row.name}-${index}`} className="week-top__row">
-                <span className="week-top__rank" aria-hidden="true">
-                  {index + 1}
-                </span>
-                <span className="week-top__name">{row.name}</span>
-                <span className="week-top__xp">
-                  <Star className="icon-16" aria-hidden="true" />
-                  {row.xp.toLocaleString('en-US')}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </section>
-        <p className="sheet-note">那一周的你：第 {week.rank} 名，{week.xp.toLocaleString('en-US')} XP。</p>
-      </div>
-    </Sheet>
-  )
-}
-
-function FeedSheet() {
-  const { closeSheet, memberById } = useApp()
-  return (
-    <Sheet
-      open
-      onClose={closeSheet}
-      title="全部动态"
-      subtitle="小组里的新动静。"
-      variant="right"
-      testId="feed-sheet"
-      footer={
-        <button type="button" className="button button--secondary button--full" onClick={closeSheet}>
+        <button type="button" className="chip-button" onClick={closeSheet}>
           关闭
         </button>
-      }
-    >
-      <ul className="feed-sheet-list">
-        {feed.map((item) => {
-          const actor = memberById(item.memberId)
-          if (!actor) return null
-          return (
-            <li key={item.id} className="feed-item feed-item--wide">
-              <Avatar initial={actor.initial} tone={actor.tone} size="sm" />
-              <div className="feed-item__body">
-                <p className="feed-item__text">
-                  <strong>{actor.name}</strong> {item.text}
-                </p>
-                <span className="feed-item__time">
-                  {item.time} · {item.reactions} 个回应
-                </span>
-              </div>
-            </li>
-          )
-        })}
-      </ul>
+      </div>
     </Sheet>
   )
 }
@@ -376,8 +602,7 @@ function LogoutSheet() {
     <Sheet
       open
       onClose={closeSheet}
-      title="退出登录"
-      subtitle="本机登录会清除。"
+      title="退出"
       variant="center"
       testId="logout-sheet"
       footer={
@@ -393,7 +618,7 @@ function LogoutSheet() {
         </div>
       }
     >
-      <p className="sheet-copy">下次要重新进入。你的战绩还在，火焰不会灭。</p>
+      <p className="sheet-copy">下次要重新进入。</p>
     </Sheet>
   )
 }
@@ -402,8 +627,11 @@ export function SheetHost() {
   const { sheet, memberById } = useApp()
   if (!sheet) return null
 
+  if (sheet.kind === 'day') return <DaySheet dayId={sheet.dayId} />
   if (sheet.kind === 'repair') return <RepairSheet />
   if (sheet.kind === 'feed') return <FeedSheet />
+  if (sheet.kind === 'settings') return <SettingsSheet />
+  if (sheet.kind === 'edit') return <EditSheet />
   if (sheet.kind === 'integration') return <IntegrationSheet />
   if (sheet.kind === 'nearby') return <NearbySheet />
   if (sheet.kind === 'week') return <WeekSheet weekId={sheet.weekId} />

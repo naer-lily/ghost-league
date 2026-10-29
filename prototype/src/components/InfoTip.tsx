@@ -12,7 +12,7 @@ interface InfoTipProps {
 export function InfoTip({ label, title, body, side = 'top' }: InfoTipProps) {
   const [open, setOpen] = useState(false)
   const openRef = useRef(false)
-  const touchNextRef = useRef<boolean | null>(null)
+  const pendingRef = useRef<boolean | null>(null)
 
   const handleOpenChange = (next: boolean) => {
     openRef.current = next
@@ -26,22 +26,16 @@ export function InfoTip({ label, title, body, side = 'top' }: InfoTipProps) {
           type="button"
           className="info-tip__trigger"
           aria-label={label}
-          onPointerDown={(event) => {
-            if (event.pointerType !== 'mouse') {
-              touchNextRef.current = !openRef.current
-            }
+          onPointerDown={() => {
+            pendingRef.current = !openRef.current
           }}
           onClick={(event) => {
-            let next = touchNextRef.current
-            if (next !== null) {
-              touchNextRef.current = null
-            } else if (event.detail === 0) {
-              next = !openRef.current
-            } else {
-              return
-            }
+            let next = pendingRef.current
+            pendingRef.current = null
+            if (next === null) next = !openRef.current
             // Radix closes the tooltip on click; re-apply the intended toggle
             // after the composed handlers have finished.
+            event.preventDefault()
             window.setTimeout(() => handleOpenChange(next), 0)
           }}
         >

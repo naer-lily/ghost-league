@@ -1,4 +1,4 @@
-import { Flame, History, House, Trophy, UserRound, type LucideIcon } from 'lucide-react'
+import { Flame, Ghost, History, House, Trophy, UserRound, type LucideIcon } from 'lucide-react'
 import type { PageId } from '../data'
 import { useApp } from '../store'
 
@@ -20,9 +20,15 @@ export function NavRail() {
   const { page, navigate } = useApp()
   return (
     <nav className="nav-rail" aria-label="主导航">
-      <span className="nav-rail__mark" aria-hidden="true">
-        <Flame className="icon-28" />
-      </span>
+      <div className="nav-rail__brand">
+        <span className="nav-rail__mark" aria-hidden="true">
+          <Ghost className="icon-26" />
+        </span>
+        <span className="nav-rail__wordmark">
+          <span className="nav-rail__name">Ghost League</span>
+          <span className="nav-rail__sub">青铜联赛</span>
+        </span>
+      </div>
       <div className="nav-rail__items">
         {items.map(({ id, label, icon: Icon }) => (
           <button
@@ -32,12 +38,15 @@ export function NavRail() {
             aria-current={page === id ? 'page' : undefined}
             onClick={() => navigate(id)}
           >
-            <Icon className="icon-24" aria-hidden="true" />
+            <Icon className="icon-26" aria-hidden="true" />
             <span className="nav-rail__label">{label}</span>
-            <span className="nav-rail__underline" aria-hidden="true" />
           </button>
         ))}
       </div>
+      <span className="nav-rail__foot" aria-hidden="true">
+        <Ghost className="icon-18" />
+        S1
+      </span>
     </nav>
   )
 }
@@ -55,9 +64,10 @@ export function BottomNav() {
             aria-current={page === id ? 'page' : undefined}
             onClick={() => navigate(id)}
           >
-            <Icon className="icon-24" aria-hidden="true" />
+            <span className="bottom-nav__icon" aria-hidden="true">
+              <Icon className="icon-26" />
+            </span>
             <span className="bottom-nav__label">{label}</span>
-            <span className="bottom-nav__underline" aria-hidden="true" />
           </button>
         ))}
       </div>

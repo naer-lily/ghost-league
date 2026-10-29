@@ -1,4 +1,4 @@
-import { ArrowDown, Star } from 'lucide-react'
+import { ArrowDown } from 'lucide-react'
 import type { Member } from '../data'
 import { Avatar, type FrameKind } from './Avatar'
 
@@ -13,36 +13,17 @@ interface LeagueRowProps {
 
 export function LeagueRow({ member, rank, demotion = false, onClick, compact = false, frame }: LeagueRowProps) {
   const isMe = Boolean(member.isMe)
-  const label = `第 ${rank} 名，${isMe ? '你' : member.name}，${member.xp.toLocaleString('en-US')} XP${
-    isMe ? '，我的行' : ''
-  }`
+  const label = `第 ${rank} 名，${isMe ? '你' : member.name}，${member.xp.toLocaleString('en-US')} XP`
 
   const inner = (
     <>
-      <span className={`league-row__rank ${isMe ? 'league-row__rank--me' : ''}`} aria-hidden="true">
+      <span className="league-row__rank" aria-hidden="true">
         {rank}
       </span>
-      <Avatar
-        initial={member.initial}
-        tone={member.tone}
-        size="sm"
-        frame={frame}
-      />
-      <span className="league-row__identity">
-        <span className="league-row__name">
-          <span className="league-row__name-text">{isMe ? '你' : member.name}</span>
-          {isMe ? <span className="league-row__me-tag">我</span> : null}
-        </span>
-        <span className="league-row__meta">
-          {isMe ? `连续 ${member.streak} 天` : member.title}
-        </span>
-      </span>
+      <Avatar initial={member.initial} tone={member.tone} size={compact ? 'sm' : 'md'} frame={frame} />
+      <span className="league-row__name">{isMe ? '你' : member.name}</span>
       <span className="league-row__xp">
-        {demotion ? (
-          <ArrowDown className="league-row__xp-icon league-row__xp-icon--down icon-16" aria-hidden="true" />
-        ) : (
-          <Star className="league-row__xp-icon icon-16" aria-hidden="true" />
-        )}
+        {demotion ? <ArrowDown className="league-row__arrow" aria-hidden="true" /> : null}
         {member.xp.toLocaleString('en-US')}
       </span>
     </>
@@ -66,7 +47,14 @@ export function LeagueRow({ member, rank, demotion = false, onClick, compact = f
   }
 
   return (
-    <button type="button" className={className} onClick={onClick} aria-label={label}>
+    <button
+      type="button"
+      className={className}
+      onClick={onClick}
+      aria-label={label}
+      data-testid="league-row"
+      data-me={isMe ? 'true' : undefined}
+    >
       {inner}
     </button>
   )

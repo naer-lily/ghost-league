@@ -1,9 +1,10 @@
-import { Flame, RotateCcw } from 'lucide-react'
+import { Ghost, RotateCcw } from 'lucide-react'
 import { useApp } from './store'
 import { NavRail, BottomNav } from './components/Nav'
 import { TopBar } from './components/TopBar'
 import { Toast } from './components/Toast'
 import { SheetHost } from './components/SheetHost'
+import { PageAside } from './components/PageAside'
 import { HomePage } from './pages/HomePage'
 import { LeaguePage } from './pages/LeaguePage'
 import { EmbersPage } from './pages/EmbersPage'
@@ -14,19 +15,18 @@ function LoginScreen() {
   const { login } = useApp()
   return (
     <main className="login-page">
-      <section className="card login-card" aria-labelledby="login-title">
+      <section className="login-card" aria-labelledby="login-title">
         <span className="login-card__mark" aria-hidden="true">
-          <Flame className="icon-40" />
+          <Ghost className="icon-40" />
         </span>
         <h1 className="login-card__title" id="login-title">
-          已退出登录
+          已退出
         </h1>
-        <p className="login-card__body">本机登录已清除。战绩还在，火焰没灭。</p>
+        <p className="login-card__body">火焰没灭。</p>
         <button type="button" className="button button--primary button--full" onClick={login}>
           <RotateCcw className="icon-20" aria-hidden="true" />
           重新进入
         </button>
-        <p className="login-card__note">原型不会真的登录。</p>
       </section>
     </main>
   )
@@ -52,13 +52,16 @@ export default function App() {
       <NavRail />
       <div className="app-main">
         <TopBar />
-        <main className="page" id="main" tabIndex={-1} key={page} data-page={page}>
-          {page === 'home' ? <HomePage /> : null}
-          {page === 'league' ? <LeaguePage /> : null}
-          {page === 'embers' ? <EmbersPage /> : null}
-          {page === 'history' ? <HistoryPage /> : null}
-          {page === 'me' ? <MePage /> : null}
-        </main>
+        <div className="page-shell">
+          <main className="page" id="main" tabIndex={-1} key={page} data-page={page}>
+            {page === 'home' ? <HomePage /> : null}
+            {page === 'league' ? <LeaguePage /> : null}
+            {page === 'embers' ? <EmbersPage /> : null}
+            {page === 'history' ? <HistoryPage /> : null}
+            {page === 'me' ? <MePage /> : null}
+          </main>
+          <PageAside />
+        </div>
       </div>
       <BottomNav />
       <Toast toast={toast} />

@@ -10,22 +10,29 @@ import {
 } from 'react'
 import {
   collectionItems as seedCollection,
+  EMBER_BALANCE,
   emberHistory as seedEmberHistory,
   findMember,
   me,
+  pathDays as seedPathDays,
   repairDays as seedRepairDays,
+  STREAK,
   type CollectionKind,
   type EmberEntry,
   type IconTheme,
   type Member,
   type PageId,
+  type PathDay,
   type RepairDay,
 } from './data'
 
 export type SheetState =
   | { kind: 'repair' }
+  | { kind: 'day'; dayId: string }
   | { kind: 'user'; memberId: string; rank?: number }
   | { kind: 'feed' }
+  | { kind: 'settings' }
+  | { kind: 'edit' }
   | { kind: 'integration' }
   | { kind: 'nearby' }
   | { kind: 'week'; weekId: string }
@@ -51,6 +58,8 @@ interface AppContextValue {
   avatarSrc: string | null
   saveProfile: (name: string, avatar: string | null) => void
   embers: number
+  streak: number
+  days: PathDay[]
   repairDays: RepairDay[]
   emberLog: EmberEntry[]
   repair: (dayId: string) => void
@@ -100,7 +109,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
   const [profileName, setProfileName] = useState(() => read('gl.profileName', '选手'))
   const [avatarSrc, setAvatarSrc] = useState<string | null>(null)
-  const [embers, setEmbers] = useState(1)
+  const [embers, setEmbers] = useState(EMBER_BALANCE)
+  const [streak, setStreak] = useState(STREAK)
+  const [repairedDays, setRepairedDays] = useState<string[]>([])
   const [repairDays, setRepairDays] = useState<RepairDay[]>(() => [...seedRepairDays])
   const [emberLog, setEmberLog] = useState<EmberEntry[]>(() => [...seedEmberHistory])
   const [refreshing, setRefreshing] = useState(false)
@@ -190,6 +201,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setProfileName(trimmed)
       setAvatarSrc(avatar)
       write('gl.profileName', trimmed)
+      setSheet(null)
       notify('已保存')
     },
     [notify],
@@ -215,11 +227,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const day = repairDays.find((item) => item.id === dayId)
       if (!day) return
       if (embers < 1) {
-        notify('余烬不够。再攒 2,000 XP。', 'error')
+        notify('余烬不够。', 'error')
         return
       }
       setEmbers((value) => value - 1)
       setRepairDays((days) => days.filter((item) => item.id !== dayId))
+      setRepairedDays((days) => (days.includes(dayId) ? days : [...days, dayId]))
+      setStreak((value) => value + 1)
       setEmberLog((log) => [
         {
           id: `repair-${dayId}-${Date.now()}`,
@@ -232,7 +246,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ])
       setSheet(null)
       buzz(20)
-      notify('补签成功。火焰续上了。')
+      notify('火焰续上了。')
     },
     [buzz, embers, notify, repairDays],
   )
@@ -277,6 +291,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     notify('欢迎回来')
   }, [navigate, notify])
 
+  const days = useMemo<PathDay[]>(
+    () =>
+      seedPathDays.map((day) => {
+        if (repairedDays.includes(day.id)) {
+          return { ...day, status: 'done', xp: 0, repaired: true }
+        }
+        return day
+      }),
+    [repairedDays],
+  )
+
   const value = useMemo<AppContextValue>(
     () => ({
       page,
@@ -291,6 +316,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       avatarSrc,
       saveProfile,
       embers,
+      streak,
+      days,
       repairDays,
       emberLog,
       repair,
@@ -324,6 +351,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       avatarSrc,
       saveProfile,
       embers,
+      streak,
+      days,
       repairDays,
       emberLog,
       repair,

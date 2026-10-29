@@ -46,6 +46,8 @@ export interface WeekRecord {
   groupSize: number
   result: string
   resultTone: 'up' | 'stay'
+  tier: string
+  tierAsset: string
   top: { name: string; xp: number }[]
 }
 
@@ -77,9 +79,22 @@ export interface RepairDay {
   meta: string
 }
 
+export type DayStatus = 'done' | 'today' | 'locked' | 'missed'
+
+export interface PathDay {
+  id: string
+  weekday: string
+  date: string
+  xp: number
+  status: DayStatus
+  repaired?: boolean
+}
+
 export const GOAL_XP = 100
 export const TODAY_XP = 110
-export const WEEK_XP = 110
+export const WEEK_XP = 1320
+export const STREAK = 3
+export const EMBER_BALANCE = 1
 export const PROMOTION_COUNT = 3
 export const DEMOTION_COUNT = 3
 export const GROUP_SIZE = 15
@@ -89,8 +104,8 @@ export const me: Member = {
   name: '你',
   initial: '你',
   tone: 'mint',
-  xp: 1320,
-  streak: 1,
+  xp: WEEK_XP,
+  streak: STREAK,
   title: '本周第 4',
   isMe: true,
 }
@@ -135,24 +150,34 @@ export const friends: Member[] = [
   { id: 'f3', name: '晴天', initial: '晴', tone: 'gold', xp: 610, streak: 1, title: '刚上线' },
 ]
 
+export const pathDays: PathDay[] = [
+  { id: 'mon', weekday: '周一', date: '10/27', xp: 0, status: 'missed' },
+  { id: 'tue', weekday: '周二', date: '10/28', xp: 420, status: 'done' },
+  { id: 'wed', weekday: '周三', date: '10/29', xp: 790, status: 'done' },
+  { id: 'thu', weekday: '周四', date: '10/30', xp: TODAY_XP, status: 'today' },
+  { id: 'fri', weekday: '周五', date: '10/31', xp: 0, status: 'locked' },
+  { id: 'sat', weekday: '周六', date: '11/01', xp: 0, status: 'locked' },
+  { id: 'sun', weekday: '周日', date: '11/02', xp: 0, status: 'locked' },
+]
+
 export const feed: FeedItem[] = [
-  { id: 'ev1', memberId: 'u1', text: '点火成功，连续 6 天', time: '2 小时前', reactions: 3 },
-  { id: 'ev2', memberId: 'u4', text: '反超了阿团，来到第 5', time: '4 小时前', reactions: 5 },
-  { id: 'ev3', memberId: 'u5', text: '解锁勋章「早起鸟」', time: '昨天', reactions: 2 },
-  { id: 'ev4', memberId: 'u3', text: '单日冲到 480 XP', time: '昨天', reactions: 4 },
-  { id: 'ev5', memberId: 'u7', text: '回来点火，连上第 2 天', time: '昨天', reactions: 1 },
-  { id: 'ev6', memberId: 'u8', text: '本周首次进前十', time: '2 天前', reactions: 6 },
+  { id: 'ev1', memberId: 'u1', text: '点火 6 天', time: '2 小时前', reactions: 3 },
+  { id: 'ev2', memberId: 'u4', text: '反超到第 5', time: '4 小时前', reactions: 5 },
+  { id: 'ev3', memberId: 'u5', text: '解锁「早起鸟」', time: '昨天', reactions: 2 },
+  { id: 'ev4', memberId: 'u3', text: '单日 480 XP', time: '昨天', reactions: 4 },
+  { id: 'ev5', memberId: 'u7', text: '回来点火', time: '昨天', reactions: 1 },
+  { id: 'ev6', memberId: 'u8', text: '本周首进前十', time: '2 天前', reactions: 6 },
 ]
 
 export const repairDays: RepairDay[] = [
-  { id: 'tue', label: '周二', meta: '10/27 · 可补' },
-  { id: 'mon', label: '周一', meta: '10/26 · 可补' },
+  { id: 'mon', label: '周一', meta: '10/27 · 1 枚' },
+  { id: 'sun', label: '周日', meta: '10/26 · 1 枚' },
 ]
 
 export const emberHistory: EmberEntry[] = [
-  { id: 'e1', title: '本周累积 2,000 XP', detail: '昨天', delta: 1, icon: 'flame' },
+  { id: 'e1', title: '累积 2,000 XP', detail: '昨天', delta: 1, icon: 'flame' },
   { id: 'e2', title: '补签周一', detail: '3 天前', delta: -1, icon: 'calendar' },
-  { id: 'e3', title: '上周结算奖励', detail: '6 天前', delta: 3, icon: 'gift' },
+  { id: 'e3', title: '上周结算', detail: '6 天前', delta: 3, icon: 'gift' },
 ]
 
 export const weeks: WeekRecord[] = [
@@ -165,6 +190,8 @@ export const weeks: WeekRecord[] = [
     groupSize: 15,
     result: '守住青铜',
     resultTone: 'stay',
+    tier: '青铜',
+    tierAsset: '/assets/tiers/bronze.png',
     top: [
       { name: '星野', xp: 2380 },
       { name: '小橙子', xp: 1900 },
@@ -180,6 +207,8 @@ export const weeks: WeekRecord[] = [
     groupSize: 15,
     result: '拿下第 2',
     resultTone: 'up',
+    tier: '青铜',
+    tierAsset: '/assets/tiers/bronze.png',
     top: [
       { name: '小橙子', xp: 2100 },
       { name: '你', xp: 1860 },
@@ -195,6 +224,8 @@ export const weeks: WeekRecord[] = [
     groupSize: 15,
     result: '留在青铜',
     resultTone: 'stay',
+    tier: '青铜',
+    tierAsset: '/assets/tiers/bronze.png',
     top: [
       { name: '阿团', xp: 1680 },
       { name: '夜航', xp: 1540 },
@@ -210,9 +241,11 @@ export const weeks: WeekRecord[] = [
     groupSize: 15,
     result: '惊险留级',
     resultTone: 'stay',
+    tier: '青铜',
+    tierAsset: '/assets/tiers/bronze.png',
     top: [
       { name: '纸飞机', xp: 1490 },
-      { name: '金光', xp: 1370 },
+      { name: '光年', xp: 1370 },
       { name: '橘子汽水', xp: 1250 },
     ],
   },
@@ -229,7 +262,7 @@ export const collectionItems: CollectionItem[] = [
   { id: 'badge-early', kind: 'badge', name: '早起鸟', owned: true, icon: 'sunrise' },
   { id: 'badge-streak', kind: 'badge', name: '七日火', owned: false, icon: 'star', unlock: '连续 7 天' },
   { id: 'badge-top', kind: 'badge', name: '前三席', owned: false, icon: 'trophy', unlock: '组内第 1' },
-  { id: 'badge-week', kind: 'badge', name: '满周', owned: false, icon: 'calendar', unlock: '满 7 天点火' },
+  { id: 'badge-week', kind: 'badge', name: '满周', owned: false, icon: 'calendar', unlock: '满 7 天' },
   { id: 'bg-night', kind: 'background', name: '午夜蓝', owned: true, gradient: 'night' },
   { id: 'bg-mint', kind: 'background', name: '薄荷雾', owned: true, gradient: 'mint' },
   { id: 'bg-ember', kind: 'background', name: '余烬日落', owned: false, gradient: 'ember', unlock: '连续 7 天' },
@@ -243,30 +276,30 @@ export const nearbyPeople: NearbyPerson[] = [
 ]
 
 export const tips = {
-  weekCalc: {
-    label: '本周计算规则',
-    title: '本周怎么算？',
-    body: '有效时间自动折算 XP。满今日目标点火，2,000 XP 得 1 枚余烬。',
-  },
   streak: {
     label: '火焰与补签',
     title: '火焰怎么续？',
-    body: '断签可用 1 枚余烬补 1 天。只补签，不加 XP。',
+    body: '断签用 1 枚余烬补 1 天。只补签，不加 XP。',
   },
   league: {
     label: '晋级与降级',
     title: '晋级怎么算？',
-    body: `前 ${PROMOTION_COUNT} 晋级，后 ${DEMOTION_COUNT} 可能降级。周日 24:00 结算。`,
+    body: '15 人组。前 3 晋级，后 3 降级，周日 24:00 结算。',
   },
   embers: {
     label: '余烬用途',
     title: '余烬怎么用？',
-    body: '只补签。不加 XP，不改名次。',
+    body: '1 XP = 6 秒。满 100 XP 点火。每 2,000 XP 得 1 枚。',
+  },
+  history: {
+    label: '历史结算',
+    title: '周怎么结算？',
+    body: '周日 24:00 结算。名次和 XP 都按当周最终值。',
   },
   appearance: {
     label: '外观影响',
     title: '外观影响战绩？',
-    body: '装饰品不会影响获得的经验值哦！',
+    body: '装饰品不影响 XP。',
   },
 }
 
@@ -279,13 +312,17 @@ export const iconThemeOptions = [
 export type IconTheme = (typeof iconThemeOptions)[number]['id']
 
 export function findMember(id: string): Member | undefined {
-  return [...members, ...friends, ...nearbyPeople.map((p) => ({
-    id: p.id,
-    name: p.name,
-    initial: p.initial,
-    tone: p.tone,
-    xp: p.xp,
-    streak: 0,
-    title: p.note,
-  }))].find((m) => m.id === id)
+  return [
+    ...members,
+    ...friends,
+    ...nearbyPeople.map((p) => ({
+      id: p.id,
+      name: p.name,
+      initial: p.initial,
+      tone: p.tone,
+      xp: p.xp,
+      streak: 0,
+      title: p.note,
+    })),
+  ].find((m) => m.id === id)
 }
