@@ -100,10 +100,10 @@ export function HomePage() {
             </div>
             <div>
               <dt>还差</dt>
-              <dd className="recap-list__warn">{remaining} XP</dd>
+              <dd className="recap-list__warn">{remaining > 0 ? `${remaining} XP` : '已点火'}</dd>
             </div>
           </dl>
-          <p className="recap-card__note">再 {remaining} XP，火焰亮到今天。</p>
+          <p className="recap-card__note">{remaining > 0 ? `再 ${remaining} XP，火焰亮到今天。` : '今天已经点火，火焰亮着。'}</p>
         </section>
       </div>
 
@@ -126,7 +126,7 @@ export function HomePage() {
             </span>
           </div>
 
-          <ProgressRing xp={TODAY_XP} goal={GOAL_XP} lit={false} />
+          <ProgressRing xp={TODAY_XP} goal={GOAL_XP} lit={TODAY_XP >= GOAL_XP} />
 
           <div className="checkin-state" data-testid="checkin-state">
             <span className="checkin-state__icon" aria-hidden="true">
@@ -134,7 +134,7 @@ export function HomePage() {
             </span>
             <span className="checkin-state__text">
               <span className="checkin-state__label">今日打卡</span>
-              <strong className="checkin-state__value">还没点火</strong>
+              <strong className="checkin-state__value">{TODAY_XP >= GOAL_XP ? '已点火' : '还没点火'}</strong>
             </span>
             <span className="checkin-state__auto">满 {GOAL_XP} XP 自动点火</span>
           </div>

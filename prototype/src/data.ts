@@ -77,11 +77,11 @@ export interface RepairDay {
   meta: string
 }
 
-export const GOAL_XP = 150
+export const GOAL_XP = 100
 export const TODAY_XP = 110
 export const WEEK_XP = 110
 export const PROMOTION_COUNT = 3
-export const DEMOTION_COUNT = 4
+export const DEMOTION_COUNT = 3
 export const GROUP_SIZE = 15
 
 export const me: Member = {

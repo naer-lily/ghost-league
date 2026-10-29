@@ -92,8 +92,8 @@ export function LeaguePage() {
     return () => window.clearInterval(id)
   }, [deadline])
 
-  const groupRows = members.slice(3, 11)
-  const demotionRows = members.slice(11)
+  const groupRows = members.slice(3, group.size - group.demotion)
+  const demotionRows = members.slice(group.size - group.demotion)
   const countdown = formatCountdown(remaining)
 
   return (
