@@ -16,6 +16,7 @@ from ..rules import (
     is_valid_repair_day,
     xp_for_seconds,
 )
+from ..progression import MILESTONE_STREAK_BROKEN, milestone_payload
 from .core import _row_to_dict
 
 class CheckinsMixin:
@@ -136,8 +137,9 @@ class CheckinsMixin:
             clean_current = 0
 
         old = conn.execute(
-            "SELECT longest FROM streaks WHERE player_id = ?", (player_id,)
+            "SELECT current, longest FROM streaks WHERE player_id = ?", (player_id,)
         ).fetchone()
+        old_current = int(old["current"]) if old else 0
         longest = max(longest, int(old["longest"]) if old else 0)
         conn.execute(
             "INSERT INTO streaks "
@@ -157,6 +159,19 @@ class CheckinsMixin:
                 cal.iso_ts(now),
             ),
         )
+        if current == 0 and old_current > 0:
+            self._grant_milestone_with(  # type: ignore[attr-defined]
+                conn,
+                player_id,
+                MILESTONE_STREAK_BROKEN,
+                week_start=cal.week_start(today).isoformat(),
+                now=now,
+                payload=milestone_payload(
+                    MILESTONE_STREAK_BROKEN,
+                    week_start=cal.week_start(today).isoformat(),
+                    streak=old_current,
+                ),
+            )
         return {
             "current": current,
             "longest": longest,

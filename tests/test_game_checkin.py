@@ -47,6 +47,20 @@ def test_auto_checkin_threshold_and_duplicate_event(tmp_path) -> None:
     assert store.get_streak(pid)["current"] == 1
 
 
+def test_streak_break_grants_clown_title_and_frame(tmp_path) -> None:
+    store = GameStore(tmp_path / "league.db", epoch_reason="test")
+    pid = new_player(store, "clown")
+    add(store, pid, "day-one", 600, "2026-10-05T10:00:00+08:00")
+    streak = store.get_streak(pid)
+    assert streak is not None and streak["current"] == 1
+    store.refresh_streak(pid, today="2026-10-07", now="2026-10-07T00:05:00+08:00")
+    collection = store.collection(pid)
+    assert "title_clown" in {title["id"] for title in collection["titles"]}
+    assert "frame_clown" in {item["id"] for item in collection["items"]}
+    streak = store.get_streak(pid)
+    assert streak is not None and streak["current"] == 0
+
+
 def test_ember_grant_weekly_cap_and_balance_cap(tmp_path) -> None:
     store = GameStore(tmp_path / "league.db", epoch_reason="test")
 

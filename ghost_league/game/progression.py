@@ -12,6 +12,7 @@ from typing import Any, Final
 MILESTONE_FIRST_CHECKIN: Final = "first_checkin"
 MILESTONE_STREAK_3: Final = "streak_3"
 MILESTONE_STREAK_7: Final = "streak_7"
+MILESTONE_STREAK_BROKEN: Final = "streak_broken"
 MILESTONE_TOP_3: Final = "top_3"
 MILESTONE_CHAMPION: Final = "champion"
 MILESTONE_PROMOTED: Final = "promoted"
@@ -20,6 +21,7 @@ MILESTONE_ORDER: Final[tuple[str, ...]] = (
     MILESTONE_FIRST_CHECKIN,
     MILESTONE_STREAK_3,
     MILESTONE_STREAK_7,
+    MILESTONE_STREAK_BROKEN,
     MILESTONE_TOP_3,
     MILESTONE_CHAMPION,
     MILESTONE_PROMOTED,
@@ -57,6 +59,11 @@ CATALOG_TITLES: Final[tuple[dict[str, str], ...]] = (
         "name": "向上",
         "description": "首次晋级",
     },
+    {
+        "id": "title_clown",
+        "name": "小丑",
+        "description": "断掉一次连胜后获得",
+    },
 )
 
 CATALOG_ITEMS: Final[tuple[dict[str, str], ...]] = (
@@ -65,6 +72,12 @@ CATALOG_ITEMS: Final[tuple[dict[str, str], ...]] = (
         "name": "余烬",
         "slot": "frame",
         "description": "首次完成 100 XP 打卡",
+    },
+    {
+        "id": "frame_clown",
+        "name": "小丑帽",
+        "slot": "frame",
+        "description": "断掉一次连胜后获得",
     },
     {
         "id": "backdrop_night",
@@ -92,6 +105,10 @@ MILESTONE_REWARDS: Final[dict[str, dict[str, tuple[str, ...]]]] = {
         "titles": ("title_seven_days",),
         "items": ("backdrop_night",),
     },
+    MILESTONE_STREAK_BROKEN: {
+        "titles": ("title_clown",),
+        "items": ("frame_clown",),
+    },
     MILESTONE_TOP_3: {"titles": ("title_stage",), "items": ()},
     MILESTONE_CHAMPION: {
         "titles": ("title_champion",),
@@ -104,6 +121,7 @@ MILESTONE_CONDITIONS: Final[dict[str, str]] = {
     MILESTONE_FIRST_CHECKIN: "首次完成 100 XP 打卡",
     MILESTONE_STREAK_3: "连续打卡 3 天（补签计入）",
     MILESTONE_STREAK_7: "连续打卡 7 天（补签计入）",
+    MILESTONE_STREAK_BROKEN: "断掉一次连胜（同一天只记一次）",
     MILESTONE_TOP_3: "首次进入周榜前 3",
     MILESTONE_CHAMPION: "首次获得周榜第 1",
     MILESTONE_PROMOTED: "首次晋级",

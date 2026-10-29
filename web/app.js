@@ -797,12 +797,18 @@
 
   const FRAME_ART_SOURCES = Object.freeze({
     frame_ember: "/assets/frames/frame_ember.png",
+    frame_clown: "/assets/frames/frame_clown.png",
+  });
+  const FRAME_NAME_TO_ID = Object.freeze({
+    余烬: "frame_ember",
+    小丑帽: "frame_clown",
   });
 
   function resolveFrameId(frame) {
     const raw = String(frame || "").trim();
     if (!raw) return "";
     if (FRAME_ART_SOURCES[raw]) return raw;
+    if (FRAME_NAME_TO_ID[raw]) return FRAME_NAME_TO_ID[raw];
     const items = Array.isArray(state.collection?.items) ? state.collection.items : [];
     const match = items.find(
       (entry) => entry?.slot === "frame" && String(entry.name || "").trim() === raw,
@@ -811,11 +817,13 @@
   }
 
   function paintAvatarFrame(container, frameId) {
-    const source = FRAME_ART_SOURCES[resolveFrameId(frameId)] || "";
+    const resolvedFrameId = resolveFrameId(frameId);
+    const source = FRAME_ART_SOURCES[resolvedFrameId] || "";
     let overlay = container.querySelector("img.avatar-frame-art");
     if (!source) {
       if (overlay) overlay.remove();
       container.classList.remove("has-frame-art");
+      delete container.dataset.frame;
       return;
     }
     if (!overlay) {
@@ -827,6 +835,7 @@
       overlay.draggable = false;
       container.append(overlay);
     }
+    container.dataset.frame = resolvedFrameId;
     if (overlay.getAttribute("src") !== source) {
       overlay.setAttribute("src", source);
     }
@@ -1557,10 +1566,10 @@
       row.className = "standing-row";
       row.dataset.userId = memberKey;
       if (member.is_me) row.classList.add("is-me");
-      const ownFrameId = member.is_me ? resolveFrameId(member.frame) : "";
-      if (ownFrameId) {
+      const frameId = resolveFrameId(member.frame_id || member.frame);
+      if (frameId) {
         row.classList.add("has-frame");
-        row.dataset.frame = ownFrameId;
+        row.dataset.frame = frameId;
       }
       if (isPromotion) row.classList.add("is-promotion");
       if (isDemotion) row.classList.add("is-demotion");
@@ -1605,7 +1614,7 @@
       image.alt = "";
       image.hidden = true;
       avatar.append(fallback, image);
-      paintAvatar(avatar, member.avatar_url, member.name || member.display_name, ownFrameId);
+      paintAvatar(avatar, member.avatar_url, member.name || member.display_name, frameId);
       const copy = document.createElement("span");
       copy.className = "standing-copy";
       const nameLine = document.createElement("span");

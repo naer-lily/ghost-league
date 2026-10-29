@@ -726,6 +726,7 @@ class GameService:
                     "streak": int(row.get("streak") or 0),
                     "title": loadout["title"],
                     "frame": loadout["frame"],
+                    "frame_id": loadout["frame_id"],
                     "backdrop": loadout["backdrop"],
                 }
             )

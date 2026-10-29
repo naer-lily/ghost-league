@@ -99,6 +99,10 @@ FRAME_VISUALS: dict[str, FrameVisual] = {
         asset="frame_ember.png",
         glow_color="#ff5a1f",
     ),
+    "frame_clown": FrameVisual(
+        asset="frame_clown.png",
+        glow_color="#ffc857",
+    ),
 }
 
 _CARD_ICON_DIR = (
