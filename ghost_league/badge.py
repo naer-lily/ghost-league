@@ -74,7 +74,7 @@ class FrameVisual:
     """
 
     asset: str
-    glow_color: str
+    glow_color: str | None
     glow_opacity: float = 0.34
     top_margin: int = 4
     # Fraction of the image's half-size that contains visible pixels.  The
@@ -101,7 +101,7 @@ FRAME_VISUALS: dict[str, FrameVisual] = {
     ),
     "frame_clown": FrameVisual(
         asset="frame_clown.png",
-        glow_color="#ffc857",
+        glow_color=None,
     ),
 }
 
@@ -442,15 +442,22 @@ def _frame_markup(frame_id: object, geometry: BadgeGeometry) -> tuple[str, str]:
     y = cy - half
     glow_radius = half * FRAME_GLOW_SCALE
 
-    defs = f'''
+    defs = ""
+    if visual.glow_color is not None:
+        defs = f'''
     <radialGradient id="badge-frame-glow" cx="0.5" cy="0.5" r="0.5">
       <stop offset="0.52" stop-color="{visual.glow_color}" stop-opacity="{visual.glow_opacity}"/>
       <stop offset="0.78" stop-color="{visual.glow_color}" stop-opacity="{visual.glow_opacity * 0.42:.3f}"/>
       <stop offset="1" stop-color="{visual.glow_color}" stop-opacity="0"/>
     </radialGradient>'''
+    glow = (
+        f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{glow_radius:.2f}" fill="url(#badge-frame-glow)"/>'
+        if visual.glow_color is not None
+        else ""
+    )
     markup = f'''
   <g class="badge-frame" data-frame="{xml_escape(key)}">
-    <circle cx="{cx:.2f}" cy="{cy:.2f}" r="{glow_radius:.2f}" fill="url(#badge-frame-glow)"/>
+    {glow}
     <image class="badge-frame-image" x="{x:.2f}" y="{y:.2f}" width="{size:.2f}" height="{size:.2f}" preserveAspectRatio="xMidYMid meet" href="{data_uri}"/>
   </g>'''
     return defs, markup
