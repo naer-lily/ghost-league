@@ -151,13 +151,13 @@ export const friends: Member[] = [
 ]
 
 export const pathDays: PathDay[] = [
-  { id: 'mon', weekday: '周一', date: '10/27', xp: 0, status: 'missed' },
-  { id: 'tue', weekday: '周二', date: '10/28', xp: 420, status: 'done' },
-  { id: 'wed', weekday: '周三', date: '10/29', xp: 790, status: 'done' },
-  { id: 'thu', weekday: '周四', date: '10/30', xp: TODAY_XP, status: 'today' },
-  { id: 'fri', weekday: '周五', date: '10/31', xp: 0, status: 'locked' },
-  { id: 'sat', weekday: '周六', date: '11/01', xp: 0, status: 'locked' },
-  { id: 'sun', weekday: '周日', date: '11/02', xp: 0, status: 'locked' },
+  { id: 'mon', weekday: '周一', date: '10/26', xp: 0, status: 'missed' },
+  { id: 'tue', weekday: '周二', date: '10/27', xp: 420, status: 'done' },
+  { id: 'wed', weekday: '周三', date: '10/28', xp: 790, status: 'done' },
+  { id: 'thu', weekday: '周四', date: '10/29', xp: TODAY_XP, status: 'today' },
+  { id: 'fri', weekday: '周五', date: '10/30', xp: 0, status: 'locked' },
+  { id: 'sat', weekday: '周六', date: '10/31', xp: 0, status: 'locked' },
+  { id: 'sun', weekday: '周日', date: '11/01', xp: 0, status: 'locked' },
 ]
 
 export const feed: FeedItem[] = [
@@ -170,8 +170,8 @@ export const feed: FeedItem[] = [
 ]
 
 export const repairDays: RepairDay[] = [
-  { id: 'mon', label: '周一', meta: '10/27 · 1 枚' },
-  { id: 'sun', label: '周日', meta: '10/26 · 1 枚' },
+  { id: 'mon', label: '周一', meta: '10/26 · 1 枚' },
+  { id: 'sun', label: '周日', meta: '10/25 · 1 枚' },
 ]
 
 export const emberHistory: EmberEntry[] = [
