@@ -2,10 +2,12 @@ interface EmberSpriteProps {
   size?: number
   className?: string
   label?: string
+  /** Soft warm halo plus drifting sparks; used when the spirit acts as a character. */
+  aura?: boolean
 }
 
 /** A small original ember spirit: rounded body, two eyes, one flame. */
-export function EmberSprite({ size = 72, className = '', label }: EmberSpriteProps) {
+export function EmberSprite({ size = 72, className = '', label, aura = false }: EmberSpriteProps) {
   return (
     <span
       className={`ember-sprite ${className}`.trim()}
@@ -25,7 +27,20 @@ export function EmberSprite({ size = 72, className = '', label }: EmberSpritePro
             <stop offset="0%" stopColor="#ffc800" />
             <stop offset="100%" stopColor="#ff9600" />
           </linearGradient>
+          <radialGradient id="ember-aura" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#ff9600" stopOpacity="0.34" />
+            <stop offset="62%" stopColor="#ff9600" stopOpacity="0.12" />
+            <stop offset="100%" stopColor="#ff9600" stopOpacity="0" />
+          </radialGradient>
         </defs>
+        {aura ? (
+          <>
+            <ellipse className="ember-sprite__aura" cx="60" cy="78" rx="58" ry="52" fill="url(#ember-aura)" />
+            <circle className="ember-sprite__spark ember-sprite__spark--a" cx="12" cy="30" r="2.6" fill="#ffd84d" />
+            <circle className="ember-sprite__spark ember-sprite__spark--b" cx="109" cy="50" r="2.2" fill="#ff9600" />
+            <circle className="ember-sprite__spark ember-sprite__spark--c" cx="22" cy="104" r="2" fill="#ff4b4b" />
+          </>
+        ) : null}
         <path
           className="ember-sprite__flame"
           d="M62 7c3 11-7 13-4 24 5-2 7-6 7-11 9 7 14 17 14 28 0 13-10 22-23 22S33 61 33 48c0-14 12-23 22-36 1-2 4-4 7-5Z"

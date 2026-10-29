@@ -271,13 +271,13 @@ svg {
 }
 
 .status-pill__icon {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   stroke-width: 2.6;
 }
 
 .status-pill__value {
-  font-size: 18px;
+  font-size: 21px;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
@@ -718,66 +718,133 @@ svg {
   50% { transform: scale(1.04, 0.97) rotate(-1.5deg); }
 }
 
+/* Character mode: warm halo plus a few drifting sparks. */
+.ember-sprite__aura {
+  transform-origin: 60px 78px;
+  animation: aura-breathe 3.6s ease-in-out infinite;
+}
+
+.ember-sprite__spark {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: spark-twinkle 1.7s ease-in-out infinite;
+}
+
+.ember-sprite__spark--b { animation-delay: 0.55s; }
+.ember-sprite__spark--c { animation-delay: 1.05s; }
+
+@keyframes aura-breathe {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+
+@keyframes spark-twinkle {
+  0%, 100% { opacity: 0.25; transform: scale(0.75); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
 /* ---------------------------------------------------------------- home */
 .home-page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
+/* Unit header: thick green slab with a light sheen, badge on the left. */
 .unit-banner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   width: 100%;
-  min-height: 56px;
-  padding: 0 10px 0 16px;
-  border: 2px solid var(--green-bright);
-  border-radius: 18px;
-  background: linear-gradient(180deg, #58cc02 0%, #4cae02 100%);
-  box-shadow: 0 5px 0 var(--green-shadow);
+  padding: 9px 8px 9px 9px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #6cee0a 0%, #58cc02 55%, #4cae02 100%);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.28),
+    0 5px 0 var(--green-shadow);
+}
+
+.unit-banner__main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 46px;
+  padding: 0 8px;
+  border-radius: 14px;
   color: #fff;
   text-align: left;
-  transition: transform 0.08s ease, box-shadow 0.08s ease;
+  transition: background 0.15s ease, transform 0.08s ease;
 }
 
-.unit-banner:active {
-  transform: translateY(2px);
-  box-shadow: 0 3px 0 var(--green-shadow);
+.unit-banner__main:hover {
+  background: rgba(255, 255, 255, 0.14);
 }
 
-.unit-banner__text {
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+.unit-banner__main:active {
+  transform: translateY(1px);
 }
 
 .unit-banner__trophy {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.18);
-  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.12);
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.24);
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.16),
+    inset 0 2px 0 rgba(255, 255, 255, 0.28);
+  color: #fff;
 }
 
+.unit-banner__text {
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+}
+
+.unit-banner__tip {
+  display: flex;
+  flex: none;
+}
+
+.unit-banner .info-tip__trigger {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.unit-banner .info-tip__trigger:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+/* The learning path is the hero: it takes every remaining pixel and runs
+   all the way down to the navigation. */
 .week-path {
   position: relative;
-  padding: 16px 0 6px;
-  min-height: 596px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 0 6px;
 }
 
+.path-track {
+  position: relative;
+  min-height: 100%;
+}
+
+/* Character row: pinned between banner and path, so it never sits on a node. */
 .path-buddy {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  z-index: 4;
   display: flex;
-  align-items: center;
-  gap: 2px;
-  pointer-events: none;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 2px 0 6px;
 }
 
 .path-buddy .ember-sprite {
@@ -786,30 +853,32 @@ svg {
 
 .path-buddy__bubble {
   position: relative;
-  max-width: 96px;
-  padding: 6px 10px;
+  margin-bottom: 14px;
+  max-width: 216px;
+  padding: 9px 13px;
   border: 2px solid var(--border);
-  border-radius: 12px 12px 12px 4px;
+  border-radius: 14px 14px 4px 14px;
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
   white-space: nowrap;
-  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.2);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.22);
 }
 
+/* Thin dotted connectors only — no wide empty plates. */
 .path-spine {
   position: absolute;
-  top: 30px;
-  bottom: 30px;
+  top: 50px;
+  bottom: 50px;
   left: 50%;
-  width: 8px;
+  width: 6px;
   transform: translateX(-50%);
-  background-image: radial-gradient(circle, var(--border) 3.2px, transparent 3.6px);
-  background-size: 8px 18px;
+  background-image: radial-gradient(circle, var(--border-strong) 2.2px, transparent 2.6px);
+  background-size: 6px 14px;
   background-repeat: repeat-y;
   background-position: center top;
-  opacity: 0.95;
+  opacity: 0.9;
 }
 
 .path-list {
@@ -820,16 +889,15 @@ svg {
 
 .path-row {
   position: relative;
-  height: 82px;
+  height: 100px;
 }
 
 .path-row__stem {
   position: absolute;
-  top: 50%;
-  height: 5px;
-  transform: translateY(-50%);
-  background-image: radial-gradient(circle, var(--border) 2.6px, transparent 3px);
-  background-size: 14px 5px;
+  top: calc(50% - 1.5px);
+  height: 3px;
+  background-image: radial-gradient(circle, var(--border-strong) 1.8px, transparent 2.2px);
+  background-size: 9px 3px;
   background-repeat: repeat-x;
 }
 
@@ -843,6 +911,7 @@ svg {
   width: 25%;
 }
 
+/* Tiny day label on the outer edge; it must never overpower the node. */
 .path-row__meta {
   position: absolute;
   top: 50%;
@@ -854,21 +923,31 @@ svg {
 }
 
 .path-row--left .path-row__meta {
-  right: calc(75% + 48px);
-  text-align: right;
+  left: 0;
+  text-align: left;
 }
 
 .path-row--right .path-row__meta {
-  left: calc(75% + 48px);
-  text-align: left;
+  right: 0;
+  text-align: right;
 }
 
 .path-row__weekday {
   color: var(--text);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
+.path-row__date {
+  color: var(--muted-2);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* Big pressable 3D coins: 72–84px discs riding on a 5px dark base. */
 .day-node {
   position: absolute;
   top: 50%;
@@ -878,55 +957,87 @@ svg {
   align-items: center;
   justify-content: center;
   gap: 0;
-  width: 74px;
-  height: 74px;
-  border: 3px solid transparent;
+  width: 76px;
+  height: 76px;
+  border: 0;
   border-radius: 50%;
+  box-shadow: 0 5px 0 var(--node-edge, #101a1f);
+  color: #fff;
   transform: translate(-50%, -50%);
-  transition: transform 0.1s ease, box-shadow 0.1s ease, filter 0.15s ease;
+  transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.15s ease;
 }
 
 .path-row--left .day-node { left: 25%; }
 .path-row--right .day-node { left: 75%; }
 
-.day-node:hover { filter: brightness(1.06); }
-.day-node:active { transform: translate(-50%, calc(-50% + 2px)); }
+.day-node:hover { filter: brightness(1.07); }
+
+.day-node:active {
+  transform: translate(-50%, calc(-50% + 4px));
+  box-shadow: 0 1px 0 var(--node-edge, #101a1f);
+}
 
 .day-node__icon {
-  width: 30px;
-  height: 30px;
-  stroke-width: 3;
+  width: 34px;
+  height: 34px;
+  stroke-width: 3.2;
 }
 
+/* Completed: solid green, check mark (flame when the day was repaired). */
 .day-node--done {
-  background: linear-gradient(180deg, var(--green) 0%, var(--green-deep) 100%);
-  border-color: var(--green-bright);
-  box-shadow: 0 5px 0 var(--green-shadow);
-  color: #fff;
+  background: linear-gradient(180deg, var(--green-bright) 0%, var(--green-deep) 100%);
+  --node-edge: var(--green-shadow);
 }
 
+/* Broken streak: dashed rim, ember inside, small repair tag on top. */
 .day-node--missed {
-  background: var(--surface-2);
+  background: #23333d;
   border: 3px dashed var(--orange);
-  box-shadow: 0 5px 0 #101a1f;
+  --node-edge: #101a1f;
   color: var(--orange);
 }
 
-.day-node--locked {
-  background: var(--surface-2);
-  border-color: var(--border);
-  box-shadow: 0 5px 0 #101a1f;
-  color: var(--muted-2);
-  opacity: 0.72;
+.day-node--missed .day-node__icon {
+  width: 28px;
+  height: 28px;
+  opacity: 0.92;
 }
 
+/* Upcoming day: small dark solid stop — no lock, no empty plate. */
+.day-node--locked {
+  width: 72px;
+  height: 72px;
+  background: #2b3d45;
+  --node-edge: #1a262c;
+}
+
+.day-node--locked:active {
+  transform: translate(-50%, calc(-50% + 3px));
+}
+
+.day-node__dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #405864;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.24);
+}
+
+/* Today: the biggest coin, warm outer glow, floating tag. */
 .day-node--today {
   width: 88px;
   height: 88px;
-  background: linear-gradient(180deg, #ffd84d 0%, #ff9600 100%);
-  border-color: #ffe680;
-  box-shadow: 0 7px 0 var(--orange-shadow), 0 0 0 7px rgba(255, 200, 0, 0.12);
-  color: #fff;
+  background: linear-gradient(180deg, #ffb340 0%, #ff9600 62%, #f08a00 100%);
+  --node-edge: #c07000;
+  box-shadow:
+    0 6px 0 var(--node-edge),
+    0 0 30px 4px rgba(255, 150, 0, 0.32);
+}
+
+.day-node--today:active {
+  box-shadow:
+    0 2px 0 var(--node-edge),
+    0 0 18px 2px rgba(255, 150, 0, 0.28);
 }
 
 .day-node--today::before,
@@ -934,7 +1045,7 @@ svg {
   content: "";
   position: absolute;
   inset: -9px;
-  border: 3px solid rgba(255, 200, 0, 0.5);
+  border: 3px solid rgba(255, 200, 0, 0.45);
   border-radius: 50%;
   animation: node-pulse 2.2s ease-out infinite;
   pointer-events: none;
@@ -945,25 +1056,67 @@ svg {
 }
 
 @keyframes node-pulse {
-  0% { transform: scale(0.92); opacity: 0.85; }
+  0% { transform: scale(0.92); opacity: 0.8; }
   70% { transform: scale(1.18); opacity: 0; }
   100% { transform: scale(1.18); opacity: 0; }
 }
 
+.day-node__flag {
+  position: absolute;
+  top: -11px;
+  left: 50%;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 0 9px;
+  border-radius: var(--radius-pill);
+  background: #fff;
+  color: #d97a00;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.25);
+}
+
+.day-node__flag--today::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -4px;
+  border: 4px solid transparent;
+  border-top-color: #fff;
+}
+
+.day-node__flag--repair {
+  top: -8px;
+  left: auto;
+  right: -7px;
+  min-width: 20px;
+  padding: 0 6px;
+  background: var(--orange);
+  color: #2b1600;
+  transform: none;
+}
+
 .day-node--today .day-node__icon {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   margin-bottom: 1px;
-  stroke-width: 2.8;
+  stroke-width: 2.6;
 }
 
 .day-node__xp {
-  font-size: 24px;
+  font-size: 25px;
   font-weight: 900;
   line-height: 1;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.04em;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.16);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
 }
 
 .day-node__unit {
@@ -972,6 +1125,27 @@ svg {
   font-weight: 800;
   letter-spacing: 0.08em;
   opacity: 0.9;
+}
+
+/* Phone: the home page is exactly one screen tall, the bottom navigation is
+   always fully visible, and only the path itself scrolls. */
+@media (max-width: 959px) {
+  .home-page {
+    height: calc(100vh - var(--topbar-h) - 14px - var(--bottom-nav) - 26px - env(safe-area-inset-bottom));
+    height: calc(100dvh - var(--topbar-h) - 14px - var(--bottom-nav) - 26px - env(safe-area-inset-bottom));
+  }
+
+  .week-path {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 12px;
+  }
+
+  .week-path::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* ---------------------------------------------------------------- league */
@@ -3159,6 +3333,11 @@ dialog.sheet::backdrop {
     padding-top: 4px;
   }
 
+  /* Desktop: the path column still owns the full height below the banner. */
+  .home-page {
+    min-height: calc(100vh - 116px);
+  }
+
   .toast {
     bottom: 24px;
   }
@@ -3255,17 +3434,14 @@ dialog.sheet::backdrop {
     gap: 4px;
   }
 
+  /* Wide screen: roomier path rows inside the 560px column. */
+  .path-row {
+    height: 104px;
+  }
+
   .day-node--today {
     width: 92px;
     height: 92px;
-  }
-
-  .path-row {
-    height: 92px;
-  }
-
-  .week-path {
-    min-height: 656px;
   }
 }
 
@@ -3281,6 +3457,8 @@ dialog.sheet::backdrop {
   }
 
   .ember-sprite,
+  .ember-sprite__aura,
+  .ember-sprite__spark,
   .day-node--today::before,
   .day-node--today::after {
     animation: none !important;
