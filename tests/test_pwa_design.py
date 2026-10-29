@@ -146,18 +146,20 @@ class PWADesignMotionTests(unittest.TestCase):
         self.assertIn("minmax(0, 1fr)", self.css)
 
     def test_07_shell_cache_is_bumped_without_removing_previous_marker(self) -> None:
-        self.assertIn('const CACHE_VERSION = "gl-shell-v34-2026-10-29";', self.sw)
-        self.assertIn("gl-shell-v33-2026-10-29", self.sw)
-        self.assertIn("gl-shell-v32-2026-10-28", self.sw)
-        self.assertIn("gl-shell-v30-2026-10-28", self.sw)
-        self.assertIn("gl-shell-v29-2026-10-28", self.sw)
-        self.assertIn("gl-shell-v28-2026-10-28", self.sw)
-        self.assertIn("gl-shell-v27-2026-10-28", self.sw)
-        self.assertIn("gl-shell-v26-2026-10-28", self.sw)
-        self.assertIn("gl-shell-v25-2026-10-27", self.sw)
+        self.assertIn('const CACHE_VERSION = "gl-shell-v44-2026-10-30";', self.sw)
+        self.assertIn("gl-shell-v43-2026-10-30", self.sw)
+        self.assertIn("gl-shell-v42-2026-10-30", self.sw)
+        self.assertIn("gl-shell-v41-2026-10-30", self.sw)
+        self.assertIn("gl-shell-v40-2026-10-30", self.sw)
+        self.assertIn("gl-shell-v39-2026-10-30", self.sw)
+        self.assertIn("gl-shell-v38-2026-10-30", self.sw)
+        self.assertIn("gl-shell-v37-2026-10-30", self.sw)
+        self.assertIn("gl-shell-v36-2026-10-30", self.sw)
+        self.assertIn("gl-shell-v35-2026-10-30", self.sw)
+        self.assertIn("gl-shell-v34-2026-10-29", self.sw)
         self.assertIn("caches.delete", self.sw)
-        self.assertIn("/style.css?v=34", self.sw)
-        self.assertIn("/app.js?v=34", self.sw)
+        self.assertIn("/style.css?v=44", self.sw)
+        self.assertIn("/app.js?v=44", self.sw)
 
     def test_10_ember_frame_art_is_scoped_to_owned_avatars(self) -> None:
         self.assertIn('frame_ember: "/assets/frames/frame_ember.png"', self.js)
@@ -165,9 +167,9 @@ class PWADesignMotionTests(unittest.TestCase):
         self.assertIn('container.querySelector("img.avatar-frame-art")', self.js)
         self.assertIn('container.querySelector("img:not(.avatar-frame-art)")', self.js)
         self.assertIn("state.collection?.equipped?.frame_id", self.js)
-        self.assertIn('const ownFrameId = member.is_me ? resolveFrameId(member.frame) : "";', self.js)
+        self.assertIn('const frameId = resolveFrameId(member.frame_id || member.frame);', self.js)
         self.assertIn(
-            "paintAvatar(avatar, member.avatar_url, member.name || member.display_name, ownFrameId);",
+            "paintAvatar(avatar, member.avatar_url, member.name || member.display_name, frameId);",
             self.js,
         )
         self.assertIn("detail.frame_id || detail.frame", self.js)

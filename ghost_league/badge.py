@@ -77,6 +77,7 @@ class FrameVisual:
     glow_color: str | None
     glow_opacity: float = 0.34
     top_margin: int = 4
+    hat_only: bool = False
     # Fraction of the image's half-size that contains visible pixels.  The
     # ember art has a tall flame at the top, so this keeps the whole ring
     # inside the card instead of letting the viewport crop it.
@@ -102,6 +103,7 @@ FRAME_VISUALS: dict[str, FrameVisual] = {
     "frame_clown": FrameVisual(
         asset="frame_clown.png",
         glow_color=None,
+        hat_only=True,
     ),
 }
 
@@ -435,11 +437,18 @@ def _frame_markup(frame_id: object, geometry: BadgeGeometry) -> tuple[str, str]:
     half = size / 2
     cx = geometry.icon_center_x + visual.center_dx
     cy = geometry.icon_center_y + visual.center_dy
-    min_cy = half * visual.content_half_ratio + visual.top_margin
-    if cy < min_cy:
-        cy = min_cy
-    x = cx - half
-    y = cy - half
+    if visual.hat_only:
+        size = geometry.icon_size * 1.5
+        half = size / 2
+        cy = geometry.icon_y + geometry.icon_size * 0.04 - half
+        y = cy - half
+        x = cx - half
+    else:
+        min_cy = half * visual.content_half_ratio + visual.top_margin
+        if cy < min_cy:
+            cy = min_cy
+        x = cx - half
+        y = cy - half
     glow_radius = half * FRAME_GLOW_SCALE
 
     defs = ""
