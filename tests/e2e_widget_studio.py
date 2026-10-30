@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
-"""Playwright E2E for Widget Studio.
+"""Playwright E2E for Widget Studio (schema v3, explicit save).
 
 Run explicitly with the shared UI environment::
 
     /opt/ui-venv/bin/python tests/e2e_widget_studio.py
 
 It boots a temporary FastAPI/PWA instance (no TLS, no new service), drives the
-real editor, checks that pointermove never PUTs, verifies persisted JSON and the
-public PNG endpoint, and writes screenshots under ``artifacts/``.
+real editor, checks that drags/typing never PUT (even after >1.5s), saves only
+on Ctrl+S / the save button, verifies per-background text variants and
+positions, and writes screenshots under ``artifacts/``.
 """
 
 from __future__ import annotations
 
-import io
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
 import tempfile
 import textwrap
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -158,13 +160,42 @@ def launch_browser(playwright):
 
 def wait_saved(page) -> None:
     page.wait_for_function(
-        "document.querySelector('#sync-status').textContent.startsWith('已同步到')",
+        "document.querySelector('#sync-status').textContent.startsWith('已保存 ·')",
         timeout=15000,
     )
 
 
-def background_count(page) -> int:
-    return page.locator(".bg-card").count()
+def wait_dirty(page) -> None:
+    page.wait_for_function(
+        "document.querySelector('#sync-status').textContent === '未保存'",
+        timeout=5000,
+    )
+
+
+def canvas_point(page, x: float, y: float) -> tuple[float, float]:
+    box = page.locator("#studio-canvas").bounding_box()
+    assert box is not None
+    return (
+        box["x"] + x * (box["width"] / 1536),
+        box["y"] + y * (box["height"] / 914),
+    )
+
+
+def drag_element(page, x: float, y: float, dx: float, dy: float) -> None:
+    start = canvas_point(page, x, y)
+    page.mouse.move(*start)
+    page.mouse.down()
+    page.mouse.move(start[0] + dx, start[1] + dy, steps=8)
+    page.mouse.up()
+
+
+def fetch_template(context, origin: str, template_id: str) -> dict:
+    response = context.request.get(
+        f"{origin}/v1/widget-studio/templates/{template_id}",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+    assert response.status == 200, response.text()
+    return response.json()
 
 
 def main() -> int:
@@ -209,24 +240,46 @@ def main() -> int:
                 timeout=15000,
             )
             wait_saved(page)
-            print("PASS new template")
+            assert page.locator("#save-template-btn").is_disabled()
+            print("PASS new template is saved and save button is disabled")
 
+            # Uploads only write files; they mark the in-memory template dirty
+            # and never PUT on their own.
+            put_requests.clear()
             page.set_input_files("#bg-file-input", [str(path) for path in images])
             page.wait_for_function(
                 "document.querySelectorAll('.bg-card').length === 4", timeout=20000
             )
+            wait_dirty(page)
+            page.wait_for_timeout(1600)
+            assert not put_requests, "uploads must not auto-PUT"
+            saved_after_upload = fetch_template(context, origin, "nijika-e2e")
+            assert len(saved_after_upload["backgrounds"]) == 1, saved_after_upload
+            page.click("#save-template-btn")
+            page.wait_for_function("document.querySelectorAll('.bg-card').length === 4")
             wait_saved(page)
-            print("PASS uploaded 3 backgrounds")
+            assert put_requests, "save button must PUT"
+            print("PASS uploads mark dirty, no auto-PUT, explicit save persists")
 
-            page.click("#library-open")
-            page.wait_for_selector("#library-modal:not([hidden])")
-            page.click('.library-item[data-src="ghost:assets/tiers/card/bronze.png"]')
+            # Second template for the switch-confirmation test.
+            page.click("#new-template-btn")
+            page.wait_for_selector("#template-modal:not([hidden])")
+            page.fill("#template-name-input", "Second E2E")
+            page.click("#template-modal-confirm")
             page.wait_for_function(
-                "document.querySelectorAll('.bg-card').length === 5", timeout=10000
+                "document.querySelector('#template-select').value === 'second-e2e'",
+                timeout=15000,
             )
             wait_saved(page)
-            print("PASS added Ghost library background")
+            page.select_option("#template-select", "nijika-e2e")
+            page.wait_for_function(
+                "document.querySelector('#template-select').value === 'nijika-e2e'",
+                timeout=15000,
+            )
+            wait_saved(page)
+            print("PASS created second template for switch confirmation")
 
+            # Condition edits stay local until an explicit save.
             page.click('.bg-card[data-bg-id="bg-morning"] .bg-card-head')
             page.select_option("#cond-hour-preset", "5-11")
             page.select_option("#cond-weekday-preset", "workdays")
@@ -235,129 +288,208 @@ def main() -> int:
                 "document.querySelector('.bg-card[data-bg-id=\"bg-morning\"] .bg-summary').textContent.includes('05–11')",
                 timeout=5000,
             )
+            wait_dirty(page)
+            put_requests.clear()
+            page.wait_for_timeout(1600)
+            assert not put_requests, "condition edits must not auto-PUT"
+            page.click("#save-template-btn")
             wait_saved(page)
+            print("PASS condition edits wait for explicit save")
 
-            page.click('.bg-card[data-bg-id="bg-tiers-card-bronze"] .bg-card-head')
-            page.fill("#cond-league", "bronze")
+            # Drag text, streak number and flame: each stays local for >1.5s.
+            page.click('.text-item[data-text-id="text-1"]')
+            old_x = float(page.input_value("#text-x"))
+            old_y = float(page.input_value("#text-y"))
+            put_requests.clear()
+            drag_element(page, old_x + 120, old_y + 50, 90, 40)
+            wait_dirty(page)
+            page.wait_for_timeout(1700)
+            assert not put_requests, "text drag must not auto-PUT"
+            assert float(page.input_value("#text-x")) > old_x + 50
+            print("PASS text drag local for >1.5s, 0 PUT")
+
+            put_requests.clear()
+            drag_element(page, 940, 390, -60, 50)
+            page.wait_for_timeout(1700)
+            assert not put_requests, "streak drag must not auto-PUT"
+            streak_x = float(page.input_value("#streak-x"))
+            print("PASS streak drag local for >1.5s, 0 PUT")
+
+            put_requests.clear()
+            drag_element(page, 720, 350, 40, -20)
+            page.wait_for_timeout(1700)
+            assert not put_requests, "flame drag must not auto-PUT"
+            print("PASS flame drag local for >1.5s, 0 PUT")
+
+            put_requests.clear()
+            page.keyboard.press("Control+s")
+            page.wait_for_function("document.querySelector('#save-template-btn').disabled === true")
             wait_saved(page)
-            print("PASS edited conditions")
+            assert put_requests, "Ctrl+S must PUT"
+            saved = fetch_template(context, origin, "nijika-e2e")
+            morning = next(bg for bg in saved["backgrounds"] if bg["id"] == "bg-morning")
+            assert abs(morning["layout"]["texts"][0]["x"] - float(page.input_value("#text-x"))) < 0.5
+            assert abs(morning["layout"]["streak"]["x"] - streak_x) < 0.5
+            print("PASS Ctrl+S PUTs and status goes 未保存 -> 已保存")
+
+            # Text content / condition change: no PUT, confirm on switch/reload.
+            page.click('.text-item[data-text-id="text-1"]')
+            page.fill("#text-content", "测试文字A")
+            page.fill("#bg-priority", "55")
+            wait_dirty(page)
+            put_requests.clear()
+            page.wait_for_timeout(1600)
+            assert not put_requests, "text/condition edits must not auto-PUT"
+
+            dialogs: list[str] = []
+
+            def dismiss(dialog):
+                dialogs.append(dialog.message)
+                dialog.dismiss()
+
+            page.once("dialog", dismiss)
+            try:
+                page.select_option("#template-select", "second-e2e", timeout=4000)
+            except Exception:
+                pass
+            page.wait_for_timeout(400)
+            assert dialogs and "未保存" in dialogs[0], dialogs
+            assert page.input_value("#template-select") == "nijika-e2e"
+            wait_dirty(page)
+            print("PASS switch with dirty state asks for confirmation and cancels")
+
+            dialogs.clear()
+            page.once("dialog", dismiss)
+            try:
+                page.reload(wait_until="domcontentloaded", timeout=5000)
+            except Exception:
+                pass
+            page.wait_for_timeout(500)
+            assert dialogs, "reload must show a beforeunload confirmation"
+            assert page.locator("#sync-status").inner_text() == "未保存"
+            print("PASS reload with dirty state asks for confirmation and cancels")
+
+            page.keyboard.press("Control+s")
+            wait_saved(page)
+            saved = fetch_template(context, origin, "nijika-e2e")
+            morning = next(bg for bg in saved["backgrounds"] if bg["id"] == "bg-morning")
+            assert morning["layout"]["texts"][0]["text"] == "测试文字A"
+            assert morning["priority"] == 55
+            print("PASS explicit save persisted text and condition")
+
+            # Two more text variants on the same background.
+            page.click('.bg-card[data-bg-id="bg-morning"] .bg-card-head')
+            page.click("#add-text-variant")
+            page.fill("#text-content", "第二条")
+            page.fill("#text-x", "100")
+            page.fill("#text-y", "120")
+            page.click("#add-text-variant")
+            page.fill("#text-content", "第三条")
+            page.fill("#text-x", "200")
+            page.fill("#text-y", "220")
+            wait_dirty(page)
+            page.click("#save-template-btn")
+            wait_saved(page)
+            saved = fetch_template(context, origin, "nijika-e2e")
+            morning = next(bg for bg in saved["backgrounds"] if bg["id"] == "bg-morning")
+            text_ids = [item["id"] for item in morning["layout"]["texts"]]
+            assert text_ids == ["text-1", "text-2", "text-3"], text_ids
+            print("PASS added two text variants and saved them")
+
+            # Fixed text= previews and random preview headers.
+            for text_id in text_ids:
+                response = context.request.get(
+                    f"{origin}/v1/widgets/nijika-e2e.png?"
+                    + urllib.parse.urlencode(
+                        {"token": saved["render_token"], "bg": "bg-morning", "text": text_id, "streak": "12"}
+                    )
+                )
+                assert response.status == 200, response.text()
+                assert response.headers["x-widget-text"] == text_id
+                assert response.headers["x-widget-background"] == "bg-morning"
+            print("PASS fixed text= switches every text variant")
 
             page.fill("#preview-hour", "8")
             page.select_option("#preview-weekday", "1")
+            page.fill("#preview-league", "")
+            page.fill("#preview-event", "")
             page.wait_for_function(
                 "document.querySelector('#bg-match-badge').textContent.includes('bg-morning')",
                 timeout=5000,
             )
-            pixel_morning = page.evaluate(
-                "() => [...document.getElementById('studio-canvas').getContext('2d').getImageData(768, 100, 1, 1).data]"
-            )
-            page.fill("#preview-hour", "15")
+            page.click("#random-preview-btn")
+            page.wait_for_selector("#preview-modal:not([hidden])")
             page.wait_for_function(
-                "document.querySelector('#bg-match-badge').textContent.includes('fallback')",
-                timeout=5000,
+                "document.querySelector('#preview-meta').textContent.includes('随机预览')",
+                timeout=10000,
             )
-            pixel_fallback = page.evaluate(
-                "() => [...document.getElementById('studio-canvas').getContext('2d').getImageData(768, 100, 1, 1).data]"
-            )
-            assert pixel_morning != pixel_fallback, (pixel_morning, pixel_fallback)
-            page.fill("#preview-league", "bronze")
-            page.wait_for_function(
-                "document.querySelector('#bg-match-badge').textContent.includes('bg-tiers-card-bronze')",
-                timeout=5000,
-            )
-            print("PASS preview context switches background")
-            page.fill("#preview-league", "")
+            meta = page.locator("#preview-meta").inner_text()
+            match = re.search(r"文字 (\S+)", meta)
+            assert match and match.group(1) in text_ids, meta
+            assert "bg-morning" in meta, meta
+            random_header = None
+            for _ in range(12):
+                response = context.request.get(
+                    f"{origin}/v1/widgets/nijika-e2e.png?"
+                    + urllib.parse.urlencode(
+                        {"token": saved["render_token"], "bg": "bg-morning", "streak": "12"}
+                    )
+                )
+                assert response.status == 200
+                random_header = response.headers.get("x-widget-text")
+                assert random_header in text_ids, random_header
+            page.click("#preview-close")
+            print(f"PASS random preview returns X-Widget-Text in {text_ids} ({random_header})")
 
-            page.click('.layer-item[data-layer-id="label-1"]')
-            old_x = float(page.input_value("#layer-x"))
-            old_y = float(page.input_value("#layer-y"))
-            box = page.locator("#studio-canvas").bounding_box()
-            assert box is not None
-            scale = box["width"] / 1536
-            start_x = box["x"] + (old_x + 260) * scale
-            start_y = box["y"] + (old_y + 50) * (box["height"] / 914)
-            put_requests.clear()
-            page.mouse.move(start_x, start_y)
-            page.mouse.down()
-            page.mouse.move(start_x + 40, start_y + 10, steps=6)
-            page.wait_for_timeout(650)
-            assert not put_requests, "pointermove must not trigger PUT"
-            page.mouse.move(start_x + 90, start_y + 40, steps=8)
-            page.wait_for_timeout(250)
-            assert not put_requests, "pointer drag must stay local before pointerup"
-            page.mouse.up()
-            page.wait_for_timeout(900)
-            assert put_requests, "pointerup must schedule a PUT within 400ms"
+            # Background B has independent coordinates; both survive reload.
+            page.click('.bg-card[data-bg-id="bg-night"] .bg-card-head')
+            page.fill("#text-content", "夜晚文字")
+            page.fill("#text-x", "320")
+            page.fill("#text-y", "360")
+            page.fill("#streak-x", "300")
+            page.fill("#streak-y", "200")
+            page.fill("#flame-x", "260")
+            page.fill("#flame-y", "180")
+            wait_dirty(page)
+            page.click("#save-template-btn")
             wait_saved(page)
-            new_x = float(page.input_value("#layer-x"))
-            new_y = float(page.input_value("#layer-y"))
-            assert new_x > old_x + 50, (old_x, new_x)
-            assert new_y > old_y + 10, (old_y, new_y)
-            print("PASS drag stays local, PUT only after pointerup")
-
-            request = context.request.get(
-                f"{origin}/v1/widget-studio/templates/nijika-e2e",
-                headers={"Authorization": f"Bearer {TOKEN}"},
-            )
-            assert request.status == 200, request.text()
-            saved = request.json()
-            label = next(layer for layer in saved["layers"] if layer["id"] == "label-1")
-            assert abs(label["x"] - new_x) < 0.5, (label, new_x)
-            assert abs(label["y"] - new_y) < 0.5, (label, new_y)
+            saved = fetch_template(context, origin, "nijika-e2e")
+            night = next(bg for bg in saved["backgrounds"] if bg["id"] == "bg-night")
             morning = next(bg for bg in saved["backgrounds"] if bg["id"] == "bg-morning")
-            assert morning["when"] == {"hour_from": 5, "hour_to": 11, "weekdays": [1, 2, 3, 4, 5]}
-            assert morning["priority"] == 50
-            bronze = next(bg for bg in saved["backgrounds"] if bg["id"] == "bg-tiers-card-bronze")
-            assert bronze["src"] == "ghost:assets/tiers/card/bronze.png"
-            assert bronze["when"] == {"league": "bronze"}
-            assert len(saved["backgrounds"]) == 5
-            print("PASS persisted JSON has geometry, backgrounds and conditions")
+            assert night["layout"]["texts"][0]["x"] == 320
+            assert night["layout"]["texts"][0]["y"] == 360
+            assert night["layout"]["streak"] == {"x": 300, "y": 200}
+            assert night["layout"]["flame"] == {"x": 260, "y": 180}
+            assert morning["layout"]["texts"][0]["x"] != 320
+            assert morning["layout"]["streak"]["x"] != 300
+            print("PASS background B stores different coordinates than A")
 
             page.reload(wait_until="networkidle")
             page.wait_for_function(
                 "document.querySelector('#template-select').value === 'nijika-e2e'",
                 timeout=10000,
             )
-            page.wait_for_function(
-                "document.querySelectorAll('.bg-card').length === 5", timeout=10000
-            )
-            assert float(page.input_value("#layer-x")) == new_x
-            assert float(page.input_value("#layer-y")) == new_y
-            page.wait_for_function(
-                "document.querySelector('.bg-card[data-bg-id=\"bg-morning\"] .bg-summary').textContent.includes('05–11 点 · 工作日')",
-                timeout=5000,
-            )
-            print("PASS reload restores template, positions and conditions")
+            page.click('.bg-card[data-bg-id="bg-night"] .bg-card-head')
+            assert float(page.input_value("#text-x")) == 320
+            assert float(page.input_value("#text-y")) == 360
+            assert float(page.input_value("#streak-x")) == 300
+            assert float(page.input_value("#flame-x")) == 260
+            page.click('.bg-card[data-bg-id="bg-morning"] .bg-card-head')
+            page.click('.text-item[data-text-id="text-2"]')
+            assert float(page.input_value("#text-x")) == 100
+            assert float(page.input_value("#text-y")) == 120
+            print("PASS reload restores per-background coordinates")
 
-            page.fill("#preview-hour", "15")
-            page.wait_for_function(
-                "document.querySelector('#bg-match-badge').textContent.includes('fallback')",
-                timeout=5000,
-            )
-            page.click("#production-preview-btn")
-            page.wait_for_selector("#preview-modal:not([hidden])")
-            page.wait_for_function(
-                "document.querySelector('#production-image').complete && document.querySelector('#production-image').naturalWidth > 0",
-                timeout=15000,
-            )
-            production_url = page.input_value("#production-url")
-            assert "token=" in production_url and "Bearer" not in production_url
-            with urllib.request.urlopen(production_url, timeout=20) as response:
-                assert response.status == 200
-                assert response.headers["X-Widget-Background"] == "bg-default", response.headers
-                assert response.headers["Cache-Control"] == "no-store"
-                image = Image.open(io.BytesIO(response.read()))
-                assert image.size == (1536, 914), image.size
-            page.click("#preview-close")
-            print("PASS production preview 200 / 1536x914 / X-Widget-Background")
-
+            # Final view for screenshots: three readable text variants on A.
+            page.wait_for_timeout(300)
             page.screenshot(path=str(ARTIFACTS / "widget-studio-1440.png"), full_page=False)
             desktop_box = page.locator("#studio-canvas").bounding_box()
             page.set_viewport_size({"width": 390, "height": 844})
-            page.wait_for_timeout(400)
+            page.wait_for_timeout(500)
             mobile_box = page.locator("#studio-canvas").bounding_box()
             assert mobile_box is not None and 0 < mobile_box["width"] <= 390
             assert page.is_visible("#new-template-btn")
+            assert page.locator("#text-variant-list .text-item").count() == 3
             page.screenshot(path=str(ARTIFACTS / "widget-studio-390.png"), full_page=False)
             print("PASS desktop/mobile screenshots")
             print(f"  desktop canvas {desktop_box}")

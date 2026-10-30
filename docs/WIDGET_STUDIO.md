@@ -6,7 +6,7 @@ Widget Studio 是 Ghost League PWA 内的图片模版编辑器。它不新增服
 
 ```text
 web/widget-studio/              # 编辑器静态页（index.html / styles.css / app.js）
-        │  Bearer: localStorage["gl.token.v1"]
+        │  Bearer: localStorage["gl.token.v1"]；只有 Ctrl/Cmd+S 或“保存”才 PUT
         ▼
 /v1/widget-studio/...           # 读写模版、上传资源、资源库、缩略图
         │  权威数据
@@ -41,16 +41,41 @@ web/assets/tiers, frames        # 通过 ghost:assets/... 原地引用，不复�
 - 生产图不需要 Bearer，只认每份模版独立的 `render_token`。无 token 或错 token 一律
   `404`，不返回 `401`，不暴露模版是否存在。
 
-## 模版 schema（version 2）
+## 模版 schema（version 3）
+
+styles 是全局唯一样式源；每张底图只拥有自己的摆位与文字变体。
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "id": "nijika",
   "name": "Nijika",
   "updated_at": "2026-10-30T23:30:00+08:00",
   "render_token": "32 lowercase hex chars",
   "canvas": { "width": 1536, "height": 914, "radius": 128 },
+  "styles": {
+    "label": {
+      "width": 520,
+      "height": 100,
+      "fontSize": 64,
+      "fontWeight": 400,
+      "color": "#17324d",
+      "align": "left",
+      "lineHeight": 1.15,
+      "shadow": { "color": "rgba(255,255,255,0.65)", "blur": 0, "offsetX": 0, "offsetY": 2 }
+    },
+    "streak": {
+      "width": 360,
+      "height": 180,
+      "fontSize": 132,
+      "fontWeight": 400,
+      "color": "#ffb020",
+      "align": "left",
+      "lineHeight": 1,
+      "shadow": { "color": "rgba(255,255,255,0.75)", "blur": 0, "offsetX": 0, "offsetY": 3 }
+    },
+    "flame": { "width": 120, "height": 140, "opacity": 1 }
+  },
   "backgrounds": [
     {
       "id": "bg-default",
@@ -61,44 +86,49 @@ web/assets/tiers, frames        # 通过 ghost:assets/... 原地引用，不复�
       "fit": "cover",
       "offsetX": 0,
       "offsetY": 0,
-      "scale": 1
-    }
-  ],
-  "layers": [
-    {
-      "id": "number-1",
-      "type": "text",
-      "role": "streak",
-      "text": "{streak}",
-      "x": 760,
-      "y": 300,
-      "w": 360,
-      "h": 180,
-      "fontSize": 132,
-      "fontWeight": 400,
-      "color": "#ffb020",
-      "align": "left",
-      "lineHeight": 1,
-      "shadow": {
-        "color": "rgba(255,255,255,0.75)",
-        "blur": 0,
-        "offsetX": 0,
-        "offsetY": 3
+      "scale": 1,
+      "layout": {
+        "texts": [
+          { "id": "text-1", "text": "连续学习", "x": 760, "y": 540 },
+          { "id": "text-2", "text": "今天也继续", "x": 760, "y": 540 }
+        ],
+        "streak": { "x": 760, "y": 300 },
+        "flame": { "x": 660, "y": 280 }
       }
     }
   ]
 }
 ```
 
+- `styles` 是全局唯一样式源。编辑器与 API 都**不允许**按底图改样式；编辑器只读展示。
+- 每张底图必须有 `layout.texts`，至少一条，可以有几十条。每条只有 `id`、`text`、
+  `x`、`y`；宽度/高度/字体/颜色/阴影/行高都取 `styles.label`，`x/y` 是文字盒左上角。
+- `layout.streak`、`layout.flame` 只有 `x/y`；尺寸/字体/颜色/透明度取全局 styles。
+- 没有全局 `layers`：version 3 只接受底图自有摆位；带 `layers` 或 `version: 2` 的
+  JSON 明确报错，不做静默兼容。
 - 每份模版至少一张底图，并且至少一个 `when: {}` fallback。
-- `backgrounds[].id` 必须唯一；`layers[].id` 必须唯一。
+- `backgrounds[].id` 必须唯一；同一底图内 `layout.texts[].id` 必须唯一。
 - `src` 只允许两种形式：
   - 模版本地相对路径：`backgrounds/<bg-id>.png`、`flame.png`，相对
     `data/widgets/<id>/`；
   - Ghost 资源库：`ghost:assets/...`，相对 `web/`。
 - `src` 拒绝绝对路径、URL、反斜杠、`.`/`..` 段，以及逃出允许根目录的路径。
 - 文本占位符：`{streak}`、`{xp}`、`{rank}`、`{name}`；缺失上下文时渲染为空字符串。
-- 文字按 `w` 自动换行（中文逐字、英文按词），超出 `h` 截断并写 warning 日志。
+- 文字按 `styles.label.width` 自动换行（中文逐字、英文按词），超出
+  `styles.label.height` 截断并写 warning 日志；连胜数字使用 `{streak}` 与
+  `styles.streak`。
+
+### v2 → v3 迁移
+
+`scripts/migrate_widget_template_v3.py` 是一次性迁移工具，不是运行时兼容层：
+
+```bash
+python3 scripts/migrate_widget_template_v3.py data/widgets/nijika/template.json
+```
+
+它把原 `layers` 中的 label 文字/坐标复制成每张底图的 `layout.texts[0]`，把
+number/flame 坐标复制成 `layout.streak` / `layout.flame`，并把字号/颜色/阴影等
+收进全局 `styles`。迁移后的样例是 `data/widgets/nijika/template.json`。
 
 ## 条件 `when`
 
@@ -128,20 +158,21 @@ fallback 不参与“按 priority 抢占”，因此低优先级 fallback 不会
 
 | 方法 | 路径 | Auth | 说明 |
 | --- | --- | --- | --- |
-| GET | `/templates` | 是 | 列表：`id,name,updated_at,background_count,layer_count`。坏 JSON 跳过并记录 warning |
+| GET | `/templates` | 是 | 列表：`id,name,updated_at,background_count,text_count`。坏 JSON 跳过并记录 warning |
 | POST | `/templates` | 是 | body `{name}`，从名称生成 slug，冲突加 `-2`，生成 `render_token`，并写入默认 fallback 底图 |
 | GET | `/templates/{id}` | 是 | 完整 JSON |
-| PUT | `/templates/{id}` | 是 | 校验 + 原子写；`render_token` 保持不变，返回完整 JSON。没有 publish |
+| PUT | `/templates/{id}` | 是 | 校验 v3 + 原子写；`render_token` 保持不变，返回完整 JSON。没有 publish |
 | DELETE | `/templates/{id}` | 是 | 删除整个 `data/widgets/<id>/` |
-| POST | `/templates/{id}/assets/background` | 是 | multipart `file` + `bg_id` + 可选 `name`；Pillow 校验后存 PNG，单文件上限 15MB，更新 JSON |
-| POST | `/templates/{id}/assets/flame` | 是 | multipart `file`；存成 `flame.png`，并新增/更新 flame 图层 |
+| POST | `/templates/{id}/assets/background` | 是 | multipart `file` + `bg_id`；只写 `backgrounds/<bg_id>.png`，返回 `{src}`，**不改 JSON** |
+| POST | `/templates/{id}/assets/flame` | 是 | multipart `file`；只写 `flame.png`，返回 `{src}`，**不改 JSON** |
 | GET | `/templates/{id}/assets/{filename}` | 否 | 模版本地图片，`Cache-Control: no-store` |
 | GET | `/templates/{id}/backgrounds/{bg_id}/thumb?w=240` | 否 | 缩略图，列表不加载 1536 大图 |
 | GET | `/library` | 否 | Ghost 资源库 `{id,label,url,src,group}`，`src` 形如 `ghost:assets/tiers/card/bronze.png` |
 | GET | `/v1/widgets/{id}.png` | token | 生产图，见下 |
 
-非法的 id、`../`、非图片、超大文件、未知 kind、缺 fallback、重复 bg id、非法
-`ghost:` 路径都返回 4xx。
+上传接口只负责落文件；编辑器把返回的 `src` 写进当前内存模版并标“未保存”，用户点
+“保存”或按 Ctrl/Cmd+S 后才 PUT `template.json`。非法 id、`../`、非图片、超大文件、
+未知 kind、缺 fallback、重复 bg id、非法 `ghost:` 路径都返回 4xx。
 
 ## 生产图
 
@@ -152,12 +183,16 @@ GET /v1/widgets/<id>.png
     &hour=10&weekday=1&completed=1&league=bronze&event=rush
     [&size=1x]
     [&bg=<bg_id>]
+    [&text=<text-id>]
 ```
 
 - 默认 `1536×914` RGBA，圆角 `128`，圆角外 alpha=0；`size=1x` 由 1536 LANCZOS
   缩到 `368×219`。
 - 每次都从 `data/widgets/<id>/` 重新读取 JSON 和图片，保存后下一次请求即生效。
-- 响应头：`X-Widget-Background: <bg_id>`、`Cache-Control: no-store`。
+- 选底图后，在该底图 `layout.texts` 中**随机选一条**文字；数字和火焰使用该底图的坐标。
+- `text=<text-id>` 只用于调试/预览时固定文字；不传则随机。id 不属于当前底图时 `404`。
+- 响应头：`X-Widget-Background: <bg_id>`、`X-Widget-Text: <text_id>`、
+  `Cache-Control: no-store`。
 - `hour`/`weekday` 缺省使用 `Asia/Shanghai` 当前时间；`streak/xp/rank` 缺省 0；
   `completed` 缺省 false；`league/event` 缺省空。
 - `bg=` 仅用于调试，强制某张底图，仍需要正确 token。
@@ -170,14 +205,27 @@ https://<ghost-host>/v1/widgets/nijika.png?token=<render_token>&streak=12&xp=345
 
 ## 编辑器行为
 
-- 主画布固定逻辑坐标 `1536×914`，CSS 等比缩放；用 Canvas 2D 绘制圆角、底图
-  （cover/contain + offset + scale）、火焰和文字。
-- `pointermove` 只改内存并 `requestAnimationFrame` 重画，不发请求；松手后 400ms 才 PUT。
-- 输入停止 400ms 后 PUT；切换模版前先 flush；`pagehide` 用
-  `fetch(..., {keepalive:true})` 兜底。
-- 同步状态显示“正在同步 / 已同步到 data/widgets/<id> / 同步失败”。
+- 主画布固定逻辑坐标 `1536×914`，CSS 等比缩放；用 Canvas 2D 绘制当前底图、当前选中
+  文字变体、连胜数字和火焰。
+- **显式保存**：拖动、pointerup、输入文字、改条件、改 x/y 都不发 PUT；只有顶部
+  “保存”按钮或 `Ctrl/Cmd+S` 才发送完整 snapshot。
+- 状态：干净 `已保存 · data/widgets/<id>`；有改动 `未保存`；保存中 `保存中…`；
+  失败 `保存失败：<原因>` 并保留 dirty 以便重试。保存按钮无改动时禁用，有改动时高亮。
+- `beforeunload` 在 dirty 时提示；切换模版/新建/复制/删除前 `confirm`，取消则不切换。
+- 右侧只编辑摆位与文字内容：
+  - 当前底图的文字变体列表（摘要 + x/y），可新增/删除/选中；新增复制当前文字与坐标，
+    至少保留一条；
+  - 文字内容 textarea，只改 `text`；
+  - 文字、连胜数字、火焰的 x/y；
+  - 全局样式只读展示，不提供字号/字重/颜色/阴影/行高/宽高输入。
+- 切换底图时文字变体列表和 x/y 跟着切换，不复用上一张底图的坐标。
+- 画布拖动只改 x/y，不做缩放/旋转/宽高调整；方向键 1px，`Shift+方向键` 10px，
+  拖动时按住 `Shift` 吸附 8px 网格；元素至少保留 40px 在画布内。
+- 自动/手动底图预览选择规则与 task123 一致；切换预览上下文只改变当前选中的底图，
+  不改变已保存坐标。
+- “生产预览”固定当前底图与文字变体；`随机预览` 清掉 `text=` 参数重新请求生产图，
+  并在弹窗显示响应头里的 `X-Widget-Text`。主画布始终显示当前选中的文字变体，不随机跳。
 - 底图列表只加载 `thumb`；当前底图按需加载并缓存。
-- “生产预览”先保存，再打开 `/v1/widgets/...`，单独显示，不替代主画布。
 - 只使用两个 localStorage key：`gl.token.v1` 与上次打开的模版 id；模版内容只落文件。
 
 ## 测试
@@ -192,13 +240,16 @@ python3 -m compileall -q ghost_league scripts
 /opt/ui-venv/bin/python tests/e2e_widget_studio.py
 ```
 
-E2E 会启动临时端口上的临时 Ghost 实例（仅测试进程，不新增 systemd），验证上传、条件、
-即时拖动、JSON 持久化、刷新恢复、生产图和 1440×900 / 390×844 截图。截图在
-`artifacts/widget-studio-*.png`（本地产物，不进 Git）。
+E2E 会启动临时端口上的临时 Ghost 实例（仅测试进程，不新增 systemd），验证上传后
+JSON 不变、拖动/输入等待 >1.5s 仍 0 PUT、Ctrl+S/保存按钮才 PUT、脏状态切换/刷新确认、
+同一底图多个文字变体、`text=` 固定预览、随机预览响应头、底图 B 独立坐标、刷新恢复和
+1440×900 / 390×844 截图。截图在 `artifacts/widget-studio-*.png`（本地产物，不进 Git）。
 
 ## 边界
 
 - 不新增服务、端口、venv、ORM、SQLite 或图片 base64 JSON。
 - 不复制 Ghost 的 tiers/frames；只读引用 `ghost:assets/...`。
-- 不做账号/权限系统、版本历史、备份、动画、滤镜、任意形状、自由绘画或图层混合。
+- 不做样式编辑；样式全局统一，只调位置。
+- 不做自动保存；只有 Ctrl/Cmd+S 或“保存”按钮写 JSON。
+- 不做缩放/旋转/宽高调整、版本历史、备份、动画、滤镜、任意形状、自由绘画或图层混合。
 - 目录文件是权威；没有 publish/版本表。

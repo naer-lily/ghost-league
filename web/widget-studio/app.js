@@ -6,8 +6,9 @@
   const API = "/v1/widget-studio";
   const CANVAS_W = 1536;
   const CANVAS_H = 914;
-  const THEME = "#f6b545";
+  const MIN_VISIBLE = 40;
   const WEEKDAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  const KIND_LABELS = { text: "文字", streak: "连胜数字", flame: "火焰" };
 
   const $ = (id) => document.getElementById(id);
 
@@ -24,8 +25,9 @@
     token: "",
     templates: [],
     template: null,
-    selectedLayerId: null,
     selectedBgId: null,
+    selectedTextId: null,
+    selection: { kind: "text" },
     manualBgId: null,
     autoSelect: true,
     preview: {
@@ -43,11 +45,13 @@
     dirty: false,
     revision: 0,
     saving: null,
-    saveTimer: null,
+    saveError: "",
     drag: null,
     raf: 0,
     imageCache: new Map(),
+    persistedBgIds: new Set(),
     toastTimer: null,
+    previewObjectUrl: null,
   };
 
   // -- small helpers -------------------------------------------------
@@ -115,11 +119,50 @@
     element.className = `sync-status${kind ? ` is-${kind}` : ""}`;
   }
 
-  function clearPendingSave() {
-    if (state.saveTimer) {
-      clearTimeout(state.saveTimer);
-      state.saveTimer = null;
+  function clone(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function defaultLayout() {
+    return {
+      texts: [{ id: "text-1", text: "连续学习", x: 760, y: 540 }],
+      streak: { x: 760, y: 300 },
+      flame: { x: 660, y: 280 },
+    };
+  }
+
+  // -- explicit save state -------------------------------------------
+  function setSaveState() {
+    const button = $("save-template-btn");
+    const canSave = Boolean(state.template && state.dirty && !state.saving);
+    button.disabled = !canSave;
+    button.classList.toggle("is-dirty", canSave);
+    if (!state.template) {
+      setStatus("未加载");
+      return;
     }
+    if (state.saving) {
+      setStatus("保存中…", "saving");
+    } else if (state.saveError) {
+      setStatus(`保存失败：${state.saveError}`, "error");
+    } else if (state.dirty) {
+      setStatus("未保存", "dirty");
+    } else {
+      setStatus(`已保存 · data/widgets/${state.template.id}`, "saved");
+    }
+  }
+
+  function markDirty() {
+    if (!state.template) return;
+    state.dirty = true;
+    state.saveError = "";
+    state.revision += 1;
+    setSaveState();
+  }
+
+  function confirmDiscard() {
+    if (!state.dirty) return true;
+    return window.confirm("有未保存的改动，继续会丢弃这些改动。确定继续？");
   }
 
   // -- HTTP ----------------------------------------------------------
@@ -138,7 +181,6 @@
       headers,
       body,
       cache: "no-store",
-      keepalive: Boolean(options.keepalive),
     });
     const text = await response.text();
     let payload = null;
@@ -172,6 +214,53 @@
     setStatus("需要 Ghost 令牌");
   }
 
+  // -- explicit save -------------------------------------------------
+  async function saveNow() {
+    if (!state.template || state.saving || !state.dirty) return;
+    const snapshot = clone(state.template);
+    const revision = state.revision;
+    state.saveError = "";
+    state.saving = (async () => {
+      try {
+        const saved = await api(`/templates/${encodeURIComponent(snapshot.id)}`, {
+          method: "PUT",
+          body: snapshot,
+        });
+        if (state.template && state.template.id === snapshot.id) {
+          state.template.updated_at = saved.updated_at;
+        }
+        if (state.template && state.template.id === snapshot.id) {
+          state.persistedBgIds = new Set(snapshot.backgrounds.map((bg) => bg.id));
+          renderBackgroundList();
+        }
+        if (state.revision === revision) {
+          state.dirty = false;
+        }
+        const summary = state.templates.find((item) => item.id === snapshot.id);
+        if (summary) {
+          summary.name = snapshot.name;
+          summary.updated_at = saved.updated_at;
+          summary.background_count = snapshot.backgrounds.length;
+          summary.text_count = snapshot.backgrounds.reduce(
+            (total, bg) => total + (bg.layout?.texts?.length || 0),
+            0
+          );
+          renderTemplateSelect();
+        }
+        if (state.revision === revision) toast("已保存", "ok");
+      } catch (error) {
+        state.saveError = error.message;
+        state.dirty = true;
+        if (error.status !== 401) toast(`保存失败：${error.message}`, "error");
+      } finally {
+        state.saving = null;
+        setSaveState();
+      }
+    })();
+    setSaveState();
+    await state.saving;
+  }
+
   // -- boot ----------------------------------------------------------
   async function boot() {
     $("auth-gate").hidden = true;
@@ -183,10 +272,11 @@
       renderTemplateSelect();
       if (!state.templates.length) {
         state.template = null;
-        state.selectedLayerId = null;
         state.selectedBgId = null;
+        state.selectedTextId = null;
+        state.dirty = false;
         renderAll();
-        setStatus("等待新建模版");
+        setSaveState();
         openTemplateModal();
         return;
       }
@@ -221,24 +311,43 @@
     }
   }
 
+  function selectBackgroundInternal(id) {
+    const template = state.template;
+    if (!template) return;
+    const background = template.backgrounds.find((bg) => bg.id === id) || template.backgrounds[0];
+    state.selectedBgId = background ? background.id : null;
+    state.selectedTextId = background?.layout?.texts?.[0]?.id || null;
+    state.selection = { kind: "text" };
+    renderBackgroundList();
+    renderBackgroundInspector();
+    renderLayoutPanel();
+    renderManualBgSelect();
+    updateMatchBadge();
+    requestDraw();
+  }
+
   async function openTemplate(id) {
-    await flushSave();
     const template = await api(`/templates/${encodeURIComponent(id)}`);
     state.template = template;
     state.imageCache.clear();
-    state.selectedLayerId = template.layers[0]?.id || null;
-    const fallback = template.backgrounds.find((bg) => !Object.keys(bg.when || {}).length);
-    state.selectedBgId = (fallback || template.backgrounds[0])?.id || null;
-    state.manualBgId = state.selectedBgId;
-    if (!state.autoSelect && !template.backgrounds.some((bg) => bg.id === state.manualBgId)) {
-      state.manualBgId = state.selectedBgId;
-    }
+    state.persistedBgIds = new Set(template.backgrounds.map((bg) => bg.id));
     state.dirty = false;
-    state.revision += 1;
+    state.saving = null;
+    state.saveError = "";
+    state.revision = 0;
     state.drag = null;
+    const fallback = template.backgrounds.find((bg) => !Object.keys(bg.when || {}).length);
+    state.manualBgId = (fallback || template.backgrounds[0])?.id || null;
+    let targetBg = state.manualBgId;
+    if (state.autoSelect) {
+      const selected = selectBackgroundForPreview();
+      if (selected?.bg) targetBg = selected.bg.id;
+    }
     storeLastTemplate(template.id);
-    renderAll();
-    setStatus(`已同步到 data/widgets/${template.id}`, "saved");
+    selectBackgroundInternal(targetBg);
+    renderTemplateSelect();
+    updateProductionDisplay();
+    setSaveState();
   }
 
   // -- template list ------------------------------------------------
@@ -269,228 +378,274 @@
     if (state.template) select.value = state.template.id;
   }
 
-  // -- layers --------------------------------------------------------
-  function selectedLayer() {
-    if (!state.template) return null;
-    return state.template.layers.find((layer) => layer.id === state.selectedLayerId) || null;
-  }
-
-  function renderLayerList() {
-    const list = $("layer-list");
-    list.innerHTML = "";
-    if (!state.template) return;
-    for (const layer of state.template.layers) {
-      const item = document.createElement("li");
-      item.className = `layer-item${layer.id === state.selectedLayerId ? " is-selected" : ""}`;
-      item.dataset.layerId = layer.id;
-      const preview =
-        layer.type === "text"
-          ? String(layer.text || "").replace(/\s+/g, " ").slice(0, 24) || "（空文字）"
-          : layer.src;
-      item.innerHTML = `
-        <span class="layer-icon" aria-hidden="true">${layer.type === "text" ? "文" : "图"}</span>
-        <span class="layer-main">
-          <strong>${esc(layer.role || layer.type)}</strong>
-          <small>${esc(preview)}</small>
-        </span>`;
-      item.addEventListener("click", () => selectLayer(layer.id));
-      list.append(item);
-    }
-  }
-
-  function selectLayer(id) {
-    state.selectedLayerId = id;
-    renderLayerList();
-    renderLayerInspector();
-    requestDraw();
-  }
-
-  function renderLayerInspector() {
-    const layer = selectedLayer();
-    const kind = $("layer-kind");
-    const inspector = $("layer-inspector");
-    if (!layer) {
-      kind.textContent = "未选择";
-      inspector.innerHTML = '<p class="empty">在画布或左侧图层列表选择一个图层。</p>';
-      return;
-    }
-    kind.textContent = layer.type === "text" ? "文字" : "图片";
-    if (layer.type === "text") {
-      const shadow = layer.shadow;
-      inspector.innerHTML = `
-        <label class="field"><span>文字内容</span>
-          <textarea id="layer-text" maxlength="500">${esc(layer.text)}</textarea>
-        </label>
-        <div class="field-grid">
-          <label class="field"><span>X</span><input id="layer-x" type="number" step="1" value="${esc(layer.x)}"></label>
-          <label class="field"><span>Y</span><input id="layer-y" type="number" step="1" value="${esc(layer.y)}"></label>
-          <label class="field"><span>宽 W</span><input id="layer-w" type="number" step="1" min="1" value="${esc(layer.w)}"></label>
-          <label class="field"><span>高 H</span><input id="layer-h" type="number" step="1" min="1" value="${esc(layer.h)}"></label>
-        </div>
-        <div class="field-grid">
-          <label class="field"><span>字号</span><input id="layer-font-size" type="number" step="1" min="1" value="${esc(layer.fontSize)}"></label>
-          <label class="field"><span>字重</span><input id="layer-font-weight" type="number" step="100" min="100" max="900" value="${esc(layer.fontWeight)}"></label>
-        </div>
-        <div class="field-grid">
-          <label class="field"><span>颜色</span><input id="layer-color" type="text" value="${esc(layer.color)}"></label>
-          <label class="field"><span>对齐</span>
-            <select id="layer-align">
-              <option value="left"${layer.align === "left" ? " selected" : ""}>左对齐</option>
-              <option value="center"${layer.align === "center" ? " selected" : ""}>居中</option>
-              <option value="right"${layer.align === "right" ? " selected" : ""}>右对齐</option>
-            </select>
-          </label>
-        </div>
-        <div class="field-grid">
-          <label class="field"><span>行高</span><input id="layer-line-height" type="number" step="0.05" min="0.1" value="${esc(layer.lineHeight)}"></label>
-          <label class="field"><span>占位符</span><input type="text" value="{streak} {xp} {rank} {name}" readonly></label>
-        </div>
-        <div class="divider"></div>
-        <label class="check-row"><input id="layer-shadow-enabled" type="checkbox"${shadow ? " checked" : ""}> 启用阴影</label>
-        <div id="layer-shadow-fields" class="inspector"${shadow ? "" : " hidden"}>
-          <div class="field-grid">
-            <label class="field"><span>阴影颜色</span><input id="layer-shadow-color" type="text" value="${esc(shadow ? shadow.color : "rgba(0,0,0,0.35)")}"></label>
-            <label class="field"><span>模糊</span><input id="layer-shadow-blur" type="number" step="1" min="0" value="${esc(shadow ? shadow.blur : 0)}"></label>
-            <label class="field"><span>X 偏移</span><input id="layer-shadow-x" type="number" step="1" value="${esc(shadow ? shadow.offsetX : 0)}"></label>
-            <label class="field"><span>Y 偏移</span><input id="layer-shadow-y" type="number" step="1" value="${esc(shadow ? shadow.offsetY : 0)}"></label>
-          </div>
-        </div>`;
-      bindLayerTextInputs(layer);
-      return;
-    }
-    inspector.innerHTML = `
-      <div class="field"><span>来源</span><input type="text" value="${esc(layer.src)}" readonly></div>
-      <div class="field-grid">
-        <label class="field"><span>X</span><input id="layer-x" type="number" step="1" value="${esc(layer.x)}"></label>
-        <label class="field"><span>Y</span><input id="layer-y" type="number" step="1" value="${esc(layer.y)}"></label>
-        <label class="field"><span>宽 W</span><input id="layer-w" type="number" step="1" min="1" value="${esc(layer.w)}"></label>
-        <label class="field"><span>高 H</span><input id="layer-h" type="number" step="1" min="1" value="${esc(layer.h)}"></label>
-      </div>
-      <label class="field"><span>透明度 ${esc(layer.opacity)}</span><input id="layer-opacity" type="number" step="0.05" min="0" max="1" value="${esc(layer.opacity)}"></label>`;
-    bindLayerGeometry(layer);
-    $("layer-opacity").addEventListener("input", (event) => {
-      layer.opacity = Math.max(0, Math.min(1, num(event.target.value, 1)));
-      requestDraw();
-      scheduleSave();
-    });
-  }
-
-  function bindLayerGeometry(layer) {
-    for (const [key, id, minimum] of [
-      ["x", "layer-x", null],
-      ["y", "layer-y", null],
-      ["w", "layer-w", 1],
-      ["h", "layer-h", 1],
-    ]) {
-      $(id)?.addEventListener("input", (event) => {
-        let value = round(event.target.value);
-        if (minimum != null) value = Math.max(minimum, value);
-        layer[key] = value;
-        requestDraw();
-        scheduleSave();
-      });
-    }
-  }
-
-  function bindLayerTextInputs(layer) {
-    bindLayerGeometry(layer);
-    $("layer-text").addEventListener("input", (event) => {
-      layer.text = event.target.value;
-      renderLayerList();
-      requestDraw();
-      scheduleSave();
-    });
-    for (const [key, id, minimum] of [
-      ["fontSize", "layer-font-size", 1],
-      ["fontWeight", "layer-font-weight", 100],
-      ["lineHeight", "layer-line-height", 0.1],
-    ]) {
-      $(id).addEventListener("input", (event) => {
-        layer[key] = Math.max(minimum, round(event.target.value));
-        requestDraw();
-        scheduleSave();
-      });
-    }
-    $("layer-color").addEventListener("input", (event) => {
-      layer.color = event.target.value;
-      requestDraw();
-      scheduleSave();
-    });
-    $("layer-align").addEventListener("change", (event) => {
-      layer.align = event.target.value;
-      requestDraw();
-      scheduleSave();
-    });
-    $("layer-shadow-enabled").addEventListener("change", (event) => {
-      layer.shadow = event.target.checked
-        ? { color: "rgba(0,0,0,0.35)", blur: 0, offsetX: 0, offsetY: 0 }
-        : null;
-      renderLayerInspector();
-      requestDraw();
-      scheduleSave();
-    });
-    const shadowBindings = [
-      ["color", "layer-shadow-color", "text"],
-      ["blur", "layer-shadow-blur", "number"],
-      ["offsetX", "layer-shadow-x", "number"],
-      ["offsetY", "layer-shadow-y", "number"],
-    ];
-    for (const [key, id, type] of shadowBindings) {
-      $(id)?.addEventListener("input", (event) => {
-        if (!layer.shadow) return;
-        layer.shadow[key] = type === "number" ? round(event.target.value) : event.target.value;
-        requestDraw();
-        scheduleSave();
-      });
-    }
-  }
-
-  function syncLayerGeometryInputs() {
-    const layer = selectedLayer();
-    if (!layer) return;
-    for (const [key, id] of [
-      ["x", "layer-x"],
-      ["y", "layer-y"],
-      ["w", "layer-w"],
-      ["h", "layer-h"],
-    ]) {
-      const input = $(id);
-      if (input && document.activeElement !== input) input.value = round(layer[key]);
-    }
-  }
-
-  function addTextLayer() {
-    if (!state.template) return;
-    const id = uniqueId("text", state.template.layers.map((layer) => layer.id));
-    state.template.layers.push({
-      id,
-      type: "text",
-      role: "text",
-      text: "新文字",
-      x: 200,
-      y: 200,
-      w: 480,
-      h: 100,
-      fontSize: 48,
-      fontWeight: 400,
-      color: "#17324d",
-      align: "left",
-      lineHeight: 1.2,
-      shadow: null,
-    });
-    state.selectedLayerId = id;
-    renderLayerList();
-    renderLayerInspector();
-    requestDraw();
-    scheduleSave();
-  }
-
-  // -- backgrounds ---------------------------------------------------
+  // -- layout helpers ------------------------------------------------
   function selectedBg() {
     if (!state.template) return null;
     return state.template.backgrounds.find((bg) => bg.id === state.selectedBgId) || null;
   }
 
+  function layoutOf(background) {
+    return background?.layout || null;
+  }
+
+  function selectedText() {
+    const background = selectedBg();
+    if (!background) return null;
+    return background.layout.texts.find((item) => item.id === state.selectedTextId) || null;
+  }
+
+  function styleFor(kind) {
+    const styles = state.template?.styles;
+    if (!styles) return null;
+    if (kind === "text") return styles.label;
+    if (kind === "streak") return styles.streak;
+    return styles.flame;
+  }
+
+  function positionFor(kind) {
+    const background = selectedBg();
+    if (!background) return null;
+    if (kind === "text") return selectedText();
+    return layoutOf(background)?.[kind] || null;
+  }
+
+  function positionBox(kind) {
+    const style = styleFor(kind);
+    const position = positionFor(kind);
+    if (!style || !position) return null;
+    return {
+      x: num(position.x),
+      y: num(position.y),
+      width: Math.max(1, num(style.width, 1)),
+      height: Math.max(1, num(style.height, 1)),
+    };
+  }
+
+  function canvasSize() {
+    return {
+      width: num(state.template?.canvas?.width, CANVAS_W),
+      height: num(state.template?.canvas?.height, CANVAS_H),
+    };
+  }
+
+  function clampPosition(kind, x, y) {
+    const box = positionBox(kind);
+    const canvas = canvasSize();
+    const width = box?.width || 1;
+    const height = box?.height || 1;
+    return {
+      x: Math.round(Math.max(MIN_VISIBLE - width, Math.min(canvas.width - MIN_VISIBLE, x))),
+      y: Math.round(Math.max(MIN_VISIBLE - height, Math.min(canvas.height - MIN_VISIBLE, y))),
+    };
+  }
+
+  function setPosition(kind, x, y) {
+    const target = positionFor(kind);
+    if (!target) return;
+    const clamped = clampPosition(kind, x, y);
+    target.x = clamped.x;
+    target.y = clamped.y;
+  }
+
+  // -- text variants -------------------------------------------------
+  function textSummary(value) {
+    const cleaned = String(value || "").replace(/\s+/g, " ").trim();
+    return cleaned ? cleaned.slice(0, 22) : "（空文字）";
+  }
+
+  function renderLayoutPanel() {
+    const inspector = $("layout-inspector");
+    const kind = $("layout-kind");
+    const background = selectedBg();
+    if (!background) {
+      kind.textContent = "未选择";
+      inspector.innerHTML = '<p class="empty">在左侧选择一张底图后编辑文字变体与摆位。</p>';
+      return;
+    }
+    const texts = layoutOf(background).texts;
+    if (!texts.some((item) => item.id === state.selectedTextId)) {
+      state.selectedTextId = texts[0]?.id || null;
+    }
+    const text = selectedText();
+    const streak = background.layout.streak;
+    const flame = background.layout.flame;
+    kind.textContent = `${KIND_LABELS[state.selection.kind] || "文字"} · ${background.id}`;
+    const style = state.template.styles.label;
+    const items = texts
+      .map(
+        (item) => `
+        <li class="text-item${item.id === state.selectedTextId ? " is-selected" : ""}" data-text-id="${esc(item.id)}">
+          <button type="button" class="text-select" data-act="select">
+            <strong>${esc(textSummary(item.text))}</strong>
+            <small>x ${esc(round(item.x))} · y ${esc(round(item.y))}</small>
+          </button>
+          ${texts.length > 1 ? '<button type="button" class="text-delete" data-act="delete" title="删除文字变体" aria-label="删除文字变体">×</button>' : ""}
+        </li>`
+      )
+      .join("");
+    inspector.innerHTML = `
+      <div class="section-row">
+        <h3>文字变体</h3>
+        <button id="add-text-variant" class="btn btn-small" type="button">新增</button>
+      </div>
+      <ul id="text-variant-list" class="text-list" aria-label="文字变体列表">${items}</ul>
+      ${text ? `
+      <label class="field"><span>文字内容（只改文字，不改样式）</span>
+        <textarea id="text-content" maxlength="500">${esc(text.text)}</textarea>
+      </label>
+      <div class="field-grid">
+        <label class="field"><span>文字 X</span><input id="text-x" type="number" step="1" value="${esc(round(text.x))}"></label>
+        <label class="field"><span>文字 Y</span><input id="text-y" type="number" step="1" value="${esc(round(text.y))}"></label>
+      </div>` : '<p class="empty">该底图还没有文字变体。</p>'}
+      <div class="divider"></div>
+      <h3>连胜数字位置</h3>
+      <div class="field-grid">
+        <label class="field"><span>数字 X</span><input id="streak-x" type="number" step="1" value="${esc(round(streak.x))}"></label>
+        <label class="field"><span>数字 Y</span><input id="streak-y" type="number" step="1" value="${esc(round(streak.y))}"></label>
+      </div>
+      <h3>火焰位置</h3>
+      <div class="field-grid">
+        <label class="field"><span>火焰 X</span><input id="flame-x" type="number" step="1" value="${esc(round(flame.x))}"></label>
+        <label class="field"><span>火焰 Y</span><input id="flame-y" type="number" step="1" value="${esc(round(flame.y))}"></label>
+      </div>
+      <p class="style-readonly">
+        样式全局统一（只读）：字号 ${esc(style.fontSize)} · 字重 ${esc(style.fontWeight)} ·
+        颜色 ${esc(style.color)} · 行高 ${esc(style.lineHeight)} · 对齐 ${esc(style.align)} ·
+        文字盒 ${esc(style.width)}×${esc(style.height)}
+      </p>
+      <p class="hint">拖动或方向键只改 x/y：1px，Shift+方向键 10px；拖动时按住 Shift 吸附 8px 网格。</p>`;
+    bindLayoutPanel();
+  }
+
+  function bindLayoutPanel() {
+    $("add-text-variant")?.addEventListener("click", addTextVariant);
+    $("text-variant-list")?.addEventListener("click", (event) => {
+      const item = event.target.closest(".text-item");
+      if (!item) return;
+      const action = event.target.closest("[data-act]");
+      const textId = item.dataset.textId;
+      if (action?.dataset.act === "delete") {
+        deleteTextVariant(textId);
+      } else {
+        selectTextVariant(textId);
+      }
+    });
+    $("text-content")?.addEventListener("input", (event) => {
+      const text = selectedText();
+      if (!text) return;
+      text.text = event.target.value;
+      const item = document.querySelector(`.text-item[data-text-id="${CSS.escape(text.id)}"] strong`);
+      if (item) item.textContent = textSummary(text.text);
+      markDirty();
+      requestDraw();
+    });
+    for (const [kind, id] of [["text", "text-x"], ["text", "text-y"]]) {
+      $(id)?.addEventListener("input", (event) => {
+        const text = selectedText();
+        if (!text) return;
+        const key = id.endsWith("x") ? "x" : "y";
+        const next = setPosition("text", key === "x" ? num(event.target.value) : text.x, key === "y" ? num(event.target.value) : text.y);
+        text[key] = next[key];
+        markDirty();
+        requestDraw();
+      });
+    }
+    bindPositionInput("streak", "streak-x", "streak-y");
+    bindPositionInput("flame", "flame-x", "flame-y");
+  }
+
+  function bindPositionInput(kind, xId, yId) {
+    for (const id of [xId, yId]) {
+      $(id)?.addEventListener("input", (event) => {
+        const target = positionFor(kind);
+        if (!target) return;
+        const next = setPosition(
+          kind,
+          id === xId ? num(event.target.value) : target.x,
+          id === yId ? num(event.target.value) : target.y
+        );
+        target.x = next.x;
+        target.y = next.y;
+        markDirty();
+        requestDraw();
+      });
+    }
+  }
+
+  function selectTextVariant(id) {
+    if (!selectedBg()) return;
+    state.selectedTextId = id;
+    state.selection = { kind: "text" };
+    renderLayoutPanel();
+    requestDraw();
+  }
+
+  function addTextVariant() {
+    const background = selectedBg();
+    if (!background) return;
+    const texts = background.layout.texts;
+    const current = selectedText() || texts[0];
+    const ids = new Set(texts.map((item) => item.id));
+    let suffix = texts.length + 1;
+    let id = `text-${suffix}`;
+    while (ids.has(id)) {
+      suffix += 1;
+      id = `text-${suffix}`;
+    }
+    texts.push({
+      id,
+      text: current?.text || "新文字",
+      x: round(current?.x ?? 760),
+      y: round(current?.y ?? 540),
+    });
+    state.selectedTextId = id;
+    state.selection = { kind: "text" };
+    markDirty();
+    renderLayoutPanel();
+    requestDraw();
+    toast("已新增文字变体（未保存）", "ok");
+  }
+
+  function deleteTextVariant(id) {
+    const background = selectedBg();
+    if (!background) return;
+    const texts = background.layout.texts;
+    if (texts.length <= 1) {
+      toast("每张底图至少保留一条文字变体。", "error");
+      return;
+    }
+    const index = texts.findIndex((item) => item.id === id);
+    if (index < 0) return;
+    texts.splice(index, 1);
+    state.selectedTextId = (texts[Math.max(0, index - 1)] || texts[0]).id;
+    state.selection = { kind: "text" };
+    markDirty();
+    renderLayoutPanel();
+    requestDraw();
+  }
+
+  function syncLayoutInputs() {
+    const text = selectedText();
+    if (text) {
+      const x = $("text-x");
+      const y = $("text-y");
+      if (x && document.activeElement !== x) x.value = round(text.x);
+      if (y && document.activeElement !== y) y.value = round(text.y);
+    }
+    for (const [kind, xId, yId] of [
+      ["streak", "streak-x", "streak-y"],
+      ["flame", "flame-x", "flame-y"],
+    ]) {
+      const target = positionFor(kind);
+      if (!target) continue;
+      const x = $(xId);
+      const y = $(yId);
+      if (x && document.activeElement !== x) x.value = round(target.x);
+      if (y && document.activeElement !== y) y.value = round(target.y);
+    }
+  }
+
+  // -- backgrounds ---------------------------------------------------
   function conditionBits(when) {
     const bits = [];
     const value = when || {};
@@ -532,14 +687,16 @@
       item.dataset.bgId = bg.id;
       const thumb = `${API}/templates/${encodeURIComponent(state.template.id)}/backgrounds/${encodeURIComponent(bg.id)}/thumb?w=240`;
       const ghost = String(bg.src).startsWith("ghost:");
+      const thumbSrc = state.persistedBgIds.has(bg.id) ? thumb : assetUrl(bg.src);
       item.innerHTML = `
         <div class="bg-card-head" data-role="select-bg">
-          <img class="bg-thumb" src="${esc(thumb)}" alt="${esc(bg.name)} 底图缩略图" loading="lazy">
+          <img class="bg-thumb" src="${esc(thumbSrc)}" alt="${esc(bg.name)} 底图缩略图" loading="lazy">
           <div class="bg-meta">
             <strong>${esc(bg.name)}</strong>
             <span class="bg-summary">${esc(conditionSummary(bg.when))}</span>
             <span class="bg-tags">
               <span class="tag is-priority">P${esc(bg.priority)}</span>
+              <span class="tag">文字 ${esc(bg.layout?.texts?.length || 0)}</span>
               ${ghost ? '<span class="tag is-ghost">Ghost 资源</span>' : '<span class="tag">本地</span>'}
               ${Object.keys(bg.when || {}).length ? "" : '<span class="tag">fallback</span>'}
             </span>
@@ -556,19 +713,24 @@
   }
 
   function selectBackground(id) {
-    state.selectedBgId = id;
-    renderBackgroundList();
-    renderBackgroundInspector();
-    requestDraw();
+    if (!state.autoSelect) state.manualBgId = id;
+    if (id === state.selectedBgId) {
+      renderManualBgSelect();
+      updateMatchBadge();
+      requestDraw();
+      return;
+    }
+    selectBackgroundInternal(id);
   }
 
   function bgChanged() {
+    if (!state.template) return;
+    markDirty();
     renderBackgroundList();
     renderManualBgSelect();
     refreshConditionSummary();
     updateMatchBadge();
     requestDraw();
-    scheduleSave();
   }
 
   function refreshConditionSummary() {
@@ -677,12 +839,12 @@
     $("bg-name").addEventListener("input", (event) => {
       bg.name = event.target.value || bg.id;
       renderBackgroundList();
-      scheduleSave();
+      markDirty();
     });
     $("bg-priority").addEventListener("input", (event) => {
       bg.priority = Math.round(num(event.target.value, 0));
       renderBackgroundList();
-      scheduleSave();
+      markDirty();
     });
     $("cond-hour-preset").addEventListener("change", (event) => {
       const value = event.target.value;
@@ -770,7 +932,7 @@
     $("bg-fit").addEventListener("change", (event) => {
       bg.fit = event.target.value;
       requestDraw();
-      scheduleSave();
+      markDirty();
     });
     for (const [id, key, minimum] of [
       ["bg-scale", "scale", 0.05],
@@ -782,7 +944,7 @@
         if (minimum != null) value = Math.max(minimum, value);
         bg[key] = value;
         requestDraw();
-        scheduleSave();
+        markDirty();
       });
     }
   }
@@ -811,17 +973,13 @@
     if (!source) return;
     const base = `${source.id}-copy`;
     const newId = uniqueId(base, template.backgrounds.map((bg) => bg.id));
-    const copy = JSON.parse(JSON.stringify(source));
+    const copy = clone(source);
     copy.id = newId;
     copy.name = `${source.name} 副本`;
     const index = template.backgrounds.indexOf(source);
     template.backgrounds.splice(index + 1, 0, copy);
-    state.selectedBgId = newId;
-    renderBackgroundList();
-    renderBackgroundInspector();
-    renderManualBgSelect();
-    requestDraw();
-    scheduleSave();
+    markDirty();
+    selectBackgroundInternal(newId);
   }
 
   function deleteBackground(id) {
@@ -840,13 +998,10 @@
     }
     const index = template.backgrounds.indexOf(target);
     template.backgrounds.splice(index, 1);
-    state.selectedBgId = (template.backgrounds[Math.max(0, index - 1)] || template.backgrounds[0]).id;
-    if (state.manualBgId === id) state.manualBgId = state.selectedBgId;
-    renderBackgroundList();
-    renderBackgroundInspector();
-    renderManualBgSelect();
-    requestDraw();
-    scheduleSave();
+    const next = (template.backgrounds[Math.max(0, index - 1)] || template.backgrounds[0]).id;
+    if (state.manualBgId === id) state.manualBgId = next;
+    markDirty();
+    selectBackgroundInternal(next);
   }
 
   function moveBackground(id, direction) {
@@ -857,11 +1012,11 @@
     if (index < 0 || target < 0 || target >= template.backgrounds.length) return;
     const [item] = template.backgrounds.splice(index, 1);
     template.backgrounds.splice(target, 0, item);
+    markDirty();
     renderBackgroundList();
     renderBackgroundInspector();
     renderManualBgSelect();
     requestDraw();
-    scheduleSave();
   }
 
   function bindBackgroundActions() {
@@ -884,7 +1039,7 @@
     });
   }
 
-  // -- selection -----------------------------------------------------
+  // -- preview selection --------------------------------------------
   function matchBackground(bg, context) {
     const when = bg.when || {};
     if (!Object.keys(when).length) return true;
@@ -926,15 +1081,26 @@
     return { bg: fallback || template.backgrounds[0], fallback: true, manual: false };
   }
 
+  function syncSelectionFromPreview() {
+    if (!state.template || !state.autoSelect) return;
+    const selected = selectBackgroundForPreview();
+    if (selected?.bg && selected.bg.id !== state.selectedBgId) {
+      selectBackgroundInternal(selected.bg.id);
+    }
+  }
+
   function updateMatchBadge() {
     const badge = $("bg-match-badge");
     const selected = selectBackgroundForPreview();
+    const current = selectedBg();
     if (!selected || !selected.bg) {
       badge.textContent = "没有可用底图";
       return;
     }
     if (!state.autoSelect) {
       badge.textContent = `手动 · ${selected.bg.id}`;
+    } else if (current && current.id !== selected.bg.id) {
+      badge.textContent = `编辑中 · ${current.id} · 自动命中 ${selected.bg.id}`;
     } else if (selected.fallback) {
       badge.textContent = `自动 · 未命中，fallback · ${selected.bg.id}`;
     } else {
@@ -1045,67 +1211,83 @@
     return lines;
   }
 
-  function drawTextLayer(ctx, layer) {
-    const width = Math.max(1, layer.w);
-    const height = Math.max(1, layer.h);
-    const size = Math.max(1, layer.fontSize);
-    const weight = layer.fontWeight || 400;
+  function drawTextBox(ctx, style, text, x, y) {
+    const width = Math.max(1, num(style.width, 1));
+    const height = Math.max(1, num(style.height, 1));
+    const size = Math.max(1, num(style.fontSize, 48));
+    const weight = style.fontWeight || 400;
     const font = `${weight} ${size}px "Noto Sans SC", "Noto Sans CJK SC", system-ui, sans-serif`;
     ctx.save();
     ctx.font = font;
     ctx.textBaseline = "top";
     ctx.textAlign = "left";
-    const text = replacePlaceholders(layer.text);
-    const lines = wrapCanvasText(ctx, text, width);
-    const lineHeight = size * (layer.lineHeight || 1.2);
+    const lines = wrapCanvasText(ctx, replacePlaceholders(text), width);
+    const lineHeight = size * (style.lineHeight || 1.2);
     const maxLines = Math.max(0, Math.floor(height / lineHeight));
     const visible = lines.slice(0, maxLines);
     ctx.beginPath();
-    ctx.rect(layer.x, layer.y, width, height);
+    ctx.rect(x, y, width, height);
     ctx.clip();
-    if (layer.shadow) {
-      ctx.shadowColor = layer.shadow.color || "rgba(0,0,0,0.35)";
-      ctx.shadowBlur = Math.max(0, layer.shadow.blur || 0);
-      ctx.shadowOffsetX = layer.shadow.offsetX || 0;
-      ctx.shadowOffsetY = layer.shadow.offsetY || 0;
+    if (style.shadow) {
+      ctx.shadowColor = style.shadow.color || "rgba(0,0,0,0.35)";
+      ctx.shadowBlur = Math.max(0, style.shadow.blur || 0);
+      ctx.shadowOffsetX = style.shadow.offsetX || 0;
+      ctx.shadowOffsetY = style.shadow.offsetY || 0;
     }
-    ctx.fillStyle = layer.color || "#17324d";
+    ctx.fillStyle = style.color || "#17324d";
     visible.forEach((line, index) => {
       if (!line.text) return;
-      let left = layer.x;
-      if (layer.align === "center") left += (width - line.width) / 2;
-      else if (layer.align === "right") left += width - line.width;
-      ctx.fillText(line.text, left, layer.y + index * lineHeight);
+      let left = x;
+      if (style.align === "center") left += (width - line.width) / 2;
+      else if (style.align === "right") left += width - line.width;
+      ctx.fillText(line.text, left, y + index * lineHeight);
     });
     ctx.restore();
   }
 
-  function drawImageLayer(ctx, layer) {
-    const entry = imageEntry(assetUrl(layer.src));
-    if (!entry.image) return;
-    const image = entry.image;
-    const ratio = Math.min(layer.w / image.width, layer.h / image.height);
-    const width = image.width * ratio;
-    const height = image.height * ratio;
-    const x = layer.x + (layer.w - width) / 2;
-    const y = layer.y + (layer.h - height) / 2;
+  function drawFlame(ctx, style, position) {
+    const width = Math.max(1, num(style.width, 1));
+    const height = Math.max(1, num(style.height, 1));
+    const entry = imageEntry(assetUrl("flame.png"));
+    if (entry.image) {
+      const image = entry.image;
+      const ratio = Math.min(width / image.width, height / image.height);
+      const drawWidth = image.width * ratio;
+      const drawHeight = image.height * ratio;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, style.opacity ?? 1));
+      ctx.drawImage(
+        image,
+        position.x + (width - drawWidth) / 2,
+        position.y + (height - drawHeight) / 2,
+        drawWidth,
+        drawHeight
+      );
+      ctx.restore();
+      return;
+    }
     ctx.save();
-    ctx.globalAlpha = Math.max(0, Math.min(1, layer.opacity ?? 1));
-    ctx.drawImage(image, x, y, width, height);
+    ctx.strokeStyle = "rgba(255, 176, 32, 0.9)";
+    ctx.setLineDash([8, 5]);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(position.x + 1, position.y + 1, width - 2, height - 2);
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(255, 176, 32, 0.85)";
+    ctx.font = '600 20px "Noto Sans SC", system-ui, sans-serif';
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("火焰", position.x + width / 2, position.y + height / 2);
     ctx.restore();
   }
 
   function drawSelection(ctx) {
-    const layer = selectedLayer();
-    if (!layer) return;
+    const box = positionBox(state.selection.kind);
+    if (!box) return;
     ctx.save();
     ctx.strokeStyle = "#53d6bd";
     ctx.lineWidth = 4;
     ctx.setLineDash([12, 7]);
-    ctx.strokeRect(layer.x, layer.y, layer.w, layer.h);
-    ctx.setLineDash([]);
-    ctx.fillStyle = "#53d6bd";
-    ctx.fillRect(layer.x + layer.w - 9, layer.y + layer.h - 9, 18, 18);
+    ctx.strokeRect(box.x, box.y, box.width, box.height);
     ctx.restore();
   }
 
@@ -1127,30 +1309,30 @@
       canvas.height = height;
     }
     const rounded = template.canvas?.radius ?? 128;
+    const background = selectedBg();
     ctx.save();
     roundRectPath(ctx, width, height, rounded);
     ctx.clip();
     ctx.fillStyle = "#f2eadb";
     ctx.fillRect(0, 0, width, height);
-    const selected = selectBackgroundForPreview();
-    if (selected?.bg) {
-      const entry = imageEntry(assetUrl(selected.bg.src));
+    if (background) {
+      const entry = imageEntry(assetUrl(background.src));
       if (entry.image) {
         const image = entry.image;
-        const scale = Math.max(0.01, selected.bg.scale || 1);
+        const scale = Math.max(0.01, background.scale || 1);
         const cover = Math.max(width / image.width, height / image.height);
         const contain = Math.min(width / image.width, height / image.height);
-        const ratio = (selected.bg.fit === "contain" ? contain : cover) * scale;
+        const ratio = (background.fit === "contain" ? contain : cover) * scale;
         const drawWidth = image.width * ratio;
         const drawHeight = image.height * ratio;
-        const x = (width - drawWidth) / 2 + (selected.bg.offsetX || 0);
-        const y = (height - drawHeight) / 2 + (selected.bg.offsetY || 0);
+        const x = (width - drawWidth) / 2 + (background.offsetX || 0);
+        const y = (height - drawHeight) / 2 + (background.offsetY || 0);
         ctx.drawImage(image, x, y, drawWidth, drawHeight);
       }
-    }
-    for (const layer of template.layers) {
-      if (layer.type === "text") drawTextLayer(ctx, layer);
-      else if (layer.type === "image") drawImageLayer(ctx, layer);
+      const text = selectedText();
+      if (text) drawTextBox(ctx, template.styles.label, text.text, text.x, text.y);
+      drawTextBox(ctx, template.styles.streak, "{streak}", background.layout.streak.x, background.layout.streak.y);
+      drawFlame(ctx, template.styles.flame, background.layout.flame);
     }
     ctx.restore();
     drawSelection(ctx);
@@ -1161,7 +1343,7 @@
   function updateProductionDisplay() {
     const input = $("production-url-inline");
     if (!input) return;
-    const value = state.template ? productionUrl() : "";
+    const value = state.template ? productionUrl({ manualBg: true }) : "";
     if (input.value !== value) input.value = value;
   }
 
@@ -1175,17 +1357,17 @@
     };
   }
 
-  function layerAt(point) {
-    if (!state.template) return null;
-    for (let index = state.template.layers.length - 1; index >= 0; index -= 1) {
-      const layer = state.template.layers[index];
+  function elementAt(point) {
+    for (const kind of ["flame", "streak", "text"]) {
+      const box = positionBox(kind);
+      if (!box) continue;
       if (
-        point.x >= layer.x &&
-        point.x <= layer.x + layer.w &&
-        point.y >= layer.y &&
-        point.y <= layer.y + layer.h
+        point.x >= box.x &&
+        point.x <= box.x + box.width &&
+        point.y >= box.y &&
+        point.y <= box.y + box.height
       ) {
-        return layer;
+        return kind;
       }
     }
     return null;
@@ -1194,32 +1376,22 @@
   function bindCanvas() {
     const canvas = $("studio-canvas");
     canvas.addEventListener("pointerdown", (event) => {
-      if (!state.template) return;
+      if (!state.template || !selectedBg()) return;
       const point = canvasPoint(event);
-      let layer = selectedLayer();
-      const handle = layer &&
-        point.x >= layer.x + layer.w - 30 &&
-        point.x <= layer.x + layer.w + 8 &&
-        point.y >= layer.y + layer.h - 30 &&
-        point.y <= layer.y + layer.h + 8;
-      if (!handle) layer = layerAt(point);
-      if (!layer) return;
-      if (layer.id !== state.selectedLayerId) {
-        state.selectedLayerId = layer.id;
-        renderLayerList();
-        renderLayerInspector();
-      }
+      const kind = elementAt(point);
+      if (!kind) return;
+      state.selection = { kind };
+      if (kind === "text" && selectedText()) state.selectedTextId = selectedText().id;
+      const box = positionBox(kind);
       state.drag = {
-        mode: handle ? "resize" : "move",
-        layer,
+        kind,
         startX: point.x,
         startY: point.y,
-        origX: layer.x,
-        origY: layer.y,
-        origW: layer.w,
-        origH: layer.h,
+        origX: box.x,
+        origY: box.y,
         changed: false,
       };
+      renderLayoutPanel();
       canvas.setPointerCapture(event.pointerId);
       canvas.classList.add("is-dragging");
       event.preventDefault();
@@ -1232,17 +1404,20 @@
       const dx = point.x - drag.startX;
       const dy = point.y - drag.startY;
       if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
-      drag.changed = true;
-      if (drag.mode === "move") {
-        drag.layer.x = Math.round(drag.origX + dx);
-        drag.layer.y = Math.round(drag.origY + dy);
-      } else {
-        drag.layer.w = Math.max(16, Math.round(drag.origW + dx));
-        drag.layer.h = Math.max(16, Math.round(drag.origH + dy));
+      let x = drag.origX + dx;
+      let y = drag.origY + dy;
+      if (event.shiftKey) {
+        x = Math.round(x / 8) * 8;
+        y = Math.round(y / 8) * 8;
       }
-      syncLayerGeometryInputs();
+      setPosition(drag.kind, x, y);
+      if (!drag.changed) {
+        drag.changed = true;
+        markDirty();
+      }
+      syncLayoutInputs();
       requestDraw();
-      // Deliberately no request here: pointermove is local-only.
+      // Deliberately no PUT/API call here: pointermove is local-only.
     });
 
     const finish = (event) => {
@@ -1251,10 +1426,42 @@
       state.drag = null;
       canvas.classList.remove("is-dragging");
       if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-      if (drag.changed) scheduleSave();
+      if (drag.changed) setSaveState();
     };
     canvas.addEventListener("pointerup", finish);
     canvas.addEventListener("pointercancel", finish);
+  }
+
+  function bindKeyboard() {
+    document.addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void saveNow();
+        return;
+      }
+      const target = event.target;
+      if (target && target.closest && target.closest("input, textarea, select")) return;
+      const deltas = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      const delta = deltas[event.key];
+      if (!delta) return;
+      const step = event.shiftKey ? 10 : 1;
+      const targetPosition = positionFor(state.selection.kind);
+      if (!targetPosition) return;
+      event.preventDefault();
+      setPosition(
+        state.selection.kind,
+        targetPosition.x + delta[0] * step,
+        targetPosition.y + delta[1] * step
+      );
+      markDirty();
+      syncLayoutInputs();
+      requestDraw();
+    });
   }
 
   // -- preview controls ---------------------------------------------
@@ -1266,6 +1473,7 @@
     state.preview.event = $("preview-event").value.trim();
     state.preview.streak = clampInt($("preview-streak").value, 0, 1000000, 0);
     $("sample-streak").value = state.preview.streak;
+    syncSelectionFromPreview();
     requestDraw();
   }
 
@@ -1282,15 +1490,21 @@
     $("auto-select-toggle").addEventListener("change", (event) => {
       state.autoSelect = event.target.checked;
       $("manual-bg-select").disabled = state.autoSelect;
+      if (state.autoSelect) {
+        syncSelectionFromPreview();
+      } else if (state.manualBgId) {
+        selectBackground(state.manualBgId);
+      }
       updateMatchBadge();
       requestDraw();
     });
     $("manual-bg-select").addEventListener("change", (event) => {
       state.manualBgId = event.target.value;
       if (!state.autoSelect) {
-        updateMatchBadge();
-        requestDraw();
+        selectBackground(state.manualBgId);
       }
+      updateMatchBadge();
+      requestDraw();
     });
     for (const id of ["preview-hour", "preview-weekday", "preview-completed", "preview-league", "preview-event", "preview-streak"]) {
       $(id).addEventListener("input", readPreviewControls);
@@ -1301,100 +1515,9 @@
     }
   }
 
-  // -- save / sync ---------------------------------------------------
-  function scheduleSave() {
-    if (!state.template) return;
-    state.dirty = true;
-    state.revision += 1;
-    setStatus("正在同步…", "saving");
-    clearPendingSave();
-    state.saveTimer = setTimeout(() => {
-      state.saveTimer = null;
-      void saveNow();
-    }, 400);
-  }
-
-  async function saveNow() {
-    if (!state.template || state.saving || !state.dirty) return state.saving || null;
-    const template = state.template;
-    const snapshot = JSON.parse(JSON.stringify(template));
-    const revision = state.revision;
-    setStatus("正在同步…", "saving");
-    state.saving = (async () => {
-      try {
-        const saved = await api(`/templates/${encodeURIComponent(snapshot.id)}`, {
-          method: "PUT",
-          body: snapshot,
-        });
-        if (state.template && state.template.id === snapshot.id) {
-          state.template.updated_at = saved.updated_at;
-        }
-        if (state.revision === revision) {
-          state.dirty = false;
-          setStatus(`已同步到 data/widgets/${snapshot.id}`, "saved");
-          const summary = state.templates.find((item) => item.id === snapshot.id);
-          if (summary) {
-            summary.name = snapshot.name;
-            summary.updated_at = saved.updated_at;
-            summary.background_count = snapshot.backgrounds.length;
-            summary.layer_count = snapshot.layers.length;
-            renderTemplateSelect();
-          }
-        }
-      } catch (error) {
-        if (error.status !== 401) {
-          setStatus(`同步失败：${error.message}`, "error");
-          toast(`同步失败：${error.message}`, "error");
-        }
-      } finally {
-        state.saving = null;
-        if (state.dirty && state.revision !== revision && !state.saveTimer) {
-          state.saveTimer = setTimeout(() => {
-            state.saveTimer = null;
-            void saveNow();
-          }, 400);
-        }
-      }
-    })();
-    return state.saving;
-  }
-
-  async function flushSave() {
-    clearPendingSave();
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      if (state.saving) {
-        await state.saving;
-        continue;
-      }
-      if (!state.dirty) break;
-      await saveNow();
-    }
-  }
-
-  function installUnloadFlush() {
-    window.addEventListener("pagehide", () => {
-      if (!state.template || !state.dirty || !state.token) return;
-      try {
-        fetch(`${API}/templates/${encodeURIComponent(state.template.id)}`, {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${state.token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(state.template),
-          keepalive: true,
-          cache: "no-store",
-        });
-      } catch {
-        /* best effort on unload */
-      }
-    });
-  }
-
   // -- uploads -------------------------------------------------------
   async function uploadBackgroundFile(file) {
     if (!state.template) return;
-    await flushSave();
     const stem = file.name.replace(/\.[^.]+$/, "");
     const base = `bg-${slugify(stem) || "upload"}`;
     const bgId = uniqueId(base, state.template.backgrounds.map((bg) => bg.id));
@@ -1407,36 +1530,39 @@
       method: "POST",
       form,
     });
-    clearPendingSave();
-    state.dirty = false;
-    state.revision += 1;
-    state.template = result.template;
-    state.imageCache.clear();
-    state.selectedBgId = bgId;
+    const hasFallback = state.template.backgrounds.some((bg) => !Object.keys(bg.when || {}).length);
+    state.template.backgrounds.push({
+      id: bgId,
+      name: (stem || bgId).trim() || bgId,
+      src: result.src,
+      when: {},
+      priority: hasFallback ? 10 : 0,
+      fit: "cover",
+      offsetX: 0,
+      offsetY: 0,
+      scale: 1,
+      layout: defaultLayout(),
+    });
     state.manualBgId = bgId;
-    renderAll();
-    setStatus(`已同步到 data/widgets/${state.template.id}`, "saved");
+    state.imageCache.clear();
+    markDirty();
+    selectBackgroundInternal(bgId);
+    toast(`已上传底图 ${file.name}（未保存）`, "ok");
   }
 
   async function uploadFlameFile(file) {
     if (!state.template) return;
-    await flushSave();
     const form = new FormData();
     form.append("file", file);
     setStatus("正在上传火焰…", "saving");
-    const result = await api(`/templates/${encodeURIComponent(state.template.id)}/assets/flame`, {
+    await api(`/templates/${encodeURIComponent(state.template.id)}/assets/flame`, {
       method: "POST",
       form,
     });
-    clearPendingSave();
-    state.dirty = false;
-    state.revision += 1;
-    state.template = result.template;
-    state.imageCache.clear();
-    const flame = state.template.layers.find((layer) => layer.role === "flame");
-    if (flame) state.selectedLayerId = flame.id;
-    renderAll();
-    setStatus(`已同步到 data/widgets/${state.template.id}`, "saved");
+    state.imageCache.delete(assetUrl("flame.png"));
+    markDirty();
+    requestDraw();
+    toast("火焰已上传（未保存）", "ok");
   }
 
   function bindUploads() {
@@ -1447,9 +1573,11 @@
       for (const file of files) {
         try {
           await uploadBackgroundFile(file);
-          toast(`已添加底图 ${file.name}`, "ok");
         } catch (error) {
-          if (error.status !== 401) toast(`上传失败：${error.message}`, "error");
+          if (error.status !== 401) {
+            toast(`上传失败：${error.message}`, "error");
+            setSaveState();
+          }
         }
       }
     });
@@ -1459,9 +1587,11 @@
       if (!file) return;
       try {
         await uploadFlameFile(file);
-        toast("火焰已上传", "ok");
       } catch (error) {
-        if (error.status !== 401) toast(`上传失败：${error.message}`, "error");
+        if (error.status !== 401) {
+          toast(`上传失败：${error.message}`, "error");
+          setSaveState();
+        }
       }
     });
   }
@@ -1510,23 +1640,24 @@
       offsetX: 0,
       offsetY: 0,
       scale: 1,
+      layout: defaultLayout(),
     });
-    state.selectedBgId = id;
     state.manualBgId = id;
-    renderAll();
-    scheduleSave();
-    toast("已添加 Ghost 资源底图（引用不复制）", "ok");
+    markDirty();
+    selectBackgroundInternal(id);
+    toast("已添加 Ghost 资源底图（引用不复制，未保存）", "ok");
   }
 
   // -- template actions ---------------------------------------------
   function renderAll() {
     renderTemplateSelect();
-    renderLayerList();
-    renderLayerInspector();
     renderBackgroundList();
     renderBackgroundInspector();
+    renderLayoutPanel();
     renderManualBgSelect();
     updateMatchBadge();
+    updateProductionDisplay();
+    setSaveState();
     requestDraw();
   }
 
@@ -1565,7 +1696,7 @@
 
   async function duplicateTemplate() {
     if (!state.template) return;
-    await flushSave();
+    if (!confirmDiscard()) return;
     const source = state.template;
     const button = $("duplicate-template-btn");
     button.disabled = true;
@@ -1582,14 +1713,15 @@
         form.append("name", bg.name);
         await api(`/templates/${encodeURIComponent(created.id)}/assets/background`, { method: "POST", form });
       }
-      for (const layer of source.layers) {
-        if (layer.type !== "image" || String(layer.src).startsWith("ghost:")) continue;
-        const blob = await fetchAssetBlob(layer.src);
+      try {
+        const flameBlob = await fetchAssetBlob("flame.png");
         const form = new FormData();
-        form.append("file", blob, layer.src.split("/").pop() || "flame.png");
+        form.append("file", flameBlob, "flame.png");
         await api(`/templates/${encodeURIComponent(created.id)}/assets/flame`, { method: "POST", form });
+      } catch (error) {
+        if (error.status !== 404) throw error;
       }
-      const copy = JSON.parse(JSON.stringify(source));
+      const copy = clone(source);
       copy.id = created.id;
       copy.render_token = created.render_token;
       copy.updated_at = new Date().toISOString();
@@ -1606,7 +1738,7 @@
           /* ignore cleanup failure */
         }
       }
-      setStatus(`复制失败：${error.message}`, "error");
+      setSaveState();
     } finally {
       button.disabled = false;
     }
@@ -1614,6 +1746,7 @@
 
   async function deleteTemplate() {
     if (!state.template) return;
+    if (!confirmDiscard()) return;
     const id = state.template.id;
     if (!window.confirm(`删除模版 ${id}？目录 data/widgets/${id}/ 会被删除。`)) return;
     try {
@@ -1623,10 +1756,11 @@
         await openTemplate(state.templates[0].id);
       } else {
         state.template = null;
-        state.selectedLayerId = null;
         state.selectedBgId = null;
+        state.selectedTextId = null;
+        state.dirty = false;
         renderAll();
-        setStatus("等待新建模版");
+        setSaveState();
         openTemplateModal();
       }
       toast("模版已删除", "ok");
@@ -1636,15 +1770,20 @@
   }
 
   function templateChanged() {
-    const id = $("template-select").value;
+    const select = $("template-select");
+    const id = select.value;
     if (!id || id === state.template?.id) return;
+    if (!confirmDiscard()) {
+      select.value = state.template?.id || "";
+      return;
+    }
     openTemplate(id).catch((error) => {
       if (error.status !== 401) toast(`切换失败：${error.message}`, "error");
     });
   }
 
-  // -- production URL ------------------------------------------------
-  function productionParams(includeManual) {
+  // -- production URL / preview --------------------------------------
+  function productionParams(options = {}) {
     const params = new URLSearchParams();
     params.set("token", state.template?.render_token || "");
     params.set("streak", String(state.preview.streak));
@@ -1656,13 +1795,16 @@
     params.set("completed", state.preview.completed_today ? "1" : "0");
     if (state.preview.league) params.set("league", state.preview.league);
     if (state.preview.event) params.set("event", state.preview.event);
-    if (includeManual && !state.autoSelect && state.manualBgId) params.set("bg", state.manualBgId);
+    if (options.text) params.set("text", options.text);
+    if (options.bg) params.set("bg", options.bg);
+    else if (options.manualBg && !state.autoSelect && state.manualBgId) params.set("bg", state.manualBgId);
+    if (options.cacheBust) params.set("_", String(Date.now()));
     return params;
   }
 
-  function productionUrl() {
+  function productionUrl(options = {}) {
     if (!state.template) return "";
-    return `${window.location.origin}/v1/widgets/${encodeURIComponent(state.template.id)}.png?${productionParams(true).toString()}`;
+    return `${window.location.origin}/v1/widgets/${encodeURIComponent(state.template.id)}.png?${productionParams(options).toString()}`;
   }
 
   async function copyText(text, successMessage) {
@@ -1687,29 +1829,41 @@
 
   async function copyProductionUrl() {
     if (!state.template) return;
-    await copyText(productionUrl(), "生产 URL 已复制");
+    await copyText(productionUrl({ manualBg: true }), "生产 URL 已复制");
   }
 
-  async function showProductionPreview() {
-    if (!state.template) return;
-    await flushSave();
-    if (state.dirty) {
-      toast("生产预览前保存失败，请先修正同步错误。", "error");
-      return;
-    }
-    const url = productionUrl();
+  async function loadProductionPreview(url, mode) {
     $("preview-error").textContent = "";
+    $("preview-meta").textContent = "正在渲染…";
     $("production-url").value = url;
     $("preview-open-link").href = url;
     const image = $("production-image");
-    image.onerror = () => {
-      $("preview-error").textContent = "生产图加载失败，请检查 render_token 与保存状态。";
-    };
-    image.onload = () => {
-      $("preview-error").textContent = "";
-    };
-    image.src = url;
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      if (state.previewObjectUrl) URL.revokeObjectURL(state.previewObjectUrl);
+      state.previewObjectUrl = URL.createObjectURL(blob);
+      image.src = state.previewObjectUrl;
+      const bgId = response.headers.get("X-Widget-Background") || "?";
+      const textId = response.headers.get("X-Widget-Text") || "?";
+      $("preview-meta").textContent = `底图 ${bgId} · 文字 ${textId} · ${mode === "random" ? "随机预览" : "固定当前文字"}`;
+    } catch (error) {
+      $("preview-meta").textContent = "";
+      $("preview-error").textContent = `生产图加载失败：${error.message}`;
+    }
+  }
+
+  function showProductionPreview(mode = "fixed") {
+    if (!state.template) return;
     openModal("preview-modal");
+    if (state.dirty) toast("有未保存改动：生产预览显示已保存的版本。", "error");
+    const random = mode === "random";
+    const options = random
+      ? { cacheBust: true }
+      : { bg: state.selectedBgId, text: state.selectedTextId, cacheBust: true };
+    const url = productionUrl(options);
+    void loadProductionPreview(url, mode);
   }
 
   // -- modals --------------------------------------------------------
@@ -1750,14 +1904,17 @@
   // -- wiring --------------------------------------------------------
   function bindTopbar() {
     $("template-select").addEventListener("change", templateChanged);
-    $("new-template-btn").addEventListener("click", openTemplateModal);
+    $("save-template-btn").addEventListener("click", () => void saveNow());
+    $("new-template-btn").addEventListener("click", () => {
+      if (confirmDiscard()) openTemplateModal();
+    });
     $("duplicate-template-btn").addEventListener("click", () => void duplicateTemplate());
     $("delete-template-btn").addEventListener("click", () => void deleteTemplate());
     $("copy-production-url").addEventListener("click", () => void copyProductionUrl());
     $("copy-production-inline").addEventListener("click", () => void copyProductionUrl());
     $("library-open").addEventListener("click", () => void openLibrary());
-    $("add-text-layer").addEventListener("click", addTextLayer);
-    $("production-preview-btn").addEventListener("click", () => void showProductionPreview());
+    $("production-preview-btn").addEventListener("click", () => showProductionPreview("fixed"));
+    $("random-preview-btn").addEventListener("click", () => showProductionPreview("random"));
   }
 
   function bindAuth() {
@@ -1780,15 +1937,24 @@
     });
   }
 
+  function installBeforeUnload() {
+    window.addEventListener("beforeunload", (event) => {
+      if (!state.dirty) return;
+      event.preventDefault();
+      event.returnValue = "有未保存的改动，确定离开？";
+    });
+  }
+
   function start() {
     bindAuth();
     bindTopbar();
     bindModals();
     bindCanvas();
+    bindKeyboard();
     bindBackgroundActions();
     bindUploads();
     bindPreviewControls();
-    installUnloadFlush();
+    installBeforeUnload();
     readPreviewControls();
     try {
       state.token = localStorage.getItem(TOKEN_KEY) || "";

@@ -249,6 +249,7 @@ def build_router(
         event: str | None = Query(default=None),
         size: str | None = Query(default=None),
         bg: str | None = Query(default=None),
+        text: str | None = Query(default=None),
     ) -> Response:
         if size not in {None, "", "1x"}:
             raise HTTPException(status_code=400, detail="size must be 1x")
@@ -265,12 +266,13 @@ def build_router(
             event=event,
         )
         try:
-            data, bg_id = store.render(
+            data, bg_id, text_id = store.render(
                 template_id,
                 token or "",
                 context,
                 size=size or None,
                 bg_id=bg or None,
+                text_id=text or None,
             )
         except NotFoundError as exc:
             # Wrong or missing render tokens must not reveal template existence.
@@ -285,6 +287,7 @@ def build_router(
             headers={
                 "Cache-Control": "no-store",
                 "X-Widget-Background": bg_id,
+                "X-Widget-Text": text_id,
                 "Content-Disposition": "inline",
             },
         )

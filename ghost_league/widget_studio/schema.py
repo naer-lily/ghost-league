@@ -2,6 +2,11 @@
 
 A template is plain JSON on disk.  This module is deliberately free of HTTP and
 database concerns so the store, renderer and tests share exactly one schema.
+
+Version 3 makes styles global (``styles``) and moves every position next to the
+background it belongs to (``backgrounds[].layout``).  There is no global layer
+list: each background owns its label text variants, streak position and flame
+position.
 """
 
 from __future__ import annotations
@@ -13,7 +18,7 @@ from typing import Any
 CANVAS_WIDTH = 1536
 CANVAS_HEIGHT = 914
 CANVAS_RADIUS = 128
-TEMPLATE_VERSION = 2
+TEMPLATE_VERSION = 3
 MAX_FILE_BYTES = 15 * 1024 * 1024
 
 TEMPLATE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -33,7 +38,7 @@ WHEN_FIELDS = {
 }
 TEXT_ALIGNS = {"left", "center", "right"}
 FITS = {"cover", "contain"}
-LAYER_TYPES = {"text", "image"}
+STYLE_KEYS = {"label", "streak", "flame"}
 
 
 class ValidationError(ValueError):
@@ -202,6 +207,116 @@ def normalize_when(raw: Any, field: str = "when") -> dict[str, Any]:
     return result
 
 
+def _normalize_shadow(raw: Any, field: str) -> dict[str, Any] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValidationError(f"{field} must be an object or null")
+    color = raw.get("color", "rgba(0,0,0,0.35)")
+    if not isinstance(color, str) or not 1 <= len(color) <= 64:
+        raise ValidationError(f"{field}.color must be a CSS color")
+    blur = _number(raw.get("blur", 0), f"{field}.blur", minimum=0)
+    return {
+        "color": color,
+        "blur": blur,
+        "offsetX": _number(raw.get("offsetX", 0), f"{field}.offsetX"),
+        "offsetY": _number(raw.get("offsetY", 0), f"{field}.offsetY"),
+    }
+
+
+def normalize_text_style(raw: Any, field: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValidationError(f"{field} must be an object")
+    align = raw.get("align", "left")
+    if align not in TEXT_ALIGNS:
+        raise ValidationError(f"{field}.align must be left, center or right")
+    color = raw.get("color", "#17324d")
+    if not isinstance(color, str) or not 1 <= len(color) <= 64:
+        raise ValidationError(f"{field}.color must be a CSS color")
+    font_weight = raw.get("fontWeight", 400)
+    if not is_int(font_weight) or not 100 <= font_weight <= 900:
+        raise ValidationError(f"{field}.fontWeight must be 100-900")
+    return {
+        "width": _number(raw.get("width", 520), f"{field}.width", minimum=1),
+        "height": _number(raw.get("height", 100), f"{field}.height", minimum=1),
+        "fontSize": _number(raw.get("fontSize", 48), f"{field}.fontSize", minimum=1),
+        "fontWeight": font_weight,
+        "color": color,
+        "align": align,
+        "lineHeight": _number(raw.get("lineHeight", 1.2), f"{field}.lineHeight", minimum=0.1),
+        "shadow": _normalize_shadow(raw.get("shadow"), f"{field}.shadow"),
+    }
+
+
+def normalize_flame_style(raw: Any, field: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValidationError(f"{field} must be an object")
+    opacity = _number(raw.get("opacity", 1), f"{field}.opacity", minimum=0)
+    if opacity > 1:
+        raise ValidationError(f"{field}.opacity must be 0-1")
+    return {
+        "width": _number(raw.get("width", 120), f"{field}.width", minimum=1),
+        "height": _number(raw.get("height", 140), f"{field}.height", minimum=1),
+        "opacity": opacity,
+    }
+
+
+def normalize_styles(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValidationError("styles must be an object")
+    missing = STYLE_KEYS - set(raw)
+    if missing:
+        raise ValidationError(f"styles is missing: {', '.join(sorted(missing))}")
+    return {
+        "label": normalize_text_style(raw["label"], "styles.label"),
+        "streak": normalize_text_style(raw["streak"], "styles.streak"),
+        "flame": normalize_flame_style(raw["flame"], "styles.flame"),
+    }
+
+
+def _normalize_position(raw: Any, field: str) -> dict[str, float]:
+    if not isinstance(raw, dict):
+        raise ValidationError(f"{field} must be an object with x and y")
+    return {
+        "x": _number(raw.get("x"), f"{field}.x"),
+        "y": _number(raw.get("y"), f"{field}.y"),
+    }
+
+
+def normalize_layout(raw: Any, index: int) -> dict[str, Any]:
+    field = f"backgrounds[{index}].layout"
+    if not isinstance(raw, dict):
+        raise ValidationError(f"{field} must be an object")
+    texts_raw = raw.get("texts")
+    if not isinstance(texts_raw, list) or not texts_raw:
+        raise ValidationError(f"{field}.texts must be a non-empty list")
+    texts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for text_index, item in enumerate(texts_raw):
+        text_field = f"{field}.texts[{text_index}]"
+        if not isinstance(item, dict):
+            raise ValidationError(f"{text_field} must be an object")
+        text_id = item.get("id")
+        if not isinstance(text_id, str) or not ASSET_ID_RE.fullmatch(text_id):
+            raise ValidationError(f"{text_field}.id is invalid")
+        if text_id in seen:
+            raise ValidationError(f"{field} has duplicate text id: {text_id}")
+        seen.add(text_id)
+        texts.append(
+            {
+                "id": text_id,
+                "text": _text(item.get("text", ""), f"{text_field}.text", maximum=500),
+                "x": _number(item.get("x"), f"{text_field}.x"),
+                "y": _number(item.get("y"), f"{text_field}.y"),
+            }
+        )
+    return {
+        "texts": texts,
+        "streak": _normalize_position(raw.get("streak"), f"{field}.streak"),
+        "flame": _normalize_position(raw.get("flame"), f"{field}.flame"),
+    }
+
+
 def normalize_background(
     raw: Any,
     index: int,
@@ -232,87 +347,8 @@ def normalize_background(
         "offsetX": _number(raw.get("offsetX", 0), f"backgrounds[{index}].offsetX"),
         "offsetY": _number(raw.get("offsetY", 0), f"backgrounds[{index}].offsetY"),
         "scale": _number(raw.get("scale", 1), f"backgrounds[{index}].scale", minimum=0.01),
+        "layout": normalize_layout(raw.get("layout"), index),
     }
-
-
-def _normalize_shadow(raw: Any, field: str) -> dict[str, Any] | None:
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise ValidationError(f"{field} must be an object or null")
-    color = raw.get("color", "rgba(0,0,0,0.35)")
-    if not isinstance(color, str) or not 1 <= len(color) <= 64:
-        raise ValidationError(f"{field}.color must be a CSS color")
-    blur = _number(raw.get("blur", 0), f"{field}.blur", minimum=0)
-    return {
-        "color": color,
-        "blur": blur,
-        "offsetX": _number(raw.get("offsetX", 0), f"{field}.offsetX"),
-        "offsetY": _number(raw.get("offsetY", 0), f"{field}.offsetY"),
-    }
-
-
-def normalize_layer(
-    raw: Any,
-    index: int,
-    *,
-    template_dir: Path,
-    web_root: Path,
-) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raise ValidationError(f"layers[{index}] must be an object")
-    layer_id = raw.get("id")
-    if not isinstance(layer_id, str) or not ASSET_ID_RE.fullmatch(layer_id):
-        raise ValidationError(f"layers[{index}].id is invalid")
-    layer_type = raw.get("type")
-    if layer_type not in LAYER_TYPES:
-        raise ValidationError(f"layers[{index}].type must be text or image")
-    role = raw.get("role", layer_type)
-    if not isinstance(role, str) or not 1 <= len(role) <= 32:
-        raise ValidationError(f"layers[{index}].role must be 1-32 characters")
-    base = {
-        "id": layer_id,
-        "type": layer_type,
-        "role": role,
-        "x": _number(raw.get("x"), f"layers[{index}].x"),
-        "y": _number(raw.get("y"), f"layers[{index}].y"),
-        "w": _number(raw.get("w"), f"layers[{index}].w", minimum=1),
-        "h": _number(raw.get("h"), f"layers[{index}].h", minimum=1),
-    }
-    if layer_type == "text":
-        align = raw.get("align", "left")
-        if align not in TEXT_ALIGNS:
-            raise ValidationError(f"layers[{index}].align must be left, center or right")
-        color = raw.get("color", "#17324d")
-        if not isinstance(color, str) or not 1 <= len(color) <= 64:
-            raise ValidationError(f"layers[{index}].color must be a CSS color")
-        font_weight = raw.get("fontWeight", 400)
-        if not is_int(font_weight) or not 100 <= font_weight <= 900:
-            raise ValidationError(f"layers[{index}].fontWeight must be 100-900")
-        base.update(
-            {
-                "text": _text(raw.get("text", ""), f"layers[{index}].text", maximum=500),
-                "fontSize": _number(
-                    raw.get("fontSize", 48), f"layers[{index}].fontSize", minimum=1
-                ),
-                "fontWeight": font_weight,
-                "color": color,
-                "align": align,
-                "lineHeight": _number(
-                    raw.get("lineHeight", 1.2), f"layers[{index}].lineHeight", minimum=0.1
-                ),
-                "shadow": _normalize_shadow(
-                    raw.get("shadow"), f"layers[{index}].shadow"
-                ),
-            }
-        )
-    else:
-        src = validate_src(raw.get("src"), template_dir=template_dir, web_root=web_root)
-        opacity = _number(raw.get("opacity", 1), f"layers[{index}].opacity", minimum=0)
-        if opacity > 1:
-            raise ValidationError(f"layers[{index}].opacity must be 0-1")
-        base.update({"src": src, "opacity": opacity})
-    return base
 
 
 def normalize_template(
@@ -324,9 +360,11 @@ def normalize_template(
 ) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValidationError("template must be a JSON object")
-    version = raw.get("version", TEMPLATE_VERSION)
+    version = raw.get("version")
     if version != TEMPLATE_VERSION:
-        raise ValidationError("template version must be 2")
+        raise ValidationError(f"template version must be {TEMPLATE_VERSION}")
+    if "layers" in raw:
+        raise ValidationError("version 3 templates do not have global layers")
     template_id = validate_template_id(raw.get("id"))
     if expected_id is not None and template_id != expected_id:
         raise ValidationError("template id does not match the URL")
@@ -347,6 +385,8 @@ def normalize_template(
     if not is_int(radius) or not 0 <= radius <= min(width, height) // 2:
         raise ValidationError("canvas.radius is out of range")
 
+    styles = normalize_styles(raw.get("styles"))
+
     backgrounds_raw = raw.get("backgrounds")
     if not isinstance(backgrounds_raw, list):
         raise ValidationError("backgrounds must be a list")
@@ -366,27 +406,14 @@ def normalize_template(
     if not any(not background["when"] for background in backgrounds):
         raise ValidationError("every template needs at least one fallback background (when: {})")
 
-    layers_raw = raw.get("layers", [])
-    if not isinstance(layers_raw, list):
-        raise ValidationError("layers must be a list")
-    layers = [
-        normalize_layer(item, index, template_dir=template_dir, web_root=web_root)
-        for index, item in enumerate(layers_raw)
-    ]
-    seen_layers: set[str] = set()
-    for layer in layers:
-        if layer["id"] in seen_layers:
-            raise ValidationError(f"duplicate layer id: {layer['id']}")
-        seen_layers.add(layer["id"])
-
     render_token = raw.get("render_token")
     normalized: dict[str, Any] = {
         "version": TEMPLATE_VERSION,
         "id": template_id,
         "name": name.strip(),
         "canvas": {"width": width, "height": height, "radius": radius},
+        "styles": styles,
         "backgrounds": backgrounds,
-        "layers": layers,
     }
     if render_token is not None:
         normalized["render_token"] = validate_render_token(render_token)
@@ -469,14 +496,17 @@ __all__ = [
     "CANVAS_WIDTH",
     "FITS",
     "IMAGE_SUFFIXES",
-    "LAYER_TYPES",
     "MAX_FILE_BYTES",
+    "STYLE_KEYS",
     "TEMPLATE_VERSION",
     "ValidationError",
     "background_matches",
     "normalize_background",
-    "normalize_layer",
+    "normalize_flame_style",
+    "normalize_layout",
+    "normalize_styles",
     "normalize_template",
+    "normalize_text_style",
     "normalize_when",
     "resolve_src",
     "select_background",

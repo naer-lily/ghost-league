@@ -24,7 +24,8 @@
       <button id="delete-template-btn" class="btn btn-danger" type="button">删除</button>
     </div>
     <div class="top-actions">
-      <button id="copy-production-url" class="btn btn-accent" type="button">复制生产 URL</button>
+      <button id="save-template-btn" class="btn btn-accent save-btn" type="button" disabled title="Ctrl/Cmd+S">保存</button>
+      <button id="copy-production-url" class="btn" type="button">复制生产 URL</button>
       <span id="sync-status" class="sync-status" role="status">未加载</span>
     </div>
   </header>
@@ -44,18 +45,6 @@
   <div id="studio-shell" class="studio-shell" hidden>
     <main class="studio">
       <aside class="panel panel-left">
-        <section class="panel-section">
-          <div class="section-head">
-            <h2>图层</h2>
-            <button id="add-text-layer" class="btn btn-small" type="button">添加文字</button>
-          </div>
-          <ul id="layer-list" class="layer-list" aria-label="图层列表"></ul>
-          <label class="file-button">
-            上传火焰 PNG
-            <input id="flame-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
-          </label>
-        </section>
-
         <section class="panel-section bg-section">
           <div class="section-head">
             <h2>底图</h2>
@@ -65,8 +54,12 @@
             </div>
           </div>
           <input id="bg-file-input" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
-          <p class="hint">新增上传默认 <code>when:{}</code>、priority 0；已有 fallback 时 priority 10。</p>
+          <p class="hint">每张底图有自己的文字变体与数字/火焰坐标。上传只写文件，点“保存”才写入 JSON。</p>
           <ul id="background-list" class="background-list" aria-label="底图列表"></ul>
+          <label class="file-button">
+            上传火焰 PNG
+            <input id="flame-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+          </label>
         </section>
       </aside>
 
@@ -87,6 +80,7 @@
               <select id="manual-bg-select" disabled></select>
             </label>
             <button id="production-preview-btn" class="btn btn-small btn-accent" type="button">生产预览</button>
+            <button id="random-preview-btn" class="btn btn-small" type="button">随机预览</button>
           </div>
           <div class="context-row context-fields">
             <label>小时 <input id="preview-hour" type="number" min="0" max="23" value="10"></label>
@@ -125,10 +119,10 @@
       <aside class="panel panel-right">
         <section class="panel-section">
           <div class="section-head">
-            <h2>选中图层</h2>
-            <span id="layer-kind" class="pill">未选择</span>
+            <h2>文字与摆位</h2>
+            <span id="layout-kind" class="pill">未选择</span>
           </div>
-          <div id="layer-inspector" class="inspector"></div>
+          <div id="layout-inspector" class="inspector"></div>
         </section>
         <section class="panel-section">
           <div class="section-head">
@@ -168,6 +162,7 @@
         <button id="preview-close" class="btn btn-small" type="button">关闭</button>
       </div>
       <p class="muted">由 Ghost API 按当前保存后的 JSON 实时渲染，不替代主画布。</p>
+      <p id="preview-meta" class="preview-meta" role="status"></p>
       <img id="production-image" class="production-image" alt="生产 Widget 预览">
       <label for="production-url">生产 URL</label>
       <div class="url-row">

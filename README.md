@@ -133,15 +133,19 @@ token。systemd 模板把 token 放在 `/etc/ghost-league/waka.env`（0600）；
 
 - 模版数据：`data/widgets/<id>/template.json`、`flame.png`、`backgrounds/*.png`；目录文件
   是唯一真相源，保存后生产图立即生效，不需要重启。
+- 模版是 version 3：`styles` 全局唯一样式源；每张底图有自己的 `layout.texts`（文字变体）、
+  `layout.streak` 和 `layout.flame` 坐标。没有全局图层；样式只在编辑器里只读展示。
 - Ghost 现有 `web/assets/tiers/card/*.png` 和 `web/assets/frames/*.png` 通过
   `ghost:assets/...` 原地引用，不复制。
 - API：`/v1/widget-studio`（模版列表/详情与写接口要求现有 Bearer；图片、缩略图和资源库只读公开）；生产图：
   `GET /v1/widgets/<id>.png?token=<render_token>&streak=...&xp=...&rank=...&name=...`。
-  生产图不需要 Bearer，无 token / 错 token 返回 404；支持 `size=1x`（368×219）和仅调试用的
-  `bg=<bg_id>`。
-- 主画布即时绘制，`pointermove` 不发请求；拖动/输入停止 400ms 后才 `PUT`，切模版和
-  `pagehide` 有 keepalive 兜底。
-- 详细 schema、条件规则、API 表、生产 URL 和测试命令见
+  生产图不需要 Bearer，无 token / 错 token 返回 404；支持 `size=1x`（368×219）、仅调试用的
+  `bg=<bg_id>` 和 `text=<text-id>`，响应头返回 `X-Widget-Background` / `X-Widget-Text`。
+  不传 `text` 时在该底图的文字变体中随机选一条。
+- 显式保存：拖动、输入文字、改条件、改 x/y 都不写文件；只有 `Ctrl/Cmd+S` 或“保存”按钮
+  PUT 完整 snapshot。上传底图/火焰只写文件并返回 `src`，编辑器标“未保存”，保存后才改 JSON。
+- 主画布即时绘制，`pointermove` 不发请求；右侧只调文字内容与位置，不提供样式输入。
+- 详细 schema、条件规则、v2→v3 迁移、API 表、生产 URL 和测试命令见
   [`docs/WIDGET_STUDIO.md`](docs/WIDGET_STUDIO.md)。
 
 ## 数据与隐私

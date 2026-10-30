@@ -58,6 +58,52 @@ FRAME_LABELS = {
     "frame_ember": "余烬边框",
     "frame_clown": "小丑边框",
 }
+DEFAULT_STYLES: dict[str, Any] = {
+    "label": {
+        "width": 520,
+        "height": 100,
+        "fontSize": 64,
+        "fontWeight": 400,
+        "color": "#17324d",
+        "align": "left",
+        "lineHeight": 1.15,
+        "shadow": {
+            "color": "rgba(255,255,255,0.65)",
+            "blur": 0,
+            "offsetX": 0,
+            "offsetY": 2,
+        },
+    },
+    "streak": {
+        "width": 360,
+        "height": 180,
+        "fontSize": 132,
+        "fontWeight": 400,
+        "color": "#ffb020",
+        "align": "left",
+        "lineHeight": 1,
+        "shadow": {
+            "color": "rgba(255,255,255,0.75)",
+            "blur": 0,
+            "offsetX": 0,
+            "offsetY": 3,
+        },
+    },
+    "flame": {"width": 120, "height": 140, "opacity": 1},
+}
+DEFAULT_LAYOUT: dict[str, Any] = {
+    "texts": [{"id": "text-1", "text": "连续学习", "x": 760, "y": 540}],
+    "streak": {"x": 760, "y": 300},
+    "flame": {"x": 660, "y": 280},
+}
+
+
+def _default_styles() -> dict[str, Any]:
+    return json.loads(json.dumps(DEFAULT_STYLES))
+
+
+def _default_layout() -> dict[str, Any]:
+    return json.loads(json.dumps(DEFAULT_LAYOUT))
 
 
 class StoreError(Exception):
@@ -230,7 +276,10 @@ class WidgetStore:
                     "name": template["name"],
                     "updated_at": template.get("updated_at"),
                     "background_count": len(template["backgrounds"]),
-                    "layer_count": len(template["layers"]),
+                    "text_count": sum(
+                        len(background["layout"]["texts"])
+                        for background in template["backgrounds"]
+                    ),
                 }
             )
         summaries.sort(key=lambda item: (item["name"].lower(), item["id"]))
@@ -252,16 +301,12 @@ class WidgetStore:
     def _assert_assets_exist(
         self, template: dict[str, Any], template_dir: Path
     ) -> None:
-        sources = [background["src"] for background in template["backgrounds"]]
-        sources.extend(
-            layer["src"] for layer in template["layers"] if layer["type"] == "image"
-        )
-        for src in sources:
+        for background in template["backgrounds"]:
             resolved = resolve_src(
-                src, template_dir=template_dir, web_root=self.web_root
+                background["src"], template_dir=template_dir, web_root=self.web_root
             )
             if not resolved.is_file():
-                raise ValidationError(f"asset is missing: {src}")
+                raise ValidationError(f"asset is missing: {background['src']}")
 
     def _unique_template_id(self, name: str) -> str:
         base = slugify(name)
@@ -300,6 +345,7 @@ class WidgetStore:
                     "height": CANVAS_HEIGHT,
                     "radius": CANVAS_RADIUS,
                 },
+                "styles": _default_styles(),
                 "backgrounds": [
                     {
                         "id": "bg-default",
@@ -311,51 +357,8 @@ class WidgetStore:
                         "offsetX": 0,
                         "offsetY": 0,
                         "scale": 1,
+                        "layout": _default_layout(),
                     }
-                ],
-                "layers": [
-                    {
-                        "id": "label-1",
-                        "type": "text",
-                        "role": "label",
-                        "text": "连续学习",
-                        "x": 760,
-                        "y": 540,
-                        "w": 520,
-                        "h": 100,
-                        "fontSize": 64,
-                        "fontWeight": 400,
-                        "color": "#17324d",
-                        "align": "left",
-                        "lineHeight": 1.15,
-                        "shadow": {
-                            "color": "rgba(255,255,255,0.65)",
-                            "blur": 0,
-                            "offsetX": 0,
-                            "offsetY": 2,
-                        },
-                    },
-                    {
-                        "id": "number-1",
-                        "type": "text",
-                        "role": "streak",
-                        "text": "{streak}",
-                        "x": 760,
-                        "y": 300,
-                        "w": 360,
-                        "h": 180,
-                        "fontSize": 132,
-                        "fontWeight": 400,
-                        "color": "#ffb020",
-                        "align": "left",
-                        "lineHeight": 1,
-                        "shadow": {
-                            "color": "rgba(255,255,255,0.75)",
-                            "blur": 0,
-                            "offsetX": 0,
-                            "offsetY": 3,
-                        },
-                    },
                 ],
             }
             self._write_template(template)
@@ -369,7 +372,6 @@ class WidgetStore:
             existing = self._read_template(template_id)
             updated = dict(payload)
             updated["id"] = template_id
-            updated["version"] = TEMPLATE_VERSION
             # Render tokens are minted once per template and never changed by PUT.
             updated["render_token"] = existing["render_token"]
             updated["updated_at"] = _now_iso(self._now_fn)
@@ -398,65 +400,23 @@ class WidgetStore:
             raise AssetError("kind must be background or flame")
         image = _normalize_upload(data)
         with self._lock:
-            template = self._read_template(template_id)
+            # Uploads only write the file.  They never mutate template.json;
+            # the editor adds the asset to its in-memory template and persists
+            # it later through an explicit save.
+            self._read_template(template_id)
             template_dir = self.template_dir(template_id)
             if kind == "background":
                 if not bg_id:
                     raise AssetError("bg_id is required for background uploads")
                 bg_id = validate_asset_id(bg_id)
-                if any(background["id"] == bg_id for background in template["backgrounds"]):
-                    raise ConflictError(f"background {bg_id!r} already exists")
                 relative = f"backgrounds/{bg_id}.png"
                 target = template_dir / "backgrounds" / f"{bg_id}.png"
                 target.parent.mkdir(parents=True, exist_ok=True)
                 _atomic_write_bytes(target, _png_bytes(image))
-                has_fallback = any(
-                    not background["when"] for background in template["backgrounds"]
-                )
-                template["backgrounds"].append(
-                    {
-                        "id": bg_id,
-                        "name": (name or bg_id).strip() or bg_id,
-                        "src": relative,
-                        "when": {},
-                        "priority": 10 if has_fallback else 0,
-                        "fit": "cover",
-                        "offsetX": 0,
-                        "offsetY": 0,
-                        "scale": 1,
-                    }
-                )
-                self._write_template(template)
-                return {"src": relative, "template": self._read_template(template_id)}
+                return {"src": relative}
             relative = "flame.png"
             _atomic_write_bytes(template_dir / "flame.png", _png_bytes(image))
-            flame = next(
-                (
-                    layer
-                    for layer in template["layers"]
-                    if layer["type"] == "image"
-                    and (layer.get("role") == "flame" or layer.get("src") == relative)
-                ),
-                None,
-            )
-            if flame is None:
-                template["layers"].append(
-                    {
-                        "id": "flame-1",
-                        "type": "image",
-                        "role": "flame",
-                        "src": relative,
-                        "x": 660,
-                        "y": 280,
-                        "w": 120,
-                        "h": 140,
-                        "opacity": 1,
-                    }
-                )
-            else:
-                flame["src"] = relative
-            self._write_template(template)
-            return {"src": relative, "template": self._read_template(template_id)}
+            return {"src": relative}
 
     def asset_path(self, template_id: str, filename: str) -> Path:
         validate_template_id(template_id)
@@ -533,7 +493,16 @@ class WidgetStore:
         return items
 
     # -- production rendering -----------------------------------------
-    def render(self, template_id: str, token: str, context: dict[str, Any], *, size: str | None = None, bg_id: str | None = None) -> tuple[bytes, str]:
+    def render(
+        self,
+        template_id: str,
+        token: str,
+        context: dict[str, Any],
+        *,
+        size: str | None = None,
+        bg_id: str | None = None,
+        text_id: str | None = None,
+    ) -> tuple[bytes, str, str]:
         # Imported lazily so validation/store tests do not need the renderer.
         from .renderer import render_template
 
@@ -555,12 +524,18 @@ class WidgetStore:
                 from .schema import select_background
 
                 selected, _ = select_background(template, context)
-            data, warnings = render_template(
+            if text_id is not None and not any(
+                entry.get("id") == text_id
+                for entry in selected["layout"]["texts"]
+            ):
+                raise NotFoundError("text variant not found")
+            data, warnings, used_text = render_template(
                 template,
                 selected,
                 context,
                 template_dir=self.template_dir(template_id),
                 web_root=self.web_root,
+                text_id=text_id,
             )
             if size == "1x":
                 from PIL import Image as PILImage
@@ -574,7 +549,7 @@ class WidgetStore:
                     data = buffer.getvalue()
             for warning in warnings:
                 LOGGER.warning("widget %s: %s", template_id, warning)
-            return data, selected["id"]
+            return data, selected["id"], used_text
 
 
 __all__ = [

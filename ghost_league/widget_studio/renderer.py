@@ -1,8 +1,15 @@
-"""Pillow production renderer for Widget Studio templates."""
+"""Pillow production renderer for Widget Studio templates (schema v3).
+
+Styles are global: every label uses ``styles.label``, the streak number uses
+``styles.streak`` and the flame uses ``styles.flame``.  Positions come from the
+selected background's ``layout``.  One of the background's text variants is
+chosen at random per request unless the caller pins ``text=<text-id>``.
+"""
 
 from __future__ import annotations
 
 import io
+import random
 import re
 from pathlib import Path
 from typing import Any
@@ -15,7 +22,7 @@ FONT_REGULAR = Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
 FONT_BOLD = Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc")
 FONT_INDEX = 2  # Noto Sans CJK SC
 PLACEHOLDER_RE = re.compile(r"\{(streak|xp|rank|name)\}")
-CJK_RE = re.compile(r"[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]")
+CJK_RANGE = "\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef"
 _FONT_CACHE: dict[tuple[int, int], ImageFont.FreeTypeFont] = {}
 
 
@@ -128,7 +135,9 @@ def _tokens(paragraph: str) -> list[str]:
     """Split into wrap tokens: CJK characters stand alone, English by words."""
 
     tokens: list[str] = []
-    for match in re.finditer(r"\s+|[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]|[^\s\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]+", paragraph):
+    for match in re.finditer(
+        rf"\s+|[{CJK_RANGE}]|[^\s{CJK_RANGE}]+", paragraph
+    ):
         tokens.append(match.group(0))
     return tokens
 
@@ -173,32 +182,45 @@ def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: float) -> lis
             lines.append(("", 0.0))
     return lines
 
-def _draw_text_layer(
+
+def _aligned_left(align: str, width: int, line_width: float) -> float:
+    if align == "center":
+        return max(0.0, (width - line_width) / 2)
+    if align == "right":
+        return max(0.0, width - line_width)
+    return 0.0
+
+
+def _draw_text_box(
     canvas: Image.Image,
-    layer: dict[str, Any],
+    style: dict[str, Any],
+    text: str,
+    x: float,
+    y: float,
     context: dict[str, Any],
     warnings: list[str],
+    label: str,
 ) -> None:
-    width = max(1, round(float(layer["w"])))
-    height = max(1, round(float(layer["h"])))
-    x = round(float(layer["x"]))
-    y = round(float(layer["y"]))
-    size = max(1, round(float(layer.get("fontSize", 48))))
-    weight = int(layer.get("fontWeight", 400))
-    line_height = max(0.1, float(layer.get("lineHeight", 1.2))) * size
+    width = max(1, round(float(style["width"])))
+    height = max(1, round(float(style["height"])))
+    left = round(float(x))
+    top = round(float(y))
+    size = max(1, round(float(style.get("fontSize", 48))))
+    weight = int(style.get("fontWeight", 400))
+    line_height = max(0.1, float(style.get("lineHeight", 1.2))) * size
     font = _font(size, weight)
-    text = _format_text(str(layer.get("text", "")), context)
-    color = parse_color(layer.get("color", "#17324d"))
-    align = layer.get("align", "left")
+    formatted = _format_text(str(text), context)
+    color = parse_color(style.get("color", "#17324d"))
+    align = style.get("align", "left")
 
-    lines = _wrap_text(text, font, width)
+    lines = _wrap_text(formatted, font, width)
     max_lines = max(0, int(height // line_height))
     overflow = len(lines) > max_lines
     if overflow:
         lines = lines[:max_lines]
-        warnings.append(f"text layer {layer.get('id')} clipped to its height")
+        warnings.append(f"text {label} clipped to its height")
     layer_image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    shadow = layer.get("shadow")
+    shadow = style.get("shadow")
     if shadow:
         shadow_color = parse_color(shadow.get("color", "rgba(0,0,0,0.35)"), (0, 0, 0, 90))
         shadow_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -208,9 +230,9 @@ def _draw_text_layer(
         for index, (line, line_width) in enumerate(lines):
             if not line:
                 continue
-            left = _aligned_left(align, width, line_width)
+            line_left = _aligned_left(align, width, line_width)
             shadow_draw.text(
-                (left + offset_x, index * line_height + offset_y),
+                (line_left + offset_x, index * line_height + offset_y),
                 line,
                 font=font,
                 fill=shadow_color,
@@ -224,45 +246,53 @@ def _draw_text_layer(
     for index, (line, line_width) in enumerate(lines):
         if not line:
             continue
-        left = _aligned_left(align, width, line_width)
-        draw.text((left, index * line_height), line, font=font, fill=color)
-    canvas.alpha_composite(layer_image, (x, y))
+        line_left = _aligned_left(align, width, line_width)
+        draw.text((line_left, index * line_height), line, font=font, fill=color)
+    canvas.alpha_composite(layer_image, (left, top))
 
 
-def _aligned_left(align: str, width: int, line_width: float) -> float:
-    if align == "center":
-        return max(0.0, (width - line_width) / 2)
-    if align == "right":
-        return max(0.0, width - line_width)
-    return 0.0
-
-
-def _draw_image_layer(
+def _draw_flame(
     canvas: Image.Image,
-    layer: dict[str, Any],
+    style: dict[str, Any],
+    position: dict[str, Any],
     *,
     template_dir: Path,
-    web_root: Path,
     warnings: list[str],
 ) -> None:
-    try:
-        source = _open_rgba(resolve_src(layer["src"], template_dir=template_dir, web_root=web_root))
-    except RenderError as exc:
-        warnings.append(f"image layer {layer.get('id')} skipped: {exc}")
+    path = template_dir / "flame.png"
+    if not path.is_file():
+        warnings.append("flame asset is missing: flame.png")
         return
-    box_w = max(1, round(float(layer["w"])))
-    box_h = max(1, round(float(layer["h"])))
+    try:
+        source = _open_rgba(path)
+    except RenderError as exc:
+        warnings.append(f"flame skipped: {exc}")
+        return
+    box_w = max(1, round(float(style["width"])))
+    box_h = max(1, round(float(style["height"])))
     ratio = min(box_w / source.width, box_h / source.height)
     width = max(1, round(source.width * ratio))
     height = max(1, round(source.height * ratio))
     source = source.resize((width, height), Image.Resampling.LANCZOS)
-    opacity = max(0.0, min(1.0, float(layer.get("opacity", 1))))
+    opacity = max(0.0, min(1.0, float(style.get("opacity", 1))))
     if opacity < 1:
         alpha = source.getchannel("A").point(lambda value: round(value * opacity))
         source.putalpha(alpha)
-    x = round(float(layer["x"])) + (box_w - width) // 2
-    y = round(float(layer["y"])) + (box_h - height) // 2
+    x = round(float(position["x"])) + (box_w - width) // 2
+    y = round(float(position["y"])) + (box_h - height) // 2
     canvas.alpha_composite(source, (x, y))
+
+
+def _pick_text(background: dict[str, Any], text_id: str | None) -> dict[str, Any]:
+    texts = background.get("layout", {}).get("texts") or []
+    if not texts:
+        raise RenderError("background has no text variants")
+    if text_id is not None:
+        for entry in texts:
+            if entry.get("id") == text_id:
+                return entry
+        raise RenderError(f"unknown text variant: {text_id}")
+    return random.choice(texts)
 
 
 def _rounded_alpha(image: Image.Image, radius: int) -> None:
@@ -282,7 +312,8 @@ def render_template(
     *,
     template_dir: Path,
     web_root: Path,
-) -> tuple[bytes, list[str]]:
+    text_id: str | None = None,
+) -> tuple[bytes, list[str], str]:
     canvas_spec = template.get("canvas", {})
     width = int(canvas_spec.get("width", 1536))
     height = int(canvas_spec.get("height", 914))
@@ -297,22 +328,41 @@ def render_template(
         raise RenderError(f"background asset is missing: {background['src']}")
     _paste_background(canvas, _open_rgba(background_path), background)
 
-    for layer in template.get("layers", []):
-        if layer.get("type") == "text":
-            _draw_text_layer(canvas, layer, context, warnings)
-        elif layer.get("type") == "image":
-            _draw_image_layer(
-                canvas,
-                layer,
-                template_dir=template_dir,
-                web_root=web_root,
-                warnings=warnings,
-            )
+    styles = template.get("styles") or {}
+    layout = background.get("layout") or {}
+    chosen = _pick_text(background, text_id)
+    _draw_text_box(
+        canvas,
+        styles["label"],
+        chosen.get("text", ""),
+        chosen["x"],
+        chosen["y"],
+        context,
+        warnings,
+        f"text {chosen['id']}",
+    )
+    _draw_text_box(
+        canvas,
+        styles["streak"],
+        "{streak}",
+        layout["streak"]["x"],
+        layout["streak"]["y"],
+        context,
+        warnings,
+        "streak",
+    )
+    _draw_flame(
+        canvas,
+        styles["flame"],
+        layout["flame"],
+        template_dir=template_dir,
+        warnings=warnings,
+    )
 
     _rounded_alpha(canvas, radius)
     buffer = io.BytesIO()
     canvas.save(buffer, format="PNG")
-    return buffer.getvalue(), warnings
+    return buffer.getvalue(), warnings, str(chosen["id"])
 
 
 __all__ = [
