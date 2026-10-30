@@ -22,7 +22,6 @@ import sys
 import tempfile
 import textwrap
 import time
-import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -241,7 +240,11 @@ def main() -> int:
             )
             wait_saved(page)
             assert page.locator("#save-template-btn").is_disabled()
-            print("PASS new template is saved and save button is disabled")
+            fixed_url = f"{origin}/v1/widgets/owner/nijika-e2e.png"
+            assert page.input_value("#widget-fixed-url") == fixed_url
+            assert page.inner_text("#widget-user-id") == "owner"
+            assert page.inner_text("#widget-template-id") == "nijika-e2e"
+            print("PASS editor shows the fixed user_id + template_id URL")
 
             # Uploads only write files; they mark the in-memory template dirty
             # and never PUT on their own.
@@ -253,6 +256,7 @@ def main() -> int:
             wait_dirty(page)
             page.wait_for_timeout(1600)
             assert not put_requests, "uploads must not auto-PUT"
+            assert page.input_value("#widget-fixed-url") == fixed_url
             saved_after_upload = fetch_template(context, origin, "nijika-e2e")
             assert len(saved_after_upload["backgrounds"]) == 1, saved_after_upload
             page.click("#save-template-btn")
@@ -271,13 +275,23 @@ def main() -> int:
                 timeout=15000,
             )
             wait_saved(page)
+            page.wait_for_function(
+                "document.querySelector('#widget-fixed-url').value.endsWith('/v1/widgets/owner/second-e2e.png')",
+                timeout=15000,
+            )
+            assert page.input_value("#widget-fixed-url") == f"{origin}/v1/widgets/owner/second-e2e.png"
             page.select_option("#template-select", "nijika-e2e")
             page.wait_for_function(
                 "document.querySelector('#template-select').value === 'nijika-e2e'",
                 timeout=15000,
             )
+            page.wait_for_function(
+                "document.querySelector('#widget-fixed-url').value.endsWith('/v1/widgets/owner/nijika-e2e.png')",
+                timeout=15000,
+            )
             wait_saved(page)
-            print("PASS created second template for switch confirmation")
+            assert page.input_value("#widget-fixed-url") == fixed_url
+            print("PASS changing the outer template changes template_id in the URL")
 
             # Condition edits stay local until an explicit save.
             page.click('.bg-card[data-bg-id="bg-morning"] .bg-card-head')
@@ -289,12 +303,14 @@ def main() -> int:
                 timeout=5000,
             )
             wait_dirty(page)
+            assert page.input_value("#widget-fixed-url") == fixed_url
             put_requests.clear()
             page.wait_for_timeout(1600)
             assert not put_requests, "condition edits must not auto-PUT"
             page.click("#save-template-btn")
             wait_saved(page)
-            print("PASS condition edits wait for explicit save")
+            assert page.input_value("#widget-fixed-url") == fixed_url
+            print("PASS condition edits wait for explicit save and keep the URL fixed")
 
             # Drag text, streak number and flame: each stays local for >1.5s.
             page.click('.text-item[data-text-id="text-1"]')
@@ -394,20 +410,27 @@ def main() -> int:
             morning = next(bg for bg in saved["backgrounds"] if bg["id"] == "bg-morning")
             text_ids = [item["id"] for item in morning["layout"]["texts"]]
             assert text_ids == ["text-1", "text-2", "text-3"], text_ids
-            print("PASS added two text variants and saved them")
+            assert page.input_value("#widget-fixed-url") == fixed_url
+            print("PASS added two text variants without changing the URL")
 
-            # Fixed text= previews and random preview headers.
-            for text_id in text_ids:
-                response = context.request.get(
-                    f"{origin}/v1/widgets/nijika-e2e.png?"
-                    + urllib.parse.urlencode(
-                        {"token": saved["render_token"], "bg": "bg-morning", "text": text_id, "streak": "12"}
-                    )
-                )
+            # Fixed URL: no data query, and the headers belong to the saved
+            # background that the server selected for this user.
+            saved = fetch_template(context, origin, "nijika-e2e")
+            backgrounds = {bg["id"]: bg for bg in saved["backgrounds"]}
+            fixed = f"{origin}/v1/widgets/owner/nijika-e2e.png"
+            assert "?" not in fixed
+            seen_texts: list[str] = []
+            for _ in range(12):
+                response = context.request.get(fixed)
                 assert response.status == 200, response.text()
-                assert response.headers["x-widget-text"] == text_id
-                assert response.headers["x-widget-background"] == "bg-morning"
-            print("PASS fixed text= switches every text variant")
+                bg_id = response.headers["x-widget-background"]
+                text_id = response.headers["x-widget-text"]
+                assert bg_id in backgrounds, bg_id
+                assert text_id in [
+                    item["id"] for item in backgrounds[bg_id]["layout"]["texts"]
+                ], text_id
+                seen_texts.append(text_id)
+            print(f"PASS fixed URL returns headers in its own background ({sorted(set(seen_texts))})")
 
             page.fill("#preview-hour", "8")
             page.select_option("#preview-weekday", "1")
@@ -420,26 +443,18 @@ def main() -> int:
             page.click("#random-preview-btn")
             page.wait_for_selector("#preview-modal:not([hidden])")
             page.wait_for_function(
-                "document.querySelector('#preview-meta').textContent.includes('随机预览')",
+                "document.querySelector('#preview-meta').textContent.includes('随机刷新')",
                 timeout=10000,
             )
+            assert page.input_value("#production-url") == fixed
             meta = page.locator("#preview-meta").inner_text()
-            match = re.search(r"文字 (\S+)", meta)
-            assert match and match.group(1) in text_ids, meta
-            assert "bg-morning" in meta, meta
-            random_header = None
-            for _ in range(12):
-                response = context.request.get(
-                    f"{origin}/v1/widgets/nijika-e2e.png?"
-                    + urllib.parse.urlencode(
-                        {"token": saved["render_token"], "bg": "bg-morning", "streak": "12"}
-                    )
-                )
-                assert response.status == 200
-                random_header = response.headers.get("x-widget-text")
-                assert random_header in text_ids, random_header
+            match = re.search(r"底图 (\S+) · 文字 (\S+)", meta)
+            assert match and match.group(1) in backgrounds, meta
+            assert match.group(2) in [
+                item["id"] for item in backgrounds[match.group(1)]["layout"]["texts"]
+            ], meta
             page.click("#preview-close")
-            print(f"PASS random preview returns X-Widget-Text in {text_ids} ({random_header})")
+            print("PASS production preview uses the fixed URL without a query")
 
             # Background B has independent coordinates; both survive reload.
             page.click('.bg-card[data-bg-id="bg-night"] .bg-card-head')
@@ -478,7 +493,18 @@ def main() -> int:
             page.click('.text-item[data-text-id="text-2"]')
             assert float(page.input_value("#text-x")) == 100
             assert float(page.input_value("#text-y")) == 120
-            print("PASS reload restores per-background coordinates")
+            assert page.input_value("#widget-fixed-url") == fixed_url
+            print("PASS reload restores per-background coordinates and the fixed URL")
+
+            # Open the fixed URL directly, with no data query.
+            direct = context.new_page()
+            direct_response = direct.goto(fixed_url, wait_until="load")
+            assert direct_response is not None
+            assert direct_response.status == 200
+            assert direct_response.headers.get("content-type", "").startswith("image/png")
+            assert "?" not in direct.url
+            direct.close()
+            print("PASS direct fixed URL opens without a query")
 
             # Final view for screenshots: three readable text variants on A.
             page.wait_for_timeout(300)
@@ -489,6 +515,7 @@ def main() -> int:
             mobile_box = page.locator("#studio-canvas").bounding_box()
             assert mobile_box is not None and 0 < mobile_box["width"] <= 390
             assert page.is_visible("#new-template-btn")
+            assert page.is_visible("#widget-fixed-url")
             assert page.locator("#text-variant-list .text-item").count() == 3
             page.screenshot(path=str(ARTIFACTS / "widget-studio-390.png"), full_page=False)
             print("PASS desktop/mobile screenshots")

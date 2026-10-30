@@ -23,7 +23,6 @@ MAX_FILE_BYTES = 15 * 1024 * 1024
 
 TEMPLATE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 ASSET_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-RENDER_TOKEN_RE = re.compile(r"^[0-9a-f]{32}$")
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 
 WHEN_FIELDS = {
@@ -93,12 +92,6 @@ def validate_asset_id(asset_id: Any) -> str:
     if not isinstance(asset_id, str) or not ASSET_ID_RE.fullmatch(asset_id):
         raise ValidationError("invalid asset id")
     return asset_id
-
-
-def validate_render_token(token: Any) -> str:
-    if not isinstance(token, str) or not RENDER_TOKEN_RE.fullmatch(token):
-        raise ValidationError("render_token must be 32 lowercase hex characters")
-    return token
 
 
 def validate_src(src: Any, *, template_dir: Path, web_root: Path) -> str:
@@ -406,7 +399,6 @@ def normalize_template(
     if not any(not background["when"] for background in backgrounds):
         raise ValidationError("every template needs at least one fallback background (when: {})")
 
-    render_token = raw.get("render_token")
     normalized: dict[str, Any] = {
         "version": TEMPLATE_VERSION,
         "id": template_id,
@@ -415,8 +407,6 @@ def normalize_template(
         "styles": styles,
         "backgrounds": backgrounds,
     }
-    if render_token is not None:
-        normalized["render_token"] = validate_render_token(render_token)
     updated_at = raw.get("updated_at")
     if updated_at is not None:
         if not isinstance(updated_at, str) or not 1 <= len(updated_at) <= 64:
@@ -512,7 +502,6 @@ __all__ = [
     "select_background",
     "slugify",
     "validate_asset_id",
-    "validate_render_token",
     "validate_src",
     "validate_template_id",
 ]

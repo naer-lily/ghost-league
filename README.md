@@ -137,11 +137,14 @@ token。systemd 模板把 token 放在 `/etc/ghost-league/waka.env`（0600）；
   `layout.streak` 和 `layout.flame` 坐标。没有全局图层；样式只在编辑器里只读展示。
 - Ghost 现有 `web/assets/tiers/card/*.png` 和 `web/assets/frames/*.png` 通过
   `ghost:assets/...` 原地引用，不复制。
-- API：`/v1/widget-studio`（模版列表/详情与写接口要求现有 Bearer；图片、缩略图和资源库只读公开）；生产图：
-  `GET /v1/widgets/<id>.png?token=<render_token>&streak=...&xp=...&rank=...&name=...`。
-  生产图不需要 Bearer，无 token / 错 token 返回 404；支持 `size=1x`（368×219）、仅调试用的
-  `bg=<bg_id>` 和 `text=<text-id>`，响应头返回 `X-Widget-Background` / `X-Widget-Text`。
-  不传 `text` 时在该底图的文字变体中随机选一条。
+- API：`/v1/widget-studio`（模版列表/详情与写接口要求现有 Bearer；图片、缩略图和资源库只读公开）。
+- 生产图固定路径：`GET /v1/widgets/<user_id>/<template_id>.png`，不需要 Bearer，也不带数据
+  query；数据由服务端按 `user_id` 从 Ghost 当前状态读取。用户/模版不存在、路径或 JSON
+  非法返回 404。1x 用单独路径 `<template_id>-1x.png`（368×219）。响应头返回
+  `X-Widget-Background` / `X-Widget-Text`，并在该底图的文字变体中随机选一条。
+- 编辑器顶部“我的小组件”显示当前登录 `user_id` + 当前 `template_id` 的固定 URL，可复制；
+  换外层模版改变 URL 中的 `template_id`，换底图/文字/条件 URL 不变。生产预览直接请求
+  固定 URL，提示显示已保存版本。
 - 显式保存：拖动、输入文字、改条件、改 x/y 都不写文件；只有 `Ctrl/Cmd+S` 或“保存”按钮
   PUT 完整 snapshot。上传底图/火焰只写文件并返回 `src`，编辑器标“未保存”，保存后才改 JSON。
 - 主画布即时绘制，`pointermove` 不发请求；右侧只调文字内容与位置，不提供样式输入。

@@ -21,6 +21,9 @@ from ghost_league.widget_studio.schema import select_background
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "widget-studio-test-token"
 NOW = datetime(2026, 10, 30, 12, 0, 0, tzinfo=TZ)
+WEDNESDAY = datetime(2026, 10, 28, 12, 0, 0, tzinfo=TZ)
+WEDNESDAY_MORNING = datetime(2026, 10, 28, 6, 0, 0, tzinfo=TZ)
+UNSET = object()
 
 
 def auth() -> dict[str, str]:
@@ -152,17 +155,59 @@ class WidgetStudioAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
-    def render(self, template: dict, **params):
-        query = {"token": template["render_token"], **params}
-        response = self.client.get(f"/v1/widgets/{template['id']}.png", params=query)
-        return response
+    def status(self, **overrides) -> dict:
+        payload = {
+            "user_id": "owner",
+            "display_name": "那尔",
+            "tier": "Bronze",
+            "streak": {
+                "current": 12,
+                "longest": 20,
+                "clean_current": 12,
+                "last_checked_date": "2026-10-30",
+            },
+            "xp": 345,
+            "rank": 3,
+            "checkin": None,
+            "today_xp": 0,
+            "required_xp": 100,
+        }
+        payload.update(overrides)
+        if isinstance(payload["streak"], int):
+            current = payload["streak"]
+            payload["streak"] = {
+                "current": current,
+                "longest": max(current, 20),
+                "clean_current": current,
+                "last_checked_date": "2026-10-30",
+            }
+        return payload
+
+    def render(
+        self,
+        template: dict,
+        *,
+        user_id: str = "owner",
+        status=UNSET,
+        params: dict | None = None,
+        size: str | None = None,
+    ):
+        payload = self.status() if status is UNSET else status
+        suffix = "-1x" if size == "1x" else ""
+        url = f"/v1/widgets/{user_id}/{template['id']}{suffix}.png"
+        with patch.object(
+            self.app.state.game_service,
+            "status_for_user",
+            return_value=payload,
+        ):
+            return self.client.get(url, params=params)
 
     # -- tests --------------------------------------------------------
     def test_01_create_read_update_list_delete(self) -> None:
         template = self.create_template()
         self.assertEqual(template["id"], "nijika")
         self.assertEqual(template["version"], 3)
-        self.assertRegex(template["render_token"], r"^[0-9a-f]{32}$")
+        self.assertNotIn("render_token", template)
         self.assertEqual(template["canvas"]["width"], 1536)
         self.assertEqual(set(template["styles"]), {"label", "streak", "flame"})
         self.assertEqual(template["styles"]["label"]["fontSize"], 64)
@@ -176,6 +221,7 @@ class WidgetStudioAPITests(unittest.TestCase):
         self.assertEqual(listing.json()[0]["background_count"], 1)
         self.assertEqual(listing.json()[0]["text_count"], 1)
         self.assertNotIn("layer_count", listing.json()[0])
+        self.assertNotIn("render_token", listing.json()[0])
 
         fetched = self.client.get(
             f"/v1/widget-studio/templates/{template['id']}", headers=auth()
@@ -307,24 +353,19 @@ class WidgetStudioAPITests(unittest.TestCase):
         self.assertEqual(stored["version"], 3)
         self.assertEqual(stored["id"], template["id"])
 
-    def test_04_conditions_priority_fallback_and_override(self) -> None:
+    def test_04_conditions_priority_and_fallback_from_status(self) -> None:
         template = self.create_template()
         specs = [
             ("bg-hour", {"hour_from": 5, "hour_to": 11}, 100),
-            ("bg-weekday", {"weekdays": [1]}, 90),
+            ("bg-weekday", {"weekdays": [5]}, 90),
             ("bg-streak", {"streak_min": 7, "streak_max": 29}, 80),
             ("bg-completed", {"completed_today": True}, 70),
             ("bg-league", {"league": "bronze"}, 60),
-            ("bg-tie-a", {"event": "tie"}, 55),
-            ("bg-tie-b", {"event": "tie"}, 55),
-            ("bg-event", {"event": "rush"}, 50),
         ]
         for bg_id, _, _ in specs:
             template = self.add_local_background(template, bg_id, name=bg_id)
 
-        backgrounds = [
-            background("bg-fallback", template["backgrounds"][0]["src"])
-        ]
+        backgrounds = [background("bg-fallback", template["backgrounds"][0]["src"])]
         for bg_id, when, priority in specs:
             backgrounds.append(
                 background(
@@ -345,31 +386,60 @@ class WidgetStudioAPITests(unittest.TestCase):
         template = self.put(template)
 
         cases = [
-            ({"hour": 6, "weekday": 2, "streak": 0, "completed": 0, "league": "gold", "event": "x"}, "bg-hour"),
-            ({"hour": 12, "weekday": 1, "streak": 0, "completed": 0, "league": "gold", "event": "x"}, "bg-weekday"),
-            ({"hour": 12, "weekday": 2, "streak": 12, "completed": 0, "league": "gold", "event": "x"}, "bg-streak"),
-            ({"hour": 12, "weekday": 2, "streak": 0, "completed": 1, "league": "gold", "event": "x"}, "bg-completed"),
-            ({"hour": 12, "weekday": 2, "streak": 0, "completed": 0, "league": "bronze", "event": "x"}, "bg-league"),
-            ({"hour": 12, "weekday": 2, "streak": 0, "completed": 0, "league": "gold", "event": "rush"}, "bg-event"),
-            ({"hour": 12, "weekday": 2, "streak": 0, "completed": 0, "league": "gold", "event": "tie"}, "bg-tie-a"),
-            ({"hour": 12, "weekday": 2, "streak": 0, "completed": 0, "league": "gold", "event": ""}, "bg-fallback"),
+            (self.status(streak=0, tier="Gold"), WEDNESDAY, "bg-fallback"),
+            (self.status(streak=12, tier="Gold"), WEDNESDAY, "bg-streak"),
+            (self.status(streak=0, tier="Gold", checkin="verified"), WEDNESDAY, "bg-completed"),
+            (self.status(streak=0, tier="Bronze"), WEDNESDAY, "bg-league"),
             (
-                {"hour": 6, "weekday": 1, "streak": 12, "completed": 1, "league": "bronze", "event": "rush"},
+                self.status(streak=0, tier="Gold"),
+                WEDNESDAY_MORNING,
+                "bg-hour",
+            ),
+            (
+                self.status(streak=0, tier="Gold"),
+                NOW,
+                "bg-weekday",
+            ),
+            (
+                self.status(streak=12, tier="Bronze", checkin="verified"),
+                WEDNESDAY_MORNING,
                 "bg-hour",
             ),
         ]
-        for params, expected in cases:
-            response = self.render(template, **params)
+        for payload, when, expected in cases:
+            self.clock["now"] = when
+            response = self.render(template, status=payload)
             self.assertEqual(response.status_code, 200, response.text)
-            self.assertEqual(response.headers["x-widget-background"], expected, params)
+            self.assertEqual(response.headers["x-widget-background"], expected, when)
 
-        forced = self.render(template, bg="bg-event")
-        self.assertEqual(forced.status_code, 200)
-        self.assertEqual(forced.headers["x-widget-background"], "bg-event")
-        self.assertEqual(forced.headers["cache-control"], "no-store")
+        # Unknown check-in shapes fall back to today_xp >= required_xp.
+        self.clock["now"] = WEDNESDAY
+        completed = self.render(
+            template,
+            status=self.status(
+                streak=0,
+                tier="Gold",
+                checkin={"unexpected": True},
+                today_xp=100,
+                required_xp=100,
+            ),
+        )
+        self.assertEqual(completed.headers["x-widget-background"], "bg-completed")
+        incomplete = self.render(
+            template,
+            status=self.status(
+                streak=0,
+                tier="Gold",
+                checkin={"unexpected": True},
+                today_xp=99,
+                required_xp=100,
+            ),
+        )
+        self.assertEqual(incomplete.headers["x-widget-background"], "bg-fallback")
 
-        bad_bg = self.render(template, bg="bg-missing")
-        self.assertEqual(bad_bg.status_code, 404)
+        # Event data is never accepted from the URL or status.
+        selected, _ = select_background(template, {"event": "rush", "hour": 12})
+        self.assertEqual(selected["id"], "bg-fallback")
 
     def test_05_text_variants_random_and_per_background_positions(self) -> None:
         template = self.create_template()
@@ -388,45 +458,40 @@ class WidgetStudioAPITests(unittest.TestCase):
         template["backgrounds"][0]["layout"] = layout_a
         template = self.put(template)
 
-        for text_id in ("text-1", "text-2", "text-3"):
-            response = self.render(template, text=text_id, streak=12)
+        for index, text_id in enumerate(("text-1", "text-2", "text-3")):
+            with patch(
+                "ghost_league.widget_studio.renderer.random.choice",
+                side_effect=lambda entries, index=index: entries[index],
+            ):
+                response = self.render(template)
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.headers["x-widget-background"], "bg-default")
             self.assertEqual(response.headers["x-widget-text"], text_id)
-
-        unknown = self.render(template, text="text-missing")
-        self.assertEqual(unknown.status_code, 404)
+            self.assertIn(
+                text_id,
+                [
+                    item["id"]
+                    for item in template["backgrounds"][0]["layout"]["texts"]
+                ],
+            )
 
         with patch(
             "ghost_league.widget_studio.renderer.random.choice",
             side_effect=lambda entries: entries[1],
         ):
-            first = self.render(template, streak=12)
-            second = self.render(template, streak=12)
+            first = self.render(template)
+            second = self.render(template)
         self.assertEqual(first.headers["x-widget-text"], "text-2")
         self.assertEqual(second.headers["x-widget-text"], "text-2")
 
-        with patch(
-            "ghost_league.widget_studio.renderer.random.choice",
-            side_effect=lambda entries: entries[0],
-        ):
-            self.assertEqual(
-                self.render(template, streak=12).headers["x-widget-text"], "text-1"
-            )
-        with patch(
-            "ghost_league.widget_studio.renderer.random.choice",
-            side_effect=lambda entries: entries[2],
-        ):
-            self.assertEqual(
-                self.render(template, streak=12).headers["x-widget-text"], "text-3"
-            )
-
         # Different backgrounds carry different streaks/flames/text positions.
-        template = self.add_local_background(
-            template,
-            "bg-other",
-        )
+        template = self.add_local_background(template, "bg-other")
+        default = next(bg for bg in template["backgrounds"] if bg["id"] == "bg-default")
         other = next(bg for bg in template["backgrounds"] if bg["id"] == "bg-other")
+        default["when"] = {"hour_from": 5, "hour_to": 11}
+        default["priority"] = 50
+        other["when"] = {}
+        other["priority"] = 0
         other["layout"] = default_layout(
             text="另一张",
             x=120,
@@ -435,19 +500,28 @@ class WidgetStudioAPITests(unittest.TestCase):
             flame=(160, 200),
         )
         template = self.put(template)
-        first_image = self.render(template, bg="bg-default", text="text-1", streak=12)
-        other_image = self.render(template, bg="bg-other", text="text-1", streak=12)
-        self.assertEqual(first_image.status_code, 200)
-        self.assertEqual(other_image.status_code, 200)
-        self.assertEqual(other_image.headers["x-widget-background"], "bg-other")
-        self.assertNotEqual(first_image.content, other_image.content)
 
-    def test_06_render_size_alpha_and_token(self) -> None:
+        self.clock["now"] = datetime(2026, 10, 30, 6, 0, 0, tzinfo=TZ)
+        with patch(
+            "ghost_league.widget_studio.renderer.random.choice",
+            side_effect=lambda entries: entries[0],
+        ):
+            morning = self.render(template)
+            self.clock["now"] = datetime(2026, 10, 30, 12, 0, 0, tzinfo=TZ)
+            evening = self.render(template)
+        self.assertEqual(morning.headers["x-widget-background"], "bg-default")
+        self.assertEqual(evening.headers["x-widget-background"], "bg-other")
+        self.assertEqual(morning.headers["x-widget-text"], "text-1")
+        self.assertEqual(evening.headers["x-widget-text"], "text-1")
+        self.assertNotEqual(morning.content, evening.content)
+
+    def test_06_fixed_url_size_alpha_and_404s(self) -> None:
         template = self.create_template()
-        response = self.render(template, streak=12, xp=345, rank=3, name="那尔")
+        response = self.render(template)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.headers["x-widget-background"], "bg-default")
         self.assertEqual(response.headers["x-widget-text"], "text-1")
+        self.assertEqual(response.headers["cache-control"], "no-store")
         with Image.open(io.BytesIO(response.content)) as image:
             self.assertEqual(image.size, (1536, 914))
             self.assertEqual(image.mode, "RGBA")
@@ -460,21 +534,56 @@ class WidgetStudioAPITests(unittest.TestCase):
         with Image.open(io.BytesIO(small.content)) as image:
             self.assertEqual(image.size, (368, 219))
 
-        wrong = self.client.get(
-            f"/v1/widgets/{template['id']}.png", params={"token": "0" * 32}
-        )
-        self.assertEqual(wrong.status_code, 404)
-        missing = self.client.get(f"/v1/widgets/{template['id']}.png")
-        self.assertEqual(missing.status_code, 404)
-        unknown = self.client.get(
-            "/v1/widgets/does-not-exist.png", params={"token": "0" * 32}
-        )
-        self.assertEqual(unknown.status_code, 404)
-        invalid_size = self.render(template, size="2x")
-        self.assertEqual(invalid_size.status_code, 400)
+        noisy = {
+            "streak": "999",
+            "xp": "999",
+            "rank": "999",
+            "name": "evil",
+            "hour": "23",
+            "weekday": "7",
+            "completed": "1",
+            "league": "diamond",
+            "event": "rush",
+            "token": "0" * 32,
+            "size": "1x",
+            "bg": "bg-missing",
+            "text": "text-missing",
+        }
+        ignored = self.render(template, params=noisy)
+        self.assertEqual(ignored.status_code, 200, ignored.text)
+        self.assertEqual(ignored.content, response.content)
+        self.assertEqual(ignored.headers["x-widget-background"], "bg-default")
+        self.assertEqual(ignored.headers["x-widget-text"], "text-1")
+        with Image.open(io.BytesIO(ignored.content)) as image:
+            self.assertEqual(image.size, (1536, 914))
 
-    def test_07_disk_edit_is_live_without_restart(self) -> None:
+        unknown_user = self.render(template, user_id="ghost-user", status=None)
+        self.assertEqual(unknown_user.status_code, 404)
+        unknown_template = self.render(
+            {"id": "does-not-exist"}, status=self.status()
+        )
+        self.assertEqual(unknown_template.status_code, 404)
+        bad_user = self.client.get("/v1/widgets/bad!user/nijika.png")
+        self.assertEqual(bad_user.status_code, 404)
+        bad_template = self.client.get("/v1/widgets/owner/bad!id.png")
+        self.assertEqual(bad_template.status_code, 404)
+        missing_suffix = self.client.get("/v1/widgets/owner/nijika")
+        self.assertEqual(missing_suffix.status_code, 404)
+
+        broken = self.widgets_dir / "broken-template"
+        broken.mkdir(parents=True)
+        (broken / "template.json").write_text("{not json", encoding="utf-8")
+        corrupt = self.render({"id": "broken-template"}, status=self.status())
+        self.assertEqual(corrupt.status_code, 404)
+
+    def test_07_status_and_template_edits_change_same_url(self) -> None:
         template = self.create_template()
+        first = self.render(template, status=self.status(streak=12))
+        second = self.render(template, status=self.status(streak=99))
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertNotEqual(first.content, second.content)
+
         template = self.add_local_background(template, "bg-special")
         path = self.widgets_dir / template["id"] / "template.json"
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -484,13 +593,42 @@ class WidgetStudioAPITests(unittest.TestCase):
         default["priority"] = 50
         special["when"] = {}
         special["priority"] = 0
-        special["layout"]["streak"] = {"x": 1, "y": 2}
         path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
 
         ordinary = self.render(template)
         self.assertEqual(ordinary.headers["x-widget-background"], "bg-special")
-        special_response = self.render(template, event="special")
-        self.assertEqual(special_response.headers["x-widget-background"], "bg-default")
+
+        raw["backgrounds"] = [
+            background(
+                "bg-default",
+                next(bg for bg in raw["backgrounds"] if bg["id"] == "bg-default")["src"],
+                layout=default_layout(text="新底图文字"),
+            ),
+            background(
+                "bg-special",
+                next(bg for bg in raw["backgrounds"] if bg["id"] == "bg-special")["src"],
+                when={"hour_from": 0, "hour_to": 1},
+            ),
+        ]
+        path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+        changed_condition = self.render(template)
+        self.assertEqual(changed_condition.headers["x-widget-background"], "bg-default")
+        self.assertNotEqual(changed_condition.content, ordinary.content)
+
+        text_changed = json.loads(path.read_text(encoding="utf-8"))
+        text_changed["backgrounds"][0]["layout"]["texts"][0]["text"] = "又一条"
+        path.write_text(json.dumps(text_changed, ensure_ascii=False), encoding="utf-8")
+        after_text = self.render(template)
+        self.assertNotEqual(after_text.content, changed_condition.content)
+
+        self.upload(
+            template["id"],
+            "background",
+            bg_id="bg-default",
+            data=png_bytes(color=(250, 30, 90)),
+        )
+        after_image = self.render(template)
+        self.assertNotEqual(after_image.content, after_text.content)
 
     def test_08_invalid_inputs_are_4xx(self) -> None:
         self.assertEqual(
@@ -597,6 +735,8 @@ class WidgetStudioAPITests(unittest.TestCase):
             page = client.get("/widget-studio/")
             self.assertEqual(page.status_code, 200)
             self.assertIn("Widget Studio", page.text)
+            self.assertIn("我的小组件", page.text)
+            self.assertIn("widget-fixed-url", page.text)
             self.assertIn("/widget-studio/app.js", page.text)
             script = client.get("/widget-studio/app.js")
             self.assertEqual(script.status_code, 200)
@@ -697,6 +837,7 @@ class WidgetStudioAPITests(unittest.TestCase):
         migrated = module.migrate(raw_v2)
         self.assertEqual(migrated["version"], 3)
         self.assertNotIn("layers", migrated)
+        self.assertNotIn("render_token", migrated)
         self.assertEqual(migrated["styles"]["label"]["fontSize"], 64)
         layout = migrated["backgrounds"][0]["layout"]
         self.assertEqual(

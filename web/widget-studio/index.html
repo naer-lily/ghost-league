@@ -25,7 +25,6 @@
     </div>
     <div class="top-actions">
       <button id="save-template-btn" class="btn btn-accent save-btn" type="button" disabled title="Ctrl/Cmd+S">保存</button>
-      <button id="copy-production-url" class="btn" type="button">复制生产 URL</button>
       <span id="sync-status" class="sync-status" role="status">未加载</span>
     </div>
   </header>
@@ -43,6 +42,22 @@
   </section>
 
   <div id="studio-shell" class="studio-shell" hidden>
+    <section class="widget-url-bar" aria-label="我的小组件">
+      <div class="widget-url-head">
+        <p class="eyebrow">我的小组件</p>
+        <p class="widget-url-ids">
+          用户 <code id="widget-user-id">未登录</code>
+          · 外层模版 <code id="widget-template-id">未选择</code>
+        </p>
+      </div>
+      <div class="url-row widget-url-row">
+        <label class="sr-only" for="widget-fixed-url">我的小组件固定 URL</label>
+        <input id="widget-fixed-url" type="text" readonly placeholder="登录并选择模版后显示固定 URL">
+        <button id="copy-widget-url" class="btn btn-small btn-accent" type="button">复制</button>
+      </div>
+      <p class="hint widget-url-hint">一个用户 + 一个模版 = 一个固定 URL；换外层模版会改变 URL 中的 template_id，换底图/文字/条件 URL 不变。数据由服务端按 user_id 实时读取。</p>
+    </section>
+
     <main class="studio">
       <aside class="panel panel-left">
         <section class="panel-section bg-section">
@@ -101,8 +116,8 @@
             <label>事件 <input id="preview-event" type="text" maxlength="64" placeholder="rush"></label>
           </div>
           <div class="context-row production-row">
-            <span class="production-label">生产 URL</span>
-            <input id="production-url-inline" type="text" readonly aria-label="生产 URL">
+            <span class="production-label">固定 URL</span>
+            <input id="production-url-inline" type="text" readonly aria-label="我的小组件固定 URL">
             <button id="copy-production-inline" class="btn btn-small" type="button">复制</button>
           </div>
         </div>
@@ -161,10 +176,10 @@
         <h2 id="preview-modal-title">生产预览</h2>
         <button id="preview-close" class="btn btn-small" type="button">关闭</button>
       </div>
-      <p class="muted">由 Ghost API 按当前保存后的 JSON 实时渲染，不替代主画布。</p>
+      <p class="muted">生产预览直接请求固定 URL，显示已保存版本；未保存的改动只在左侧即时画布上。</p>
       <p id="preview-meta" class="preview-meta" role="status"></p>
       <img id="production-image" class="production-image" alt="生产 Widget 预览">
-      <label for="production-url">生产 URL</label>
+      <label for="production-url">固定 URL</label>
       <div class="url-row">
         <input id="production-url" type="text" readonly>
         <button id="preview-copy-btn" class="btn btn-small" type="button">复制</button>

@@ -23,6 +23,7 @@
 
   const state = {
     token: "",
+    userId: "",
     templates: [],
     template: null,
     selectedBgId: null,
@@ -201,6 +202,24 @@
     return payload;
   }
 
+  async function fetchCurrentUser() {
+    const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+    const response = await fetch("/v1/me/profile", {
+      headers,
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      if (response.status === 401) {
+        requireLogin("令牌无效或已过期，请重新粘贴 Ghost 令牌。");
+      }
+      throw new ApiError(response.status, "无法读取当前用户");
+    }
+    const profile = await response.json();
+    const userId = String(profile?.user_id || "");
+    if (!userId) throw new ApiError(500, "当前用户缺少 user_id");
+    state.userId = userId;
+  }
+
   function requireLogin(message) {
     state.token = "";
     try {
@@ -267,6 +286,7 @@
     $("studio-shell").hidden = false;
     setStatus("正在加载…", "saving");
     try {
+      await fetchCurrentUser();
       const templates = await api("/templates");
       state.templates = Array.isArray(templates) ? templates : [];
       renderTemplateSelect();
@@ -362,13 +382,11 @@
       select.disabled = true;
       $("duplicate-template-btn").disabled = true;
       $("delete-template-btn").disabled = true;
-      $("copy-production-url").disabled = true;
       return;
     }
     select.disabled = false;
     $("duplicate-template-btn").disabled = false;
     $("delete-template-btn").disabled = false;
-    $("copy-production-url").disabled = false;
     for (const template of state.templates) {
       const option = document.createElement("option");
       option.value = template.id;
@@ -1341,10 +1359,15 @@
   }
 
   function updateProductionDisplay() {
-    const input = $("production-url-inline");
-    if (!input) return;
-    const value = state.template ? productionUrl({ manualBg: true }) : "";
-    if (input.value !== value) input.value = value;
+    const value = state.template ? productionUrl() : "";
+    for (const id of ["production-url-inline", "widget-fixed-url"]) {
+      const input = $(id);
+      if (input && input.value !== value) input.value = value;
+    }
+    const userId = $("widget-user-id");
+    if (userId) userId.textContent = state.userId || "未登录";
+    const templateId = $("widget-template-id");
+    if (templateId) templateId.textContent = state.template?.id || "未选择";
   }
 
   // -- pointer interaction ------------------------------------------
@@ -1723,7 +1746,6 @@
       }
       const copy = clone(source);
       copy.id = created.id;
-      copy.render_token = created.render_token;
       copy.updated_at = new Date().toISOString();
       await api(`/templates/${encodeURIComponent(created.id)}`, { method: "PUT", body: copy });
       await loadTemplates();
@@ -1782,29 +1804,13 @@
     });
   }
 
-  // -- production URL / preview --------------------------------------
-  function productionParams(options = {}) {
-    const params = new URLSearchParams();
-    params.set("token", state.template?.render_token || "");
-    params.set("streak", String(state.preview.streak));
-    params.set("xp", String(state.preview.xp));
-    params.set("rank", String(state.preview.rank));
-    params.set("name", state.preview.name || "");
-    params.set("hour", String(state.preview.hour));
-    params.set("weekday", String(state.preview.weekday));
-    params.set("completed", state.preview.completed_today ? "1" : "0");
-    if (state.preview.league) params.set("league", state.preview.league);
-    if (state.preview.event) params.set("event", state.preview.event);
-    if (options.text) params.set("text", options.text);
-    if (options.bg) params.set("bg", options.bg);
-    else if (options.manualBg && !state.autoSelect && state.manualBgId) params.set("bg", state.manualBgId);
-    if (options.cacheBust) params.set("_", String(Date.now()));
-    return params;
-  }
-
-  function productionUrl(options = {}) {
-    if (!state.template) return "";
-    return `${window.location.origin}/v1/widgets/${encodeURIComponent(state.template.id)}.png?${productionParams(options).toString()}`;
+  // -- fixed widget URL / preview ------------------------------------
+  function productionUrl() {
+    if (!state.userId || !state.template) return "";
+    return (
+      `${window.location.origin}/v1/widgets/` +
+      `${encodeURIComponent(state.userId)}/${encodeURIComponent(state.template.id)}.png`
+    );
   }
 
   async function copyText(text, successMessage) {
@@ -1829,7 +1835,7 @@
 
   async function copyProductionUrl() {
     if (!state.template) return;
-    await copyText(productionUrl({ manualBg: true }), "生产 URL 已复制");
+    await copyText(productionUrl(), "固定 URL 已复制");
   }
 
   async function loadProductionPreview(url, mode) {
@@ -1847,7 +1853,8 @@
       image.src = state.previewObjectUrl;
       const bgId = response.headers.get("X-Widget-Background") || "?";
       const textId = response.headers.get("X-Widget-Text") || "?";
-      $("preview-meta").textContent = `底图 ${bgId} · 文字 ${textId} · ${mode === "random" ? "随机预览" : "固定当前文字"}`;
+      $("preview-meta").textContent =
+        `底图 ${bgId} · 文字 ${textId} · ${mode === "random" ? "随机刷新" : "固定 URL"}`;
     } catch (error) {
       $("preview-meta").textContent = "";
       $("preview-error").textContent = `生产图加载失败：${error.message}`;
@@ -1858,12 +1865,7 @@
     if (!state.template) return;
     openModal("preview-modal");
     if (state.dirty) toast("有未保存改动：生产预览显示已保存的版本。", "error");
-    const random = mode === "random";
-    const options = random
-      ? { cacheBust: true }
-      : { bg: state.selectedBgId, text: state.selectedTextId, cacheBust: true };
-    const url = productionUrl(options);
-    void loadProductionPreview(url, mode);
+    void loadProductionPreview(productionUrl(), mode);
   }
 
   // -- modals --------------------------------------------------------
@@ -1910,7 +1912,7 @@
     });
     $("duplicate-template-btn").addEventListener("click", () => void duplicateTemplate());
     $("delete-template-btn").addEventListener("click", () => void deleteTemplate());
-    $("copy-production-url").addEventListener("click", () => void copyProductionUrl());
+    $("copy-widget-url").addEventListener("click", () => void copyProductionUrl());
     $("copy-production-inline").addEventListener("click", () => void copyProductionUrl());
     $("library-open").addEventListener("click", () => void openLibrary());
     $("production-preview-btn").addEventListener("click", () => showProductionPreview("fixed"));

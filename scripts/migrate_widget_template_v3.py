@@ -87,8 +87,6 @@ def migrate(raw: dict[str, Any]) -> dict[str, Any]:
         },
         "backgrounds": [],
     }
-    if raw.get("render_token") is not None:
-        migrated["render_token"] = raw["render_token"]
     if raw.get("updated_at") is not None:
         migrated["updated_at"] = raw["updated_at"]
 

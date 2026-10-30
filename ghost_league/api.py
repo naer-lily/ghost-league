@@ -1536,6 +1536,7 @@ def create_app(
             store=widget_store,
             auth=auth,
             now_fn=service.now,
+            status_for_user=lambda user_id: service.status_for_user(user_id),
         )
     )
 

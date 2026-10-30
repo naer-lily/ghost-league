@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..accounts import USER_ID_PATTERN as SAFE_USER_ID
 from .renderer import RenderError
 from .schema import (
     MAX_FILE_BYTES,
@@ -33,6 +34,7 @@ IMAGE_MEDIA_TYPES = {
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
 }
+WIDGET_NOT_FOUND = "widget not found"
 
 
 class TemplateCreateRequest(BaseModel):
@@ -59,59 +61,51 @@ def _http_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
-def _truthy(value: str | None) -> bool:
-    return (value or "").strip().lower() in {"1", "true", "yes", "on", "y"}
+def _completed_today(status: dict[str, Any]) -> bool:
+    """Read today's completion from ``status["checkin"]``.
+
+    Local accounts expose the check-in row's ``source`` string (or ``None``).
+    Older/Channel payloads may expose a boolean or a small object; when the
+    field is absent or has an unknown shape, fall back to today's XP target.
+    """
+
+    if "checkin" in status:
+        checkin = status.get("checkin")
+        if isinstance(checkin, bool):
+            return checkin
+        if isinstance(checkin, str):
+            return bool(checkin.strip())
+        if isinstance(checkin, dict):
+            for key in ("completed", "completed_today", "checked_in", "created"):
+                value = checkin.get(key)
+                if isinstance(value, bool):
+                    return value
+            source = checkin.get("source")
+            if isinstance(source, str) and source.strip():
+                return True
+        elif checkin is None:
+            return False
+    today_xp = status.get("today_xp")
+    required_xp = status.get("required_xp")
+    if isinstance(today_xp, int) and isinstance(required_xp, int):
+        return today_xp >= required_xp
+    return False
 
 
-def _parse_bool(value: str | None, field: str) -> bool:
-    if value is None:
-        return False
-    cleaned = value.strip().lower()
-    if cleaned in {"1", "true", "yes", "on", "y"}:
-        return True
-    if cleaned in {"0", "false", "no", "off", "n", ""}:
-        return False
-    raise HTTPException(status_code=422, detail=f"{field} must be a boolean")
-
-
-def _context_from_query(
-    *,
-    now: datetime,
-    streak: int | None,
-    xp: int | None,
-    rank: int | None,
-    name: str | None,
-    hour: int | None,
-    weekday: int | None,
-    completed: str | None,
-    league: str | None,
-    event: str | None,
+def _context_from_status(
+    status: dict[str, Any], now: datetime
 ) -> dict[str, Any]:
-    resolved_hour = now.hour if hour is None else hour
-    resolved_weekday = now.isoweekday() if weekday is None else weekday
-    resolved_streak = 0 if streak is None else streak
-    resolved_xp = 0 if xp is None else xp
-    resolved_rank = 0 if rank is None else rank
-    if not 0 <= resolved_hour <= 23:
-        raise HTTPException(status_code=422, detail="hour must be 0-23")
-    if not 1 <= resolved_weekday <= 7:
-        raise HTTPException(status_code=422, detail="weekday must be 1-7")
-    if resolved_streak < 0:
-        raise HTTPException(status_code=422, detail="streak must be >= 0")
-    if resolved_xp < 0:
-        raise HTTPException(status_code=422, detail="xp must be >= 0")
-    if resolved_rank < 0:
-        raise HTTPException(status_code=422, detail="rank must be >= 0")
+    streak = status.get("streak") or {}
     return {
-        "hour": resolved_hour,
-        "weekday": resolved_weekday,
-        "streak": resolved_streak,
-        "xp": resolved_xp,
-        "rank": resolved_rank,
-        "name": name or "",
-        "completed_today": _parse_bool(completed, "completed"),
-        "league": (league or "").strip(),
-        "event": (event or "").strip(),
+        "hour": now.hour,
+        "weekday": now.isoweekday(),
+        "streak": int(streak.get("current") or 0),
+        "xp": int(status.get("xp") or 0),
+        "rank": status.get("rank"),
+        "name": str(status.get("display_name") or ""),
+        "completed_today": _completed_today(status),
+        "league": str(status.get("tier") or "").lower(),
+        "event": None,
     }
 
 
@@ -120,6 +114,7 @@ def build_router(
     store: WidgetStore,
     auth: Callable[..., dict[str, Any]],
     now_fn: Callable[[], datetime],
+    status_for_user: Callable[[str], dict[str, Any] | None],
 ) -> APIRouter:
     router = APIRouter()
 
@@ -230,57 +225,27 @@ def build_router(
         return store.library()
 
     # -- production PNG ----------------------------------------------
-    @router.get(
-        "/v1/widgets/{template_id}.png",
-        include_in_schema=False,
-        response_class=Response,
-    )
-    def widget_png(
-        template_id: str,
-        token: str | None = Query(default=None),
-        streak: int | None = Query(default=None),
-        xp: int | None = Query(default=None),
-        rank: int | None = Query(default=None),
-        name: str | None = Query(default=None),
-        hour: int | None = Query(default=None),
-        weekday: int | None = Query(default=None),
-        completed: str | None = Query(default=None),
-        league: str | None = Query(default=None),
-        event: str | None = Query(default=None),
-        size: str | None = Query(default=None),
-        bg: str | None = Query(default=None),
-        text: str | None = Query(default=None),
-    ) -> Response:
-        if size not in {None, "", "1x"}:
-            raise HTTPException(status_code=400, detail="size must be 1x")
-        context = _context_from_query(
-            now=now_fn(),
-            streak=streak,
-            xp=xp,
-            rank=rank,
-            name=name,
-            hour=hour,
-            weekday=weekday,
-            completed=completed,
-            league=league,
-            event=event,
-        )
+    def render_widget(user_id: str, template_id: str, *, size: str | None) -> Response:
+        if not isinstance(user_id, str) or not SAFE_USER_ID.fullmatch(user_id):
+            raise HTTPException(status_code=404, detail=WIDGET_NOT_FOUND)
         try:
-            data, bg_id, text_id = store.render(
-                template_id,
-                token or "",
-                context,
-                size=size or None,
-                bg_id=bg or None,
-                text_id=text or None,
-            )
-        except NotFoundError as exc:
-            # Wrong or missing render tokens must not reveal template existence.
-            raise HTTPException(status_code=404, detail="widget not found") from exc
+            validate_template_id(template_id)
         except ValidationError as exc:
-            raise HTTPException(status_code=404, detail="widget not found") from exc
-        except Exception as exc:  # noqa: BLE001
-            raise _http_error(exc) from exc
+            raise HTTPException(status_code=404, detail=WIDGET_NOT_FOUND) from exc
+
+        status = status_for_user(user_id)
+        if status is None:
+            raise HTTPException(status_code=404, detail=WIDGET_NOT_FOUND)
+        context = _context_from_status(status, now_fn())
+        try:
+            data, bg_id, text_id = store.render(template_id, context, size=size)
+        except (StoreError, ValidationError) as exc:
+            # Unknown directories and corrupt JSON are indistinguishable from
+            # the outside.
+            raise HTTPException(status_code=404, detail=WIDGET_NOT_FOUND) from exc
+        except RenderError as exc:
+            LOGGER.warning("widget render failed for %s/%s: %s", user_id, template_id, exc)
+            raise HTTPException(status_code=500, detail="widget render failed") from exc
         return Response(
             content=data,
             media_type="image/png",
@@ -291,6 +256,22 @@ def build_router(
                 "Content-Disposition": "inline",
             },
         )
+
+    @router.get(
+        "/v1/widgets/{user_id}/{template_id}-1x.png",
+        include_in_schema=False,
+        response_class=Response,
+    )
+    def widget_png_1x(user_id: str, template_id: str) -> Response:
+        return render_widget(user_id, template_id, size="1x")
+
+    @router.get(
+        "/v1/widgets/{user_id}/{template_id}.png",
+        include_in_schema=False,
+        response_class=Response,
+    )
+    def widget_png(user_id: str, template_id: str) -> Response:
+        return render_widget(user_id, template_id, size=None)
 
     return router
 

@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import re
-import secrets
 import shutil
 import tempfile
 import threading
@@ -251,8 +250,6 @@ class WidgetStore:
             web_root=self.web_root,
             expected_id=template_id,
         )
-        if "render_token" not in normalized:
-            raise AssetError(f"template {template_id!r} is missing render_token")
         return normalized
 
     def get_template(self, template_id: str) -> dict[str, Any]:
@@ -339,7 +336,6 @@ class WidgetStore:
                 "id": template_id,
                 "name": cleaned,
                 "updated_at": _now_iso(self._now_fn),
-                "render_token": secrets.token_hex(16),
                 "canvas": {
                     "width": CANVAS_WIDTH,
                     "height": CANVAS_HEIGHT,
@@ -369,11 +365,9 @@ class WidgetStore:
         if not isinstance(payload, dict):
             raise ValidationError("template must be a JSON object")
         with self._lock:
-            existing = self._read_template(template_id)
+            self._read_template(template_id)
             updated = dict(payload)
             updated["id"] = template_id
-            # Render tokens are minted once per template and never changed by PUT.
-            updated["render_token"] = existing["render_token"]
             updated["updated_at"] = _now_iso(self._now_fn)
             self._write_template(updated)
             return self._read_template(template_id)
@@ -496,46 +490,24 @@ class WidgetStore:
     def render(
         self,
         template_id: str,
-        token: str,
         context: dict[str, Any],
         *,
         size: str | None = None,
-        bg_id: str | None = None,
-        text_id: str | None = None,
     ) -> tuple[bytes, str, str]:
         # Imported lazily so validation/store tests do not need the renderer.
         from .renderer import render_template
+        from .schema import select_background
 
         validate_template_id(template_id)
         with self._lock:
             template = self._read_template(template_id)
-            expected = template.get("render_token", "")
-            if not isinstance(token, str) or not secrets.compare_digest(token, expected):
-                raise NotFoundError("widget not found")
-            if bg_id:
-                validate_asset_id(bg_id)
-                selected = next(
-                    (item for item in template["backgrounds"] if item["id"] == bg_id),
-                    None,
-                )
-                if selected is None:
-                    raise NotFoundError("background not found")
-            else:
-                from .schema import select_background
-
-                selected, _ = select_background(template, context)
-            if text_id is not None and not any(
-                entry.get("id") == text_id
-                for entry in selected["layout"]["texts"]
-            ):
-                raise NotFoundError("text variant not found")
+            selected, _ = select_background(template, context)
             data, warnings, used_text = render_template(
                 template,
                 selected,
                 context,
                 template_dir=self.template_dir(template_id),
                 web_root=self.web_root,
-                text_id=text_id,
             )
             if size == "1x":
                 from PIL import Image as PILImage
