@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import tempfile
 import unittest
 from datetime import datetime
@@ -74,6 +75,44 @@ def background(
         "scale": 1,
         "layout": layout or default_layout(),
     }
+
+
+def color_bbox(
+    image: Image.Image,
+    box: tuple[int, int, int, int],
+    predicate,
+) -> tuple[int, int, int, int, int] | None:
+    """Return (left, top, right, bottom, count) for matching pixels in ``box``."""
+
+    left, top, right, bottom = box
+    pixels = image.load()
+    min_x, min_y, max_x, max_y = right, bottom, left, top
+    count = 0
+    for y in range(top, bottom):
+        for x in range(left, right):
+            r, g, b, a = pixels[x, y]
+            if not predicate(r, g, b, a):
+                continue
+            count += 1
+            min_x = min(min_x, x)
+            min_y = min(min_y, y)
+            max_x = max(max_x, x)
+            max_y = max(max_y, y)
+    if count == 0:
+        return None
+    return min_x, min_y, max_x + 1, max_y + 1, count
+
+
+def orange_pixel(r: int, g: int, b: int, a: int) -> bool:
+    return a > 0 and r > 200 and g > 80 and b < 140 and r - b > 80
+
+
+def gray_pixel(r: int, g: int, b: int, a: int) -> bool:
+    return a > 0 and max(r, g, b) - min(r, g, b) <= 2 and 60 <= r <= 245
+
+
+def white_pixel(r: int, g: int, b: int, a: int) -> bool:
+    return a > 0 and r > 245 and g > 245 and b > 245
 
 
 class WidgetStudioAPITests(unittest.TestCase):
@@ -760,7 +799,87 @@ class WidgetStudioAPITests(unittest.TestCase):
             self.assertEqual(selected["id"], expected)
             self.assertEqual(fallback, expected == "bg-fallback")
 
-    def test_12_migration_script_builds_v3(self) -> None:
+    def test_12_nijika_ref_proportions_and_completed_grayscale(self) -> None:
+        source = ROOT / "data" / "widgets" / "nijika-ref"
+        if not source.is_dir():
+            self.skipTest("nijika-ref template is not present")
+        shutil.copytree(source, self.widgets_dir / "nijika-ref")
+        template = {"id": "nijika-ref"}
+        flame_box = (1000, 60, 1255, 350)
+        digit_box = (1255, 120, 1520, 350)
+        label_box = (1000, 330, 1536, 500)
+
+        with patch(
+            "ghost_league.widget_studio.renderer.random.choice",
+            side_effect=lambda entries: entries[0],
+        ):
+            completed = self.render(
+                template, status=self.status(streak=12, checkin="verified")
+            )
+            incomplete = self.render(
+                template, status=self.status(streak=12, checkin=None)
+            )
+
+        self.assertEqual(completed.status_code, 200, completed.text)
+        self.assertEqual(incomplete.status_code, 200, incomplete.text)
+        self.assertEqual(completed.headers["x-widget-completed"], "1")
+        self.assertEqual(incomplete.headers["x-widget-completed"], "0")
+
+        with Image.open(io.BytesIO(completed.content)) as raw:
+            completed_image = raw.convert("RGBA")
+        with Image.open(io.BytesIO(incomplete.content)) as raw:
+            incomplete_image = raw.convert("RGBA")
+
+        completed_flame = color_bbox(completed_image, flame_box, orange_pixel)
+        completed_digit = color_bbox(completed_image, digit_box, orange_pixel)
+        completed_label = color_bbox(completed_image, label_box, white_pixel)
+        self.assertIsNotNone(completed_flame)
+        self.assertIsNotNone(completed_digit)
+        self.assertIsNotNone(completed_label)
+        assert completed_flame and completed_digit and completed_label
+
+        flame_height = completed_flame[3] - completed_flame[1]
+        digit_height = completed_digit[3] - completed_digit[1]
+        self.assertGreaterEqual(flame_height, 190)
+        self.assertLessEqual(flame_height, 210)
+        self.assertGreaterEqual(flame_height / digit_height, 1.8)
+        self.assertLessEqual(completed_flame[2], completed_digit[0])
+        self.assertGreater(completed_label[1], completed_digit[3])
+
+        incomplete_flame = color_bbox(incomplete_image, flame_box, gray_pixel)
+        incomplete_digit = color_bbox(incomplete_image, digit_box, gray_pixel)
+        incomplete_label = color_bbox(incomplete_image, label_box, white_pixel)
+        self.assertIsNotNone(incomplete_flame)
+        self.assertIsNotNone(incomplete_digit)
+        self.assertIsNotNone(incomplete_label)
+        assert incomplete_flame and incomplete_digit and incomplete_label
+
+        for orange in (
+            color_bbox(incomplete_image, flame_box, orange_pixel),
+            color_bbox(incomplete_image, digit_box, orange_pixel),
+        ):
+            self.assertIsNone(orange)
+        incomplete_flame_height = incomplete_flame[3] - incomplete_flame[1]
+        incomplete_digit_height = incomplete_digit[3] - incomplete_digit[1]
+        self.assertGreaterEqual(incomplete_flame_height / incomplete_digit_height, 1.8)
+        for before, after in zip(completed_flame[:4], incomplete_flame[:4]):
+            self.assertLessEqual(abs(before - after), 3)
+        self.assertLessEqual(incomplete_flame[2], incomplete_digit[0])
+        self.assertGreater(incomplete_label[1], incomplete_digit[3])
+        self.assertEqual(completed_label, incomplete_label)
+
+        pixels = incomplete_image.load()
+        gray_digit_pixels = sum(
+            1
+            for y in range(digit_box[1], digit_box[3])
+            for x in range(digit_box[0], digit_box[2])
+            if pixels[x, y] == (154, 154, 154, 255)
+        )
+        self.assertGreater(gray_digit_pixels, 1000)
+        self.assertGreater(incomplete_flame[4], 1000)
+        self.assertGreater(incomplete_label[4], 1000)
+
+    def test_13_migration_script_builds_v3(self) -> None:
         import importlib.util
 
         script_path = ROOT / "scripts" / "migrate_widget_template_v3.py"

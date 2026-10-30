@@ -7,6 +7,7 @@
   const CANVAS_W = 1536;
   const CANVAS_H = 914;
   const MIN_VISIBLE = 40;
+  const FLAME_VISIBLE_SCALE = 0.91;
   const WEEKDAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
   const KIND_LABELS = { text: "文字", streak: "连胜数字", flame: "火焰" };
 
@@ -1131,7 +1132,7 @@
     if (state.raf) return;
     state.raf = requestAnimationFrame(() => {
       state.raf = 0;
-      draw();
+      draw(state.preview.completed_today);
     });
   }
 
@@ -1177,6 +1178,41 @@
     };
     image.src = url;
     return entry;
+  }
+
+  function flameBounds(entry) {
+    if (entry.bounds !== undefined) return entry.bounds;
+    const image = entry.image;
+    if (!image) return null;
+    const probe = document.createElement("canvas");
+    probe.width = image.width;
+    probe.height = image.height;
+    const probeCtx = probe.getContext("2d", { willReadFrequently: true });
+    let bounds = null;
+    try {
+      probeCtx.drawImage(image, 0, 0);
+      const pixels = probeCtx.getImageData(0, 0, probe.width, probe.height).data;
+      let left = probe.width;
+      let top = probe.height;
+      let right = -1;
+      let bottom = -1;
+      for (let y = 0; y < probe.height; y += 1) {
+        for (let x = 0; x < probe.width; x += 1) {
+          if (pixels[(y * probe.width + x) * 4 + 3] === 0) continue;
+          left = Math.min(left, x);
+          top = Math.min(top, y);
+          right = Math.max(right, x);
+          bottom = Math.max(bottom, y);
+        }
+      }
+      if (right >= left && bottom >= top) {
+        bounds = { x: left, y: top, width: right - left + 1, height: bottom - top + 1 };
+      }
+    } catch {
+      bounds = null;
+    }
+    entry.bounds = bounds;
+    return bounds;
   }
 
   function replacePlaceholders(text) {
@@ -1229,7 +1265,7 @@
     return lines;
   }
 
-  function drawTextBox(ctx, style, text, x, y) {
+  function drawTextBox(ctx, style, text, x, y, overrides = {}) {
     const width = Math.max(1, num(style.width, 1));
     const height = Math.max(1, num(style.height, 1));
     const size = Math.max(1, num(style.fontSize, 48));
@@ -1246,13 +1282,13 @@
     ctx.beginPath();
     ctx.rect(x, y, width, height);
     ctx.clip();
-    if (style.shadow) {
-      ctx.shadowColor = style.shadow.color || "rgba(0,0,0,0.35)";
-      ctx.shadowBlur = Math.max(0, style.shadow.blur || 0);
-      ctx.shadowOffsetX = style.shadow.offsetX || 0;
-      ctx.shadowOffsetY = style.shadow.offsetY || 0;
+    if (style.shadow || overrides.shadowColor) {
+      ctx.shadowColor = overrides.shadowColor || style.shadow?.color || "rgba(0,0,0,0.35)";
+      ctx.shadowBlur = Math.max(0, style.shadow?.blur || 0);
+      ctx.shadowOffsetX = style.shadow?.offsetX || 0;
+      ctx.shadowOffsetY = style.shadow?.offsetY || 0;
     }
-    ctx.fillStyle = style.color || "#17324d";
+    ctx.fillStyle = overrides.color || style.color || "#17324d";
     visible.forEach((line, index) => {
       if (!line.text) return;
       let left = x;
@@ -1263,19 +1299,29 @@
     ctx.restore();
   }
 
-  function drawFlame(ctx, style, position) {
+  function drawFlame(ctx, style, position, completedToday = true) {
     const width = Math.max(1, num(style.width, 1));
     const height = Math.max(1, num(style.height, 1));
     const entry = imageEntry(assetUrl("flame.png"));
     if (entry.image) {
       const image = entry.image;
-      const ratio = Math.min(width / image.width, height / image.height);
-      const drawWidth = image.width * ratio;
-      const drawHeight = image.height * ratio;
+      const bounds = flameBounds(entry);
+      const sourceX = bounds ? bounds.x : 0;
+      const sourceY = bounds ? bounds.y : 0;
+      const sourceWidth = bounds ? bounds.width : image.width;
+      const sourceHeight = bounds ? bounds.height : image.height;
+      const ratio = Math.min(width / sourceWidth, height / sourceHeight) * FLAME_VISIBLE_SCALE;
+      const drawWidth = sourceWidth * ratio;
+      const drawHeight = sourceHeight * ratio;
       ctx.save();
       ctx.globalAlpha = Math.max(0, Math.min(1, style.opacity ?? 1));
+      if (!completedToday) ctx.filter = "grayscale(1) brightness(0.85)";
       ctx.drawImage(
         image,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
         position.x + (width - drawWidth) / 2,
         position.y + (height - drawHeight) / 2,
         drawWidth,
@@ -1285,12 +1331,12 @@
       return;
     }
     ctx.save();
-    ctx.strokeStyle = "rgba(255, 176, 32, 0.9)";
+    ctx.strokeStyle = completedToday ? "rgba(255, 176, 32, 0.9)" : "rgba(154, 154, 154, 0.9)";
     ctx.setLineDash([8, 5]);
     ctx.lineWidth = 2;
     ctx.strokeRect(position.x + 1, position.y + 1, width - 2, height - 2);
     ctx.setLineDash([]);
-    ctx.fillStyle = "rgba(255, 176, 32, 0.85)";
+    ctx.fillStyle = completedToday ? "rgba(255, 176, 32, 0.85)" : "rgba(154, 154, 154, 0.85)";
     ctx.font = '600 20px "Noto Sans SC", system-ui, sans-serif';
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -1309,11 +1355,12 @@
     ctx.restore();
   }
 
-  function draw() {
+  function draw(completedToday = state.preview.completed_today) {
     if (state.raf) {
       cancelAnimationFrame(state.raf);
       state.raf = 0;
     }
+    const completed = completedToday !== false;
     const canvas = $("studio-canvas");
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
@@ -1349,8 +1396,15 @@
       }
       const text = selectedText();
       if (text) drawTextBox(ctx, template.styles.label, text.text, text.x, text.y);
-      drawTextBox(ctx, template.styles.streak, "{streak}", background.layout.streak.x, background.layout.streak.y);
-      drawFlame(ctx, template.styles.flame, background.layout.flame);
+      drawTextBox(
+        ctx,
+        template.styles.streak,
+        "{streak}",
+        background.layout.streak.x,
+        background.layout.streak.y,
+        completed ? {} : { color: "#9a9a9a", shadowColor: "rgba(0,0,0,0.28)" }
+      );
+      drawFlame(ctx, template.styles.flame, background.layout.flame, completed);
     }
     ctx.restore();
     drawSelection(ctx);
@@ -1491,7 +1545,7 @@
   function readPreviewControls() {
     state.preview.hour = clampInt($("preview-hour").value, 0, 23, 0);
     state.preview.weekday = clampInt($("preview-weekday").value, 1, 7, 1);
-    state.preview.completed_today = $("preview-completed").checked;
+    state.preview.completed_today = $("preview-completed").value === "yes";
     state.preview.league = $("preview-league").value.trim();
     state.preview.event = $("preview-event").value.trim();
     state.preview.streak = clampInt($("preview-streak").value, 0, 1000000, 0);

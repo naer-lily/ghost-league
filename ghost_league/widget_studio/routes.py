@@ -237,6 +237,7 @@ def build_router(
         if status is None:
             raise HTTPException(status_code=404, detail=WIDGET_NOT_FOUND)
         context = _context_from_status(status, now_fn())
+        completed_today = bool(context.get("completed_today"))
         try:
             data, bg_id, text_id = store.render(template_id, context, size=size)
         except (StoreError, ValidationError) as exc:
@@ -253,6 +254,7 @@ def build_router(
                 "Cache-Control": "no-store",
                 "X-Widget-Background": bg_id,
                 "X-Widget-Text": text_id,
+                "X-Widget-Completed": "1" if completed_today else "0",
                 "Content-Disposition": "inline",
             },
         )

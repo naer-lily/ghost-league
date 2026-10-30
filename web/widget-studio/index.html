@@ -111,7 +111,12 @@
               </select>
             </label>
             <label>连胜 <input id="preview-streak" type="number" min="0" value="12"></label>
-            <label class="check-field"><input id="preview-completed" type="checkbox"> 今日已完成</label>
+            <label>今日已完成
+              <select id="preview-completed">
+                <option value="no">否</option>
+                <option value="yes">是</option>
+              </select>
+            </label>
             <label>段位 <input id="preview-league" type="text" maxlength="64" placeholder="bronze"></label>
             <label>事件 <input id="preview-event" type="text" maxlength="64" placeholder="rush"></label>
           </div>

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -188,6 +189,53 @@ def drag_element(page, x: float, y: float, dx: float, dy: float) -> None:
     page.mouse.up()
 
 
+def canvas_metrics(page) -> dict:
+    return page.evaluate(
+        """
+        () => {
+          const canvas = document.getElementById("studio-canvas");
+          const ctx = canvas.getContext("2d");
+          const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          const scan = (box, predicate) => {
+            const [x0, y0, x1, y1] = box;
+            let count = 0;
+            let left = x1;
+            let top = y1;
+            let right = x0;
+            let bottom = y0;
+            for (let y = y0; y < y1; y += 1) {
+              for (let x = x0; x < x1; x += 1) {
+                const index = (y * canvas.width + x) * 4;
+                const r = data[index];
+                const g = data[index + 1];
+                const b = data[index + 2];
+                const a = data[index + 3];
+                if (!predicate(r, g, b, a)) continue;
+                count += 1;
+                if (x < left) left = x;
+                if (y < top) top = y;
+                if (x > right) right = x;
+                if (y > bottom) bottom = y;
+              }
+            }
+            return count ? { count, left, top, right: right + 1, bottom: bottom + 1 } : null;
+          };
+          const orange = (r, g, b, a) => a > 0 && r > 200 && g > 80 && b < 140 && r - b > 80;
+          const gray = (r, g, b, a) =>
+            a > 0 && Math.max(r, g, b) - Math.min(r, g, b) <= 2 && r >= 60 && r <= 245;
+          const white = (r, g, b, a) => a > 0 && r > 245 && g > 245 && b > 245;
+          return {
+            orangeFlame: scan([1000, 60, 1255, 350], orange),
+            orangeDigit: scan([1255, 120, 1520, 350], orange),
+            grayFlame: scan([1000, 60, 1255, 350], gray),
+            grayDigit: scan([1255, 120, 1520, 350], gray),
+            whiteText: scan([1000, 330, 1536, 500], white),
+          };
+        }
+        """
+    )
+
+
 def fetch_template(context, origin: str, template_id: str) -> dict:
     response = context.request.get(
         f"{origin}/v1/widget-studio/templates/{template_id}",
@@ -201,6 +249,10 @@ def main() -> int:
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     temp = tempfile.TemporaryDirectory()
     base = Path(temp.name)
+    reference_template = ROOT / "data" / "widgets" / "nijika-ref"
+    if reference_template.is_dir():
+        (base / "widgets").mkdir(parents=True, exist_ok=True)
+        shutil.copytree(reference_template, base / "widgets" / "nijika-ref")
     port = free_port()
     server = start_server(base, port)
     origin = f"http://127.0.0.1:{port}"
@@ -231,6 +283,8 @@ def main() -> int:
                 else None,
             )
             page.goto(f"{origin}/widget-studio/", wait_until="networkidle")
+            if not page.locator("#template-modal:not([hidden])").is_visible():
+                page.click("#new-template-btn")
             page.wait_for_selector("#template-modal:not([hidden])")
             page.fill("#template-name-input", "Nijika E2E")
             page.click("#template-modal-confirm")
@@ -521,6 +575,101 @@ def main() -> int:
             print("PASS desktop/mobile screenshots")
             print(f"  desktop canvas {desktop_box}")
             print(f"  mobile canvas {mobile_box}")
+
+            # nijika-ref: the sample "今日已完成" switch must gray the flame and
+            # the streak number on the editor canvas while the label stays white.
+            if reference_template.is_dir():
+                page.set_viewport_size({"width": 1440, "height": 900})
+                page.select_option("#template-select", "nijika-ref")
+                page.wait_for_function(
+                    "document.querySelector('#template-select').value === 'nijika-ref'",
+                    timeout=15000,
+                )
+                wait_saved(page)
+                page.wait_for_function(
+                    "document.querySelector('#widget-fixed-url').value.endsWith('/v1/widgets/owner/nijika-ref.png')",
+                    timeout=15000,
+                )
+                reference_url = f"{origin}/v1/widgets/owner/nijika-ref.png"
+                assert page.input_value("#widget-fixed-url") == reference_url
+                assert "?" not in reference_url
+
+                page.select_option("#preview-completed", "yes")
+                page.wait_for_timeout(400)
+                completed_metrics = canvas_metrics(page)
+                assert completed_metrics["orangeFlame"] is not None, completed_metrics
+                assert completed_metrics["orangeDigit"] is not None, completed_metrics
+                assert completed_metrics["whiteText"] is not None, completed_metrics
+                assert completed_metrics["orangeFlame"]["count"] > 1000, completed_metrics
+                assert completed_metrics["orangeDigit"]["count"] > 1000, completed_metrics
+                assert completed_metrics["whiteText"]["count"] > 1000, completed_metrics
+                completed_flame_height = (
+                    completed_metrics["orangeFlame"]["bottom"]
+                    - completed_metrics["orangeFlame"]["top"]
+                )
+                completed_digit_height = (
+                    completed_metrics["orangeDigit"]["bottom"]
+                    - completed_metrics["orangeDigit"]["top"]
+                )
+                assert completed_flame_height / completed_digit_height >= 1.8, completed_metrics
+                assert (
+                    completed_metrics["orangeFlame"]["right"]
+                    <= completed_metrics["orangeDigit"]["left"]
+                ), completed_metrics
+                assert (
+                    completed_metrics["whiteText"]["top"]
+                    > completed_metrics["orangeDigit"]["bottom"]
+                ), completed_metrics
+                page.screenshot(
+                    path=str(ARTIFACTS / "nijika-ref-completed-1440.png"),
+                    full_page=False,
+                )
+
+                page.select_option("#preview-completed", "no")
+                page.wait_for_timeout(400)
+                incomplete_metrics = canvas_metrics(page)
+                assert incomplete_metrics["orangeFlame"] is None, incomplete_metrics
+                assert incomplete_metrics["orangeDigit"] is None, incomplete_metrics
+                assert incomplete_metrics["grayFlame"]["count"] > 500, incomplete_metrics
+                assert incomplete_metrics["grayDigit"]["count"] > 500, incomplete_metrics
+                assert incomplete_metrics["whiteText"]["count"] > 1000, incomplete_metrics
+                incomplete_flame_height = (
+                    incomplete_metrics["grayFlame"]["bottom"]
+                    - incomplete_metrics["grayFlame"]["top"]
+                )
+                incomplete_digit_height = (
+                    incomplete_metrics["grayDigit"]["bottom"]
+                    - incomplete_metrics["grayDigit"]["top"]
+                )
+                assert incomplete_flame_height / incomplete_digit_height >= 1.8, incomplete_metrics
+                assert (
+                    incomplete_metrics["grayFlame"]["right"]
+                    <= incomplete_metrics["grayDigit"]["left"]
+                ), incomplete_metrics
+                assert (
+                    incomplete_metrics["whiteText"]["top"]
+                    > incomplete_metrics["grayDigit"]["bottom"]
+                ), incomplete_metrics
+                page.screenshot(
+                    path=str(ARTIFACTS / "nijika-ref-incomplete-1440.png"),
+                    full_page=False,
+                )
+
+                page.set_viewport_size({"width": 390, "height": 844})
+                page.select_option("#preview-completed", "yes")
+                page.wait_for_timeout(400)
+                page.screenshot(
+                    path=str(ARTIFACTS / "nijika-ref-completed-390.png"),
+                    full_page=False,
+                )
+                page.select_option("#preview-completed", "no")
+                page.wait_for_timeout(400)
+                page.screenshot(
+                    path=str(ARTIFACTS / "nijika-ref-incomplete-390.png"),
+                    full_page=False,
+                )
+                print("PASS nijika-ref completed switch restores/grays flame and number")
+                print("PASS nijika-ref proportions keep flame >=1.8x the number")
             browser.close()
     finally:
         stop_server(server)

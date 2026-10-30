@@ -123,6 +123,33 @@ styles 是全局唯一样式源；每张底图只拥有自己的摆位与文字�
   `styles.label.height` 截断并写 warning 日志；连胜数字使用 `{streak}` 与
   `styles.streak`。
 
+### nijika-ref 对照模板
+
+`data/widgets/nijika-ref/` 是 1536×914 的对照模版，用来固定火焰/数字/文字的比例：
+
+```json
+{
+  "styles": {
+    "label": { "width": 560, "height": 110, "fontSize": 76 },
+    "streak": { "width": 300, "height": 220, "fontSize": 132 },
+    "flame": { "width": 170, "height": 220, "opacity": 1 }
+  },
+  "layout": {
+    "texts": [{ "id": "text-1", "text": "期待重逢！", "x": 1040, "y": 360 }],
+    "streak": { "x": 1260, "y": 150 },
+    "flame": { "x": 1080, "y": 95 }
+  }
+}
+```
+
+- 火焰按 alpha 可见区域缩放，再保留约 9% 内边距；170×220 的样式盒渲染出的可见
+  火焰约 200px 高。数字字号 132 的可见高度约 96–100px，所以火焰高度 ≥ 数字的 1.8 倍。
+- 服务端和编辑器 Canvas 使用同一套缩放规则；编辑器按火焰图片的 alpha bbox 裁掉透明
+  边距后再绘制，不能只改服务端。
+- 数字 `x=1260` 在火焰右侧，文字 `y=360` 在数字下方；三者像素 bbox 不重叠。
+
+未完成状态（见下节）只改颜色，不改坐标、字号、宽高或火焰 alpha。
+
 ### v2 → v3 迁移
 
 `scripts/migrate_widget_template_v3.py` 是一次性迁移工具，不是运行时兼容层：
@@ -195,7 +222,8 @@ GET /v1/widgets/<user_id>/<template_id>-1x.png
 - 用底图自己的 `when` / `priority` / fallback 选底图，再在该底图 `layout.texts` 中
   **随机选一条**文字；数字和火焰使用该底图的坐标。
 - 响应头：`X-Widget-Background: <bg_id>`、`X-Widget-Text: <text_id>`、
-  `Cache-Control: no-store`。
+  `X-Widget-Completed: 0|1`、`Cache-Control: no-store`。`X-Widget-Completed` 只用于调试，
+  不改变 URL，也不接受 query。
 - 未知 `user_id`、非法路径、模版目录不存在、`template.json` 坏 JSON 一律 `404`，
   不返回 `500`，不泄露其他信息。
 
@@ -211,6 +239,18 @@ GET /v1/widgets/<user_id>/<template_id>-1x.png
 | `completed_today` | 按 `status["checkin"]` 实际结构：字符串 source 非空为 true，`None` 为 false；布尔或对象字段（`completed` / `completed_today` / `checked_in` / `created` / `source`）也识别。字段缺失或结构未知时回退到 `today_xp >= required_xp` |
 | `hour` / `weekday` | 服务端 `now_fn()` 的 Ghost 本地时区（`Asia/Shanghai`），`weekday` 为 1=周一 … 7=周日 |
 | `event` | 固定 `null`；不接受 query |
+
+### 今日未完成状态
+
+`completed_today=false` 时只改颜色，不改坐标、尺寸或文字：
+
+- 火焰：保留 alpha 和形状，RGB 转灰度并略降亮度（×0.85）；不把整张图变透明。
+- 数字：主色替换为纯灰 `#9a9a9a`（R=G=B，不带蓝调），阴影替换为
+  `rgba(0,0,0,0.28)`；不用橙色。
+- 文字：保持白色和原阴影，不变灰。
+- `completed_today=true` 时火焰恢复原色，数字恢复橙金。
+- 编辑器预览使用同一个 `completed_today`：右侧“今日已完成 是/否”切换会立即重绘
+  画布；生产图的状态仍由服务端从 `status_for_user` 读取，URL 不变。
 
 示例：
 
@@ -242,10 +282,11 @@ https://<ghost-host>/v1/widgets/naer-lily/nijika-1x.png
 - 画布拖动只改 x/y，不做缩放/旋转/宽高调整；方向键 1px，`Shift+方向键` 10px，
   拖动时按住 `Shift` 吸附 8px 网格；元素至少保留 40px 在画布内。
 - 自动/手动底图预览选择规则与 task123 一致；切换预览上下文只改变当前选中的底图，
-  不改变已保存坐标。
+  不改变已保存坐标。右侧“今日已完成 是/否”只影响画布，把 `completed_today` 传给
+  `draw()`，火焰/数字按同一规则变灰或恢复，文字保持白色；不写文件、不改 URL。
 - “生产预览”和“随机预览”都直接请求固定 URL，不带任何数据 query；有未保存改动时提示
   “生产预览显示已保存的版本”。弹窗显示响应头里的 `X-Widget-Background` /
-  `X-Widget-Text`。主画布始终显示当前选中的文字变体，不随机跳。
+  `X-Widget-Text` / `X-Widget-Completed`。主画布始终显示当前选中的文字变体，不随机跳。
 - 底图列表只加载 `thumb`；当前底图按需加载并缓存。
 - 只使用两个 localStorage key：`gl.token.v1` 与上次打开的模版 id；模版内容只落文件。
 
@@ -265,8 +306,9 @@ E2E 会启动临时端口上的临时 Ghost 实例（仅测试进程，不新增
 URL 的 `user_id` / `template_id`、换外层模版改 URL、换底图/文字/条件不改 URL、上传后
 JSON 不变、拖动/输入等待 >1.5s 仍 0 PUT、Ctrl+S/保存按钮才 PUT、脏状态切换/刷新确认、
 同一底图多个文字变体、无 query 直接打开固定 URL、固定 URL 响应头属于已保存底图、
-底图 B 独立坐标、刷新恢复和 1440×900 / 390×844 截图。截图在
-`artifacts/widget-studio-*.png`（本地产物，不进 Git）。
+底图 B 独立坐标、刷新恢复、nijika-ref 的“今日已完成”灰度切换和火焰/数字比例，以及
+1440×900 / 390×844 截图。截图在 `artifacts/widget-studio-*.png` 和
+`artifacts/nijika-ref-{completed,incomplete}-{1440,390}.png`（本地产物，不进 Git）。
 
 ## 边界
 
@@ -274,5 +316,6 @@ JSON 不变、拖动/输入等待 >1.5s 仍 0 PUT、Ctrl+S/保存按钮才 PUT�
 - 不复制 Ghost 的 tiers/frames；只读引用 `ghost:assets/...`。
 - 不做样式编辑；样式全局统一，只调位置。
 - 不做自动保存；只有 Ctrl/Cmd+S 或“保存”按钮写 JSON。
-- 不做缩放/旋转/宽高调整、版本历史、备份、动画、滤镜、任意形状、自由绘画或图层混合。
+- 不做缩放/旋转/宽高调整、版本历史、备份、动画、用户可配置滤镜、渐变、描边、任意形状、
+  自由绘画或图层混合；未完成灰度是固定状态，不是编辑器样式选项。
 - 目录文件是权威；没有 publish/版本表。

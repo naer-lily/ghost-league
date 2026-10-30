@@ -141,10 +141,11 @@ token。systemd 模板把 token 放在 `/etc/ghost-league/waka.env`（0600）；
 - 生产图固定路径：`GET /v1/widgets/<user_id>/<template_id>.png`，不需要 Bearer，也不带数据
   query；数据由服务端按 `user_id` 从 Ghost 当前状态读取。用户/模版不存在、路径或 JSON
   非法返回 404。1x 用单独路径 `<template_id>-1x.png`（368×219）。响应头返回
-  `X-Widget-Background` / `X-Widget-Text`，并在该底图的文字变体中随机选一条。
+  `X-Widget-Background` / `X-Widget-Text` / `X-Widget-Completed`，并在该底图的文字变体
+  中随机选一条。今日未完成时火焰转灰度、数字用纯灰 `#9a9a9a`，文字保持白色。
 - 编辑器顶部“我的小组件”显示当前登录 `user_id` + 当前 `template_id` 的固定 URL，可复制；
   换外层模版改变 URL 中的 `template_id`，换底图/文字/条件 URL 不变。生产预览直接请求
-  固定 URL，提示显示已保存版本。
+  固定 URL，提示显示已保存版本。预览“今日已完成 是/否”只切换画布的火焰/数字颜色。
 - 显式保存：拖动、输入文字、改条件、改 x/y 都不写文件；只有 `Ctrl/Cmd+S` 或“保存”按钮
   PUT 完整 snapshot。上传底图/火焰只写文件并返回 `src`，编辑器标“未保存”，保存后才改 JSON。
 - 主画布即时绘制，`pointermove` 不发请求；右侧只调文字内容与位置，不提供样式输入。

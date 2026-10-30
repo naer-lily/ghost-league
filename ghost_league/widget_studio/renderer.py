@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageChops, ImageColor, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageColor, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from .schema import resolve_src
 
@@ -23,6 +23,12 @@ FONT_BOLD = Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc")
 FONT_INDEX = 2  # Noto Sans CJK SC
 PLACEHOLDER_RE = re.compile(r"\{(streak|xp|rank|name)\}")
 CJK_RANGE = "\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef"
+INCOMPLETE_STREAK_COLOR = "#9a9a9a"
+INCOMPLETE_STREAK_SHADOW = "rgba(0,0,0,0.28)"
+# Flame PNGs carry transparent padding around the visible artwork.  Crop to the
+# alpha bbox, then keep ~9% breathing room inside the style box so the visible
+# flame is roughly 200px tall for a 220px box (instead of shrinking to ~178px).
+FLAME_VISIBLE_SCALE = 0.91
 _FONT_CACHE: dict[tuple[int, int], ImageFont.FreeTypeFont] = {}
 
 
@@ -90,6 +96,15 @@ def _open_rgba(path: Path) -> Image.Image:
             return source.convert("RGBA")
     except OSError as exc:
         raise RenderError(f"cannot read image: {path.name}") from exc
+
+
+def _grayscale(image: Image.Image, brightness: float = 0.85) -> Image.Image:
+    """Convert RGB to neutral gray while keeping the original alpha channel."""
+
+    gray = ImageOps.grayscale(image.convert("RGB"))
+    if brightness != 1:
+        gray = gray.point(lambda value: round(value * brightness))
+    return Image.merge("RGBA", (gray, gray, gray, image.getchannel("A")))
 
 
 def _scaled_size(
@@ -258,6 +273,7 @@ def _draw_flame(
     *,
     template_dir: Path,
     warnings: list[str],
+    grayscale: bool = False,
 ) -> None:
     path = template_dir / "flame.png"
     if not path.is_file():
@@ -268,12 +284,17 @@ def _draw_flame(
     except RenderError as exc:
         warnings.append(f"flame skipped: {exc}")
         return
+    visible = source.getchannel("A").getbbox()
+    if visible:
+        source = source.crop(visible)
     box_w = max(1, round(float(style["width"])))
     box_h = max(1, round(float(style["height"])))
-    ratio = min(box_w / source.width, box_h / source.height)
+    ratio = min(box_w / source.width, box_h / source.height) * FLAME_VISIBLE_SCALE
     width = max(1, round(source.width * ratio))
     height = max(1, round(source.height * ratio))
     source = source.resize((width, height), Image.Resampling.LANCZOS)
+    if grayscale:
+        source = _grayscale(source)
     opacity = max(0.0, min(1.0, float(style.get("opacity", 1))))
     if opacity < 1:
         alpha = source.getchannel("A").point(lambda value: round(value * opacity))
@@ -330,6 +351,14 @@ def render_template(
 
     styles = template.get("styles") or {}
     layout = background.get("layout") or {}
+    completed_today = context.get("completed_today") is not False
+    streak_style = styles["streak"]
+    if not completed_today:
+        streak_style = dict(streak_style)
+        streak_style["color"] = INCOMPLETE_STREAK_COLOR
+        shadow = dict(streak_style.get("shadow") or {})
+        shadow["color"] = INCOMPLETE_STREAK_SHADOW
+        streak_style["shadow"] = shadow
     chosen = _pick_text(background, text_id)
     _draw_text_box(
         canvas,
@@ -343,7 +372,7 @@ def render_template(
     )
     _draw_text_box(
         canvas,
-        styles["streak"],
+        streak_style,
         "{streak}",
         layout["streak"]["x"],
         layout["streak"]["y"],
@@ -357,6 +386,7 @@ def render_template(
         layout["flame"],
         template_dir=template_dir,
         warnings=warnings,
+        grayscale=not completed_today,
     )
 
     _rounded_alpha(canvas, radius)
