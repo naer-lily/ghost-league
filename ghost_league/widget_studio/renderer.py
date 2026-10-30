@@ -1,9 +1,13 @@
-"""Pillow production renderer for Widget Studio templates (schema v3).
+"""Pillow production renderer for Widget Studio templates (schema v4).
 
-Styles are global: every label uses ``styles.label``, the streak number uses
-``styles.streak`` and the flame uses ``styles.flame``.  Positions come from the
-selected background's ``layout``.  One of the background's text variants is
-chosen at random per request unless the caller pins ``text=<text-id>``.
+Every selected background carries its own ``styles``.  The streak number and
+the flame are one counter component: ``counter.scale`` scales both together,
+``counter.gap`` is the visible distance between the flame's right edge and the
+number's left edge, and the number is vertically centred on the flame.  Label
+text supports weight, letter spacing, an outline and regular fill colours.
+
+Positions come from the selected background's ``layout``.  One of the
+background's text variants is chosen at random per request.
 """
 
 from __future__ import annotations
@@ -157,12 +161,64 @@ def _tokens(paragraph: str) -> list[str]:
     return tokens
 
 
-def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: float) -> list[tuple[str, float]]:
+def _line_width(text: str, font: ImageFont.FreeTypeFont, spacing: float) -> float:
+    width = font.getlength(text)
+    if spacing and len(text) > 1:
+        width += spacing * (len(text) - 1)
+    return width
+
+
+def _draw_line(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    x: float,
+    y: float,
+    font: ImageFont.FreeTypeFont,
+    *,
+    fill: tuple[int, int, int, int],
+    stroke_width: int = 0,
+    stroke_fill: tuple[int, int, int, int] | None = None,
+    spacing: float = 0,
+) -> None:
+    """Draw one line, applying letter spacing character by character."""
+
+    if spacing:
+        cursor = x
+        for character in text:
+            draw.text(
+                (cursor, y),
+                character,
+                font=font,
+                fill=fill,
+                stroke_width=stroke_width,
+                stroke_fill=stroke_fill,
+            )
+            cursor += font.getlength(character) + spacing
+        return
+    draw.text(
+        (x, y),
+        text,
+        font=font,
+        fill=fill,
+        stroke_width=stroke_width,
+        stroke_fill=stroke_fill,
+    )
+
+
+def _wrap_text(
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: float,
+    spacing: float = 0,
+) -> list[tuple[str, float]]:
     lines: list[tuple[str, float]] = []
+
+    def measure(value: str) -> float:
+        return _line_width(value, font, spacing)
 
     def flush(current: str) -> None:
         cleaned = current.rstrip()
-        lines.append((cleaned, font.getlength(cleaned)))
+        lines.append((cleaned, measure(cleaned)))
 
     for paragraph in text.split("\n"):
         if not paragraph:
@@ -176,9 +232,9 @@ def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: float) -> lis
                 continue
             chunks: list[str] = []
             remaining = token
-            while remaining and font.getlength(remaining) > max_width:
+            while remaining and measure(remaining) > max_width:
                 cut = 1
-                while cut < len(remaining) and font.getlength(remaining[: cut + 1]) <= max_width:
+                while cut < len(remaining) and measure(remaining[: cut + 1]) <= max_width:
                     cut += 1
                 chunks.append(remaining[:cut])
                 remaining = remaining[cut:]
@@ -186,7 +242,7 @@ def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: float) -> lis
                 chunks.append(remaining)
             for chunk in chunks:
                 candidate = current + chunk
-                if current and font.getlength(candidate) > max_width:
+                if current and measure(candidate) > max_width:
                     flush(current)
                     current = chunk.lstrip()
                 else:
@@ -223,12 +279,15 @@ def _draw_text_box(
     size = max(1, round(float(style.get("fontSize", 48))))
     weight = int(style.get("fontWeight", 400))
     line_height = max(0.1, float(style.get("lineHeight", 1.2))) * size
+    spacing = float(style.get("letterSpacing", 0) or 0)
+    stroke_width = max(0, round(float(style.get("strokeWidth", 0) or 0)))
     font = _font(size, weight)
     formatted = _format_text(str(text), context)
     color = parse_color(style.get("color", "#17324d"))
+    stroke_color = parse_color(style.get("strokeColor", style.get("color", "#17324d")))
     align = style.get("align", "left")
 
-    lines = _wrap_text(formatted, font, width)
+    lines = _wrap_text(formatted, font, width, spacing)
     max_lines = max(0, int(height // line_height))
     overflow = len(lines) > max_lines
     if overflow:
@@ -246,11 +305,16 @@ def _draw_text_box(
             if not line:
                 continue
             line_left = _aligned_left(align, width, line_width)
-            shadow_draw.text(
-                (line_left + offset_x, index * line_height + offset_y),
+            _draw_line(
+                shadow_draw,
                 line,
-                font=font,
+                line_left + offset_x,
+                index * line_height + offset_y,
+                font,
                 fill=shadow_color,
+                stroke_width=stroke_width,
+                stroke_fill=shadow_color,
+                spacing=spacing,
             )
         blur = float(shadow.get("blur", 0) or 0)
         if blur > 0:
@@ -262,33 +326,47 @@ def _draw_text_box(
         if not line:
             continue
         line_left = _aligned_left(align, width, line_width)
-        draw.text((line_left, index * line_height), line, font=font, fill=color)
+        # Pillow draws the outline underneath the fill in one call.
+        _draw_line(
+            draw,
+            line,
+            line_left,
+            index * line_height,
+            font,
+            fill=color,
+            stroke_width=stroke_width,
+            stroke_fill=stroke_color,
+            spacing=spacing,
+        )
     canvas.alpha_composite(layer_image, (left, top))
 
 
-def _draw_flame(
+def _flame_geometry(
     canvas: Image.Image,
     style: dict[str, Any],
     position: dict[str, Any],
     *,
     template_dir: Path,
     warnings: list[str],
+    scale: float,
     grayscale: bool = False,
-) -> None:
+) -> tuple[float, float, float, float] | None:
+    """Draw the flame and return its visible ``(x, y, width, height)``."""
+
     path = template_dir / "flame.png"
     if not path.is_file():
         warnings.append("flame asset is missing: flame.png")
-        return
+        return None
     try:
         source = _open_rgba(path)
     except RenderError as exc:
         warnings.append(f"flame skipped: {exc}")
-        return
+        return None
     visible = source.getchannel("A").getbbox()
     if visible:
         source = source.crop(visible)
-    box_w = max(1, round(float(style["width"])))
-    box_h = max(1, round(float(style["height"])))
+    box_w = max(1, round(float(style["width"]) * scale))
+    box_h = max(1, round(float(style["height"]) * scale))
     ratio = min(box_w / source.width, box_h / source.height) * FLAME_VISIBLE_SCALE
     width = max(1, round(source.width * ratio))
     height = max(1, round(source.height * ratio))
@@ -302,6 +380,113 @@ def _draw_flame(
     x = round(float(position["x"])) + (box_w - width) // 2
     y = round(float(position["y"])) + (box_h - height) // 2
     canvas.alpha_composite(source, (x, y))
+    return float(x), float(y), float(width), float(height)
+
+
+def _draw_number(
+    canvas: Image.Image,
+    style: dict[str, Any],
+    text: str,
+    *,
+    left: float,
+    center_y: float,
+    scale: float,
+    color: tuple[int, int, int, int],
+    shadow_color: tuple[int, int, int, int] | None,
+) -> None:
+    size = max(1, round(float(style.get("fontSize", 48)) * scale))
+    weight = int(style.get("fontWeight", 400))
+    font = _font(size, weight)
+    try:
+        ink = font.getmask(text, mode="L").getbbox()
+    except (ValueError, AttributeError, OSError):
+        ink = None
+    if ink is None:
+        try:
+            ink = font.getbbox(text, anchor="lt")
+        except (ValueError, AttributeError):
+            ink = (0, 0, max(1, round(font.getlength(text))), size)
+    glyph_left, glyph_top, _glyph_right, glyph_bottom = ink
+    origin_x = left - glyph_left
+    origin_y = center_y - (glyph_top + glyph_bottom) / 2
+
+    shadow = style.get("shadow")
+    if shadow and shadow_color is not None:
+        shadow_layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+        shadow_draw = ImageDraw.Draw(shadow_layer)
+        shadow_draw.text(
+            (
+                origin_x + round(float(shadow.get("offsetX", 0)) * scale),
+                origin_y + round(float(shadow.get("offsetY", 0)) * scale),
+            ),
+            text,
+            font=font,
+            fill=shadow_color,
+            anchor="lt",
+        )
+        blur = float(shadow.get("blur", 0) or 0) * scale
+        if blur > 0:
+            shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(blur))
+        canvas.alpha_composite(shadow_layer)
+
+    draw = ImageDraw.Draw(canvas)
+    draw.text((origin_x, origin_y), text, font=font, fill=color, anchor="lt")
+
+
+def _draw_counter(
+    canvas: Image.Image,
+    counter_style: dict[str, Any],
+    position: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    template_dir: Path,
+    warnings: list[str],
+    completed_today: bool,
+) -> None:
+    scale = float(counter_style.get("scale", 1))
+    gap = float(counter_style.get("gap", 0))
+    flame_rect = _flame_geometry(
+        canvas,
+        counter_style["flame"],
+        position,
+        template_dir=template_dir,
+        warnings=warnings,
+        scale=scale,
+        grayscale=not completed_today,
+    )
+    # When the flame asset is missing the component still has a stable geometry
+    # from its style box, so the number keeps its position.
+    if flame_rect is None:
+        box_w = max(1, round(float(counter_style["flame"]["width"]) * scale))
+        box_h = max(1, round(float(counter_style["flame"]["height"]) * scale))
+        flame_rect = (float(position["x"]), float(position["y"]), float(box_w), float(box_h))
+    flame_right = flame_rect[0] + flame_rect[2]
+    flame_center = flame_rect[1] + flame_rect[3] / 2
+
+    number_style = dict(counter_style["number"])
+    text = _format_text("{streak}", context)
+    if not completed_today:
+        number_style["color"] = INCOMPLETE_STREAK_COLOR
+        shadow = dict(number_style.get("shadow") or {})
+        shadow["color"] = INCOMPLETE_STREAK_SHADOW
+        number_style["shadow"] = shadow
+    color = parse_color(number_style.get("color", "#17324d"))
+    shadow = number_style.get("shadow")
+    shadow_color = (
+        parse_color(shadow.get("color", "rgba(0,0,0,0.35)"), (0, 0, 0, 90))
+        if shadow
+        else None
+    )
+    _draw_number(
+        canvas,
+        number_style,
+        text,
+        left=flame_right + gap,
+        center_y=flame_center,
+        scale=scale,
+        color=color,
+        shadow_color=shadow_color,
+    )
 
 
 def _pick_text(background: dict[str, Any], text_id: str | None) -> dict[str, Any]:
@@ -349,16 +534,11 @@ def render_template(
         raise RenderError(f"background asset is missing: {background['src']}")
     _paste_background(canvas, _open_rgba(background_path), background)
 
-    styles = template.get("styles") or {}
+    # Only the selected background's own styles are used.  There is no global
+    # style fallback in v4.
+    styles = background.get("styles") or {}
     layout = background.get("layout") or {}
     completed_today = context.get("completed_today") is not False
-    streak_style = styles["streak"]
-    if not completed_today:
-        streak_style = dict(streak_style)
-        streak_style["color"] = INCOMPLETE_STREAK_COLOR
-        shadow = dict(streak_style.get("shadow") or {})
-        shadow["color"] = INCOMPLETE_STREAK_SHADOW
-        streak_style["shadow"] = shadow
     chosen = _pick_text(background, text_id)
     _draw_text_box(
         canvas,
@@ -370,23 +550,14 @@ def render_template(
         warnings,
         f"text {chosen['id']}",
     )
-    _draw_text_box(
+    _draw_counter(
         canvas,
-        streak_style,
-        "{streak}",
-        layout["streak"]["x"],
-        layout["streak"]["y"],
+        styles["counter"],
+        layout["counter"],
         context,
-        warnings,
-        "streak",
-    )
-    _draw_flame(
-        canvas,
-        styles["flame"],
-        layout["flame"],
         template_dir=template_dir,
         warnings=warnings,
-        grayscale=not completed_today,
+        completed_today=completed_today,
     )
 
     _rounded_alpha(canvas, radius)

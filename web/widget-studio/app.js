@@ -9,7 +9,7 @@
   const MIN_VISIBLE = 40;
   const FLAME_VISIBLE_SCALE = 0.91;
   const WEEKDAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-  const KIND_LABELS = { text: "文字", streak: "连胜数字", flame: "火焰" };
+  const KIND_LABELS = { text: "文字", counter: "火焰+数字" };
 
   const $ = (id) => document.getElementById(id);
 
@@ -29,7 +29,7 @@
     template: null,
     selectedBgId: null,
     selectedTextId: null,
-    selection: { kind: "text" },
+    selection: { kind: "counter" },
     manualBgId: null,
     autoSelect: true,
     preview: {
@@ -75,6 +75,10 @@
     return Math.round(num(value) * 10) / 10;
   }
 
+  function round2(value) {
+    return Math.round(num(value) * 100) / 100;
+  }
+
   function pad2(value) {
     return String(value).padStart(2, "0");
   }
@@ -82,6 +86,11 @@
   function clampInt(value, minimum, maximum, fallback) {
     if (value === "" || value == null || !Number.isFinite(Number(value))) return fallback;
     return Math.max(minimum, Math.min(maximum, Math.round(Number(value))));
+  }
+
+  function clampNumber(value, minimum, maximum, fallback) {
+    if (value === "" || value == null || !Number.isFinite(Number(value))) return fallback;
+    return Math.max(minimum, Math.min(maximum, Number(value)));
   }
 
   function slugify(value) {
@@ -125,11 +134,43 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function defaultStyles() {
+    return {
+      label: {
+        width: 520,
+        height: 100,
+        fontSize: 64,
+        fontWeight: 400,
+        letterSpacing: 0,
+        strokeWidth: 0,
+        strokeColor: "#17324d",
+        color: "#17324d",
+        align: "left",
+        lineHeight: 1.15,
+        shadow: { color: "rgba(255,255,255,0.65)", blur: 0, offsetX: 0, offsetY: 2 },
+      },
+      counter: {
+        scale: 1,
+        gap: 30,
+        flame: { width: 120, height: 140, opacity: 1 },
+        number: {
+          width: 360,
+          height: 180,
+          fontSize: 132,
+          fontWeight: 400,
+          color: "#ffb020",
+          align: "left",
+          lineHeight: 1,
+          shadow: { color: "rgba(255,255,255,0.75)", blur: 0, offsetX: 0, offsetY: 3 },
+        },
+      },
+    };
+  }
+
   function defaultLayout() {
     return {
+      counter: { x: 660, y: 280 },
       texts: [{ id: "text-1", text: "连续学习", x: 760, y: 540 }],
-      streak: { x: 760, y: 300 },
-      flame: { x: 660, y: 280 },
     };
   }
 
@@ -338,7 +379,7 @@
     const background = template.backgrounds.find((bg) => bg.id === id) || template.backgrounds[0];
     state.selectedBgId = background ? background.id : null;
     state.selectedTextId = background?.layout?.texts?.[0]?.id || null;
-    state.selection = { kind: "text" };
+    state.selection = { kind: "counter" };
     renderBackgroundList();
     renderBackgroundInspector();
     renderLayoutPanel();
@@ -413,31 +454,122 @@
     return background.layout.texts.find((item) => item.id === state.selectedTextId) || null;
   }
 
-  function styleFor(kind) {
-    const styles = state.template?.styles;
-    if (!styles) return null;
-    if (kind === "text") return styles.label;
-    if (kind === "streak") return styles.streak;
-    return styles.flame;
+  function labelStyle(background = selectedBg()) {
+    return background?.styles?.label || null;
+  }
+
+  function counterStyle(background = selectedBg()) {
+    return background?.styles?.counter || null;
+  }
+
+  function textFont(size, weight) {
+    return `${weight || 400} ${Math.max(1, size)}px "Noto Sans SC", "Noto Sans CJK SC", system-ui, sans-serif`;
+  }
+
+  function numberText() {
+    return replacePlaceholders("{streak}");
+  }
+
+  function textBoxFor(text, style = labelStyle()) {
+    if (!text || !style) return null;
+    return {
+      x: num(text.x),
+      y: num(text.y),
+      width: Math.max(1, num(style.width, 1)),
+      height: Math.max(1, num(style.height, 1)),
+    };
+  }
+
+  // The component is flame + number.  Its anchor is the flame style box's
+  // top-left; scale changes both together while gap stays in canvas pixels.
+  function counterGeometry(background = selectedBg()) {
+    const style = counterStyle(background);
+    const anchor = background?.layout?.counter;
+    if (!style || !anchor) return null;
+    const scale = Math.max(0.5, Math.min(2, num(style.scale, 1)));
+    const gap = Math.max(0, Math.min(160, num(style.gap, 0)));
+    const flameStyle = style.flame || {};
+    const flameBox = {
+      x: num(anchor.x),
+      y: num(anchor.y),
+      width: Math.max(1, num(flameStyle.width, 1) * scale),
+      height: Math.max(1, num(flameStyle.height, 1) * scale),
+    };
+    const entry = imageEntry(assetUrl("flame.png"));
+    let flameRect = flameBox;
+    if (entry.image) {
+      const bounds = flameBounds(entry);
+      const sourceWidth = bounds ? bounds.width : entry.image.width;
+      const sourceHeight = bounds ? bounds.height : entry.image.height;
+      const ratio = Math.min(flameBox.width / sourceWidth, flameBox.height / sourceHeight) * FLAME_VISIBLE_SCALE;
+      const width = sourceWidth * ratio;
+      const height = sourceHeight * ratio;
+      flameRect = {
+        x: flameBox.x + (flameBox.width - width) / 2,
+        y: flameBox.y + (flameBox.height - height) / 2,
+        width,
+        height,
+      };
+    }
+    const numberStyle = style.number || {};
+    const fontSize = Math.max(1, num(numberStyle.fontSize, 48) * scale);
+    const font = textFont(fontSize, numberStyle.fontWeight);
+    const canvas = $("studio-canvas");
+    const ctx = canvas.getContext("2d");
+    ctx.save();
+    ctx.font = font;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    const text = numberText();
+    const metrics = ctx.measureText(text);
+    const ascent = Math.max(fontSize * 0.2, metrics.actualBoundingBoxAscent || fontSize * 0.8);
+    const descent = Math.max(0, metrics.actualBoundingBoxDescent || 0);
+    const glyphWidth = Math.max(1, metrics.width || fontSize * 0.5);
+    ctx.restore();
+    const centerY = flameRect.y + flameRect.height / 2;
+    const baselineY = centerY + (ascent - descent) / 2;
+    const numberRect = {
+      x: flameRect.x + flameRect.width + gap,
+      y: baselineY - ascent,
+      width: glyphWidth,
+      height: ascent + descent,
+    };
+    const left = Math.min(flameRect.x, numberRect.x);
+    const top = Math.min(flameRect.y, numberRect.y);
+    const right = Math.max(flameRect.x + flameRect.width, numberRect.x + numberRect.width);
+    const bottom = Math.max(flameRect.y + flameRect.height, numberRect.y + numberRect.height);
+    return {
+      style,
+      scale,
+      gap,
+      flameStyle,
+      numberStyle,
+      flameBox,
+      flameRect,
+      numberRect,
+      numberFont: font,
+      numberText: text,
+      numberBaselineY: baselineY,
+      box: { x: left, y: top, width: right - left, height: bottom - top },
+    };
   }
 
   function positionFor(kind) {
     const background = selectedBg();
     if (!background) return null;
     if (kind === "text") return selectedText();
-    return layoutOf(background)?.[kind] || null;
+    if (kind === "counter") return layoutOf(background)?.counter || null;
+    return null;
   }
 
   function positionBox(kind) {
-    const style = styleFor(kind);
-    const position = positionFor(kind);
-    if (!style || !position) return null;
-    return {
-      x: num(position.x),
-      y: num(position.y),
-      width: Math.max(1, num(style.width, 1)),
-      height: Math.max(1, num(style.height, 1)),
-    };
+    if (kind === "counter") {
+      return counterGeometry()?.box || null;
+    }
+    if (kind === "text") {
+      return textBoxFor(selectedText());
+    }
+    return null;
   }
 
   function canvasSize() {
@@ -472,13 +604,18 @@
     return cleaned ? cleaned.slice(0, 22) : "（空文字）";
   }
 
+  function hexColor(value, fallback = "#ffffff") {
+    const cleaned = String(value || "");
+    return /^#[0-9a-f]{6}$/i.test(cleaned) ? cleaned : fallback;
+  }
+
   function renderLayoutPanel() {
     const inspector = $("layout-inspector");
     const kind = $("layout-kind");
     const background = selectedBg();
     if (!background) {
       kind.textContent = "未选择";
-      inspector.innerHTML = '<p class="empty">在左侧选择一张底图后编辑文字变体与摆位。</p>';
+      inspector.innerHTML = '<p class="empty">在左侧选择一张底图后编辑组件与文字。</p>';
       return;
     }
     const texts = layoutOf(background).texts;
@@ -486,10 +623,10 @@
       state.selectedTextId = texts[0]?.id || null;
     }
     const text = selectedText();
-    const streak = background.layout.streak;
-    const flame = background.layout.flame;
-    kind.textContent = `${KIND_LABELS[state.selection.kind] || "文字"} · ${background.id}`;
-    const style = state.template.styles.label;
+    const counter = counterStyle(background) || {};
+    const style = labelStyle(background) || {};
+    const anchor = background.layout.counter || { x: 0, y: 0 };
+    kind.textContent = `${KIND_LABELS[state.selection.kind] || "组件"} · ${background.id}`;
     const items = texts
       .map(
         (item) => `
@@ -503,36 +640,48 @@
       )
       .join("");
     inspector.innerHTML = `
+      <div class="current-bg">当前底图：<code id="current-bg-label">${esc(background.id)}</code></div>
+      <p class="hint">每张底图各存一套样式；下面的改动只作用于当前底图。</p>
+      <div class="divider"></div>
+      <h3>火焰 + 数字组件</h3>
+      <div class="field-grid">
+        <label class="field"><span>组 X</span><input id="counter-x" type="number" step="1" value="${esc(round(anchor.x))}"></label>
+        <label class="field"><span>组 Y</span><input id="counter-y" type="number" step="1" value="${esc(round(anchor.y))}"></label>
+      </div>
+      <div class="field-grid">
+        <label class="field"><span>整体缩放（0.5–2.0）</span><input id="counter-scale" type="number" min="0.5" max="2" step="0.05" value="${esc(round2(counter.scale ?? 1))}"></label>
+        <label class="field"><span>火焰与数字间隔（0–160）</span><input id="counter-gap" type="number" min="0" max="160" step="1" value="${esc(round(counter.gap ?? 0))}"></label>
+      </div>
+      <p class="hint">缩放锁定火焰与数字比例；间隔是可见火焰右缘到数字左缘的像素距离。数字相对火焰垂直居中。</p>
+      <div class="divider"></div>
+      <h3>文字变体</h3>
       <div class="section-row">
-        <h3>文字变体</h3>
+        <span class="hint">同一底图共用文字样式，位置各自独立</span>
         <button id="add-text-variant" class="btn btn-small" type="button">新增</button>
       </div>
       <ul id="text-variant-list" class="text-list" aria-label="文字变体列表">${items}</ul>
       ${text ? `
-      <label class="field"><span>文字内容（只改文字，不改样式）</span>
+      <label class="field"><span>文字内容</span>
         <textarea id="text-content" maxlength="500">${esc(text.text)}</textarea>
       </label>
       <div class="field-grid">
         <label class="field"><span>文字 X</span><input id="text-x" type="number" step="1" value="${esc(round(text.x))}"></label>
         <label class="field"><span>文字 Y</span><input id="text-y" type="number" step="1" value="${esc(round(text.y))}"></label>
       </div>` : '<p class="empty">该底图还没有文字变体。</p>'}
-      <div class="divider"></div>
-      <h3>连胜数字位置</h3>
+      <h3>文字样式</h3>
       <div class="field-grid">
-        <label class="field"><span>数字 X</span><input id="streak-x" type="number" step="1" value="${esc(round(streak.x))}"></label>
-        <label class="field"><span>数字 Y</span><input id="streak-y" type="number" step="1" value="${esc(round(streak.y))}"></label>
+        <label class="field"><span>字号</span><input id="label-font-size" type="number" min="1" max="400" step="1" value="${esc(round(style.fontSize ?? 48))}"></label>
+        <label class="field"><span>字重（100–900）</span><input id="label-font-weight" type="number" min="100" max="900" step="100" value="${esc(round(style.fontWeight ?? 400))}"></label>
       </div>
-      <h3>火焰位置</h3>
       <div class="field-grid">
-        <label class="field"><span>火焰 X</span><input id="flame-x" type="number" step="1" value="${esc(round(flame.x))}"></label>
-        <label class="field"><span>火焰 Y</span><input id="flame-y" type="number" step="1" value="${esc(round(flame.y))}"></label>
+        <label class="field"><span>字间距（-10–40）</span><input id="label-letter-spacing" type="number" min="-10" max="40" step="1" value="${esc(round(style.letterSpacing ?? 0))}"></label>
+        <label class="field"><span>描边宽度（0–12）</span><input id="label-stroke-width" type="number" min="0" max="12" step="0.5" value="${esc(round(style.strokeWidth ?? 0))}"></label>
       </div>
-      <p class="style-readonly">
-        样式全局统一（只读）：字号 ${esc(style.fontSize)} · 字重 ${esc(style.fontWeight)} ·
-        颜色 ${esc(style.color)} · 行高 ${esc(style.lineHeight)} · 对齐 ${esc(style.align)} ·
-        文字盒 ${esc(style.width)}×${esc(style.height)}
-      </p>
-      <p class="hint">拖动或方向键只改 x/y：1px，Shift+方向键 10px；拖动时按住 Shift 吸附 8px 网格。</p>`;
+      <div class="field-grid">
+        <label class="field"><span>文字颜色</span><input id="label-color" type="color" value="${esc(hexColor(style.color))}"></label>
+        <label class="field"><span>描边颜色</span><input id="label-stroke-color" type="color" value="${esc(hexColor(style.strokeColor || style.color))}"></label>
+      </div>
+      <p class="hint">描边颜色默认跟随文字颜色；单独修改后保持独立。拖动组件或文字时 1px，Shift 10px；拖动时按住 Shift 吸附 8px 网格。</p>`;
     bindLayoutPanel();
   }
 
@@ -569,8 +718,55 @@
         requestDraw();
       });
     }
-    bindPositionInput("streak", "streak-x", "streak-y");
-    bindPositionInput("flame", "flame-x", "flame-y");
+    bindPositionInput("counter", "counter-x", "counter-y");
+
+    const counter = counterStyle();
+    $("counter-scale")?.addEventListener("input", (event) => {
+      if (!counter) return;
+      counter.scale = clampNumber(event.target.value, 0.5, 2, 1);
+      markDirty();
+      requestDraw();
+    });
+    $("counter-gap")?.addEventListener("input", (event) => {
+      if (!counter) return;
+      counter.gap = clampNumber(event.target.value, 0, 160, 0);
+      markDirty();
+      requestDraw();
+    });
+
+    const style = labelStyle();
+    const numberInput = (id, key, minimum, maximum, integer) => {
+      $(id)?.addEventListener("input", (event) => {
+        if (!style) return;
+        style[key] = integer
+          ? clampInt(event.target.value, minimum, maximum, style[key])
+          : clampNumber(event.target.value, minimum, maximum, style[key]);
+        markDirty();
+        requestDraw();
+      });
+    };
+    numberInput("label-font-size", "fontSize", 1, 400, false);
+    numberInput("label-font-weight", "fontWeight", 100, 900, true);
+    numberInput("label-letter-spacing", "letterSpacing", -10, 40, false);
+    numberInput("label-stroke-width", "strokeWidth", 0, 12, false);
+    $("label-color")?.addEventListener("input", (event) => {
+      if (!style) return;
+      const previous = style.color;
+      style.color = event.target.value;
+      if (!style.strokeColor || style.strokeColor === previous) {
+        style.strokeColor = event.target.value;
+        const stroke = $("label-stroke-color");
+        if (stroke) stroke.value = event.target.value;
+      }
+      markDirty();
+      requestDraw();
+    });
+    $("label-stroke-color")?.addEventListener("input", (event) => {
+      if (!style) return;
+      style.strokeColor = event.target.value;
+      markDirty();
+      requestDraw();
+    });
   }
 
   function bindPositionInput(kind, xId, yId) {
@@ -651,16 +847,12 @@
       if (x && document.activeElement !== x) x.value = round(text.x);
       if (y && document.activeElement !== y) y.value = round(text.y);
     }
-    for (const [kind, xId, yId] of [
-      ["streak", "streak-x", "streak-y"],
-      ["flame", "flame-x", "flame-y"],
-    ]) {
-      const target = positionFor(kind);
-      if (!target) continue;
-      const x = $(xId);
-      const y = $(yId);
-      if (x && document.activeElement !== x) x.value = round(target.x);
-      if (y && document.activeElement !== y) y.value = round(target.y);
+    const anchor = positionFor("counter");
+    if (anchor) {
+      const x = $("counter-x");
+      const y = $("counter-y");
+      if (x && document.activeElement !== x) x.value = round(anchor.x);
+      if (y && document.activeElement !== y) y.value = round(anchor.y);
     }
   }
 
@@ -1222,11 +1414,30 @@
     });
   }
 
-  function wrapCanvasText(ctx, text, maxWidth) {
+  function measureCanvasLine(ctx, text, spacing = 0) {
+    const width = ctx.measureText(text).width;
+    return spacing && text.length > 1 ? width + spacing * (text.length - 1) : width;
+  }
+
+  function paintCanvasText(ctx, text, x, y, spacing, stroke = false) {
+    if (!spacing) {
+      if (stroke) ctx.strokeText(text, x, y);
+      else ctx.fillText(text, x, y);
+      return;
+    }
+    let cursor = x;
+    for (const character of text) {
+      if (stroke) ctx.strokeText(character, cursor, y);
+      else ctx.fillText(character, cursor, y);
+      cursor += ctx.measureText(character).width + spacing;
+    }
+  }
+
+  function wrapCanvasText(ctx, text, maxWidth, spacing = 0) {
     const lines = [];
     const flush = (current) => {
       const cleaned = current.replace(/\s+$/, "");
-      lines.push({ text: cleaned, width: ctx.measureText(cleaned).width });
+      lines.push({ text: cleaned, width: measureCanvasLine(ctx, cleaned, spacing) });
     };
     for (const paragraph of String(text).split("\n")) {
       if (!paragraph) {
@@ -1242,16 +1453,16 @@
         }
         let remaining = token;
         const chunks = [];
-        while (remaining && ctx.measureText(remaining).width > maxWidth) {
+        while (remaining && measureCanvasLine(ctx, remaining, spacing) > maxWidth) {
           let cut = 1;
-          while (cut < remaining.length && ctx.measureText(remaining.slice(0, cut + 1)).width <= maxWidth) cut += 1;
+          while (cut < remaining.length && measureCanvasLine(ctx, remaining.slice(0, cut + 1), spacing) <= maxWidth) cut += 1;
           chunks.push(remaining.slice(0, cut));
           remaining = remaining.slice(cut);
         }
         if (remaining) chunks.push(remaining);
         for (const chunk of chunks) {
           const candidate = current + chunk;
-          if (current && ctx.measureText(candidate).width > maxWidth) {
+          if (current && measureCanvasLine(ctx, candidate, spacing) > maxWidth) {
             flush(current);
             current = chunk.replace(/^\s+/, "");
           } else {
@@ -1265,44 +1476,51 @@
     return lines;
   }
 
-  function drawTextBox(ctx, style, text, x, y, overrides = {}) {
+  function drawTextBox(ctx, style, text, x, y) {
     const width = Math.max(1, num(style.width, 1));
     const height = Math.max(1, num(style.height, 1));
     const size = Math.max(1, num(style.fontSize, 48));
     const weight = style.fontWeight || 400;
-    const font = `${weight} ${size}px "Noto Sans SC", "Noto Sans CJK SC", system-ui, sans-serif`;
+    const spacing = num(style.letterSpacing, 0);
+    const strokeWidth = Math.max(0, num(style.strokeWidth, 0));
+    const font = textFont(size, weight);
     ctx.save();
     ctx.font = font;
     ctx.textBaseline = "top";
     ctx.textAlign = "left";
-    const lines = wrapCanvasText(ctx, replacePlaceholders(text), width);
+    const lines = wrapCanvasText(ctx, replacePlaceholders(text), width, spacing);
     const lineHeight = size * (style.lineHeight || 1.2);
     const maxLines = Math.max(0, Math.floor(height / lineHeight));
     const visible = lines.slice(0, maxLines);
     ctx.beginPath();
     ctx.rect(x, y, width, height);
     ctx.clip();
-    if (style.shadow || overrides.shadowColor) {
-      ctx.shadowColor = overrides.shadowColor || style.shadow?.color || "rgba(0,0,0,0.35)";
-      ctx.shadowBlur = Math.max(0, style.shadow?.blur || 0);
-      ctx.shadowOffsetX = style.shadow?.offsetX || 0;
-      ctx.shadowOffsetY = style.shadow?.offsetY || 0;
+    if (style.shadow) {
+      ctx.shadowColor = style.shadow.color || "rgba(0,0,0,0.35)";
+      ctx.shadowBlur = Math.max(0, style.shadow.blur || 0);
+      ctx.shadowOffsetX = style.shadow.offsetX || 0;
+      ctx.shadowOffsetY = style.shadow.offsetY || 0;
     }
-    ctx.fillStyle = overrides.color || style.color || "#17324d";
+    ctx.fillStyle = style.color || "#17324d";
+    ctx.strokeStyle = style.strokeColor || style.color || "#17324d";
+    ctx.lineWidth = strokeWidth * 2;
+    ctx.lineJoin = "round";
     visible.forEach((line, index) => {
       if (!line.text) return;
       let left = x;
       if (style.align === "center") left += (width - line.width) / 2;
       else if (style.align === "right") left += width - line.width;
-      ctx.fillText(line.text, left, y + index * lineHeight);
+      const top = y + index * lineHeight;
+      if (strokeWidth > 0) paintCanvasText(ctx, line.text, left, top, spacing, true);
+      paintCanvasText(ctx, line.text, left, top, spacing, false);
     });
     ctx.restore();
   }
 
-  function drawFlame(ctx, style, position, completedToday = true) {
-    const width = Math.max(1, num(style.width, 1));
-    const height = Math.max(1, num(style.height, 1));
+  function drawCounter(ctx, geometry, completedToday = true) {
+    if (!geometry) return;
     const entry = imageEntry(assetUrl("flame.png"));
+    const flameRect = geometry.flameRect;
     if (entry.image) {
       const image = entry.image;
       const bounds = flameBounds(entry);
@@ -1310,11 +1528,8 @@
       const sourceY = bounds ? bounds.y : 0;
       const sourceWidth = bounds ? bounds.width : image.width;
       const sourceHeight = bounds ? bounds.height : image.height;
-      const ratio = Math.min(width / sourceWidth, height / sourceHeight) * FLAME_VISIBLE_SCALE;
-      const drawWidth = sourceWidth * ratio;
-      const drawHeight = sourceHeight * ratio;
       ctx.save();
-      ctx.globalAlpha = Math.max(0, Math.min(1, style.opacity ?? 1));
+      ctx.globalAlpha = Math.max(0, Math.min(1, geometry.flameStyle.opacity ?? 1));
       if (!completedToday) ctx.filter = "grayscale(1) brightness(0.85)";
       ctx.drawImage(
         image,
@@ -1322,25 +1537,36 @@
         sourceY,
         sourceWidth,
         sourceHeight,
-        position.x + (width - drawWidth) / 2,
-        position.y + (height - drawHeight) / 2,
-        drawWidth,
-        drawHeight
+        flameRect.x,
+        flameRect.y,
+        flameRect.width,
+        flameRect.height
       );
       ctx.restore();
-      return;
+    } else {
+      ctx.save();
+      ctx.strokeStyle = completedToday ? "rgba(255, 176, 32, 0.9)" : "rgba(154, 154, 154, 0.9)";
+      ctx.setLineDash([8, 5]);
+      ctx.lineWidth = 2;
+      ctx.strokeRect(flameRect.x, flameRect.y, flameRect.width, flameRect.height);
+      ctx.setLineDash([]);
+      ctx.restore();
     }
+
+    const number = geometry.numberStyle;
+    const shadow = number.shadow;
     ctx.save();
-    ctx.strokeStyle = completedToday ? "rgba(255, 176, 32, 0.9)" : "rgba(154, 154, 154, 0.9)";
-    ctx.setLineDash([8, 5]);
-    ctx.lineWidth = 2;
-    ctx.strokeRect(position.x + 1, position.y + 1, width - 2, height - 2);
-    ctx.setLineDash([]);
-    ctx.fillStyle = completedToday ? "rgba(255, 176, 32, 0.85)" : "rgba(154, 154, 154, 0.85)";
-    ctx.font = '600 20px "Noto Sans SC", system-ui, sans-serif';
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("火焰", position.x + width / 2, position.y + height / 2);
+    ctx.font = geometry.numberFont;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    if (shadow) {
+      ctx.shadowColor = completedToday ? shadow.color || "rgba(95,48,0,0.35)" : "rgba(0,0,0,0.28)";
+      ctx.shadowBlur = Math.max(0, num(shadow.blur, 0) * geometry.scale);
+      ctx.shadowOffsetX = num(shadow.offsetX, 0) * geometry.scale;
+      ctx.shadowOffsetY = num(shadow.offsetY, 0) * geometry.scale;
+    }
+    ctx.fillStyle = completedToday ? number.color || "#f7a61b" : "#9a9a9a";
+    ctx.fillText(geometry.numberText, geometry.numberRect.x, geometry.numberBaselineY);
     ctx.restore();
   }
 
@@ -1352,6 +1578,19 @@
     ctx.lineWidth = 4;
     ctx.setLineDash([12, 7]);
     ctx.strokeRect(box.x, box.y, box.width, box.height);
+    ctx.setLineDash([]);
+    const label = state.selection.kind === "counter" ? "组件" : "文字";
+    ctx.font = '700 22px "Noto Sans SC", "Noto Sans CJK SC", system-ui, sans-serif';
+    const labelWidth = ctx.measureText(label).width + 22;
+    const labelHeight = 32;
+    const labelX = Math.max(0, Math.min(box.x, canvasSize().width - labelWidth));
+    const labelY = Math.max(0, box.y - labelHeight - 6);
+    ctx.fillStyle = "#53d6bd";
+    ctx.fillRect(labelX, labelY, labelWidth, labelHeight);
+    ctx.fillStyle = "#06231d";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, labelX + 11, labelY + labelHeight / 2 + 1);
     ctx.restore();
   }
 
@@ -1395,16 +1634,8 @@
         ctx.drawImage(image, x, y, drawWidth, drawHeight);
       }
       const text = selectedText();
-      if (text) drawTextBox(ctx, template.styles.label, text.text, text.x, text.y);
-      drawTextBox(
-        ctx,
-        template.styles.streak,
-        "{streak}",
-        background.layout.streak.x,
-        background.layout.streak.y,
-        completed ? {} : { color: "#9a9a9a", shadowColor: "rgba(0,0,0,0.28)" }
-      );
-      drawFlame(ctx, template.styles.flame, background.layout.flame, completed);
+      if (text) drawTextBox(ctx, background.styles.label, text.text, text.x, text.y);
+      drawCounter(ctx, counterGeometry(background), completed);
     }
     ctx.restore();
     drawSelection(ctx);
@@ -1435,17 +1666,25 @@
   }
 
   function elementAt(point) {
-    for (const kind of ["flame", "streak", "text"]) {
-      const box = positionBox(kind);
-      if (!box) continue;
-      if (
-        point.x >= box.x &&
-        point.x <= box.x + box.width &&
-        point.y >= box.y &&
-        point.y <= box.y + box.height
-      ) {
-        return kind;
-      }
+    const textBox = positionBox("text");
+    if (
+      textBox &&
+      point.x >= textBox.x &&
+      point.x <= textBox.x + textBox.width &&
+      point.y >= textBox.y &&
+      point.y <= textBox.y + textBox.height
+    ) {
+      return "text";
+    }
+    const counterBox = positionBox("counter");
+    if (
+      counterBox &&
+      point.x >= counterBox.x &&
+      point.x <= counterBox.x + counterBox.width &&
+      point.y >= counterBox.y &&
+      point.y <= counterBox.y + counterBox.height
+    ) {
+      return "counter";
     }
     return null;
   }
@@ -1459,16 +1698,17 @@
       if (!kind) return;
       state.selection = { kind };
       if (kind === "text" && selectedText()) state.selectedTextId = selectedText().id;
-      const box = positionBox(kind);
+      const position = positionFor(kind);
       state.drag = {
         kind,
         startX: point.x,
         startY: point.y,
-        origX: box.x,
-        origY: box.y,
+        origX: num(position?.x),
+        origY: num(position?.y),
         changed: false,
       };
       renderLayoutPanel();
+      requestDraw();
       canvas.setPointerCapture(event.pointerId);
       canvas.classList.add("is-dragging");
       event.preventDefault();
@@ -1618,6 +1858,7 @@
       offsetX: 0,
       offsetY: 0,
       scale: 1,
+      styles: defaultStyles(),
       layout: defaultLayout(),
     });
     state.manualBgId = bgId;
@@ -1717,6 +1958,7 @@
       offsetX: 0,
       offsetY: 0,
       scale: 1,
+      styles: defaultStyles(),
       layout: defaultLayout(),
     });
     state.manualBgId = id;

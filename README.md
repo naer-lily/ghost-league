@@ -133,8 +133,9 @@ token。systemd 模板把 token 放在 `/etc/ghost-league/waka.env`（0600）；
 
 - 模版数据：`data/widgets/<id>/template.json`、`flame.png`、`backgrounds/*.png`；目录文件
   是唯一真相源，保存后生产图立即生效，不需要重启。
-- 模版是 version 3：`styles` 全局唯一样式源；每张底图有自己的 `layout.texts`（文字变体）、
-  `layout.streak` 和 `layout.flame` 坐标。没有全局图层；样式只在编辑器里只读展示。
+- 模版是 version 4：样式按底图存（`backgrounds[].styles`），没有全局 `styles`。火焰+数字
+  是一个组件，支持整体缩放与间隔；文字支持字号、字重、字间距、描边与颜色。多个文字变体
+  共用当前底图的 `styles.label`，位置各自独立；切换底图切换整套样式。
 - Ghost 现有 `web/assets/tiers/card/*.png` 和 `web/assets/frames/*.png` 通过
   `ghost:assets/...` 原地引用，不复制。
 - API：`/v1/widget-studio`（模版列表/详情与写接口要求现有 Bearer；图片、缩略图和资源库只读公开）。

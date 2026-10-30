@@ -40,18 +40,49 @@ def png_bytes(
     return buffer.getvalue()
 
 
+def default_styles() -> dict:
+    return {
+        "label": {
+            "width": 520,
+            "height": 100,
+            "fontSize": 64,
+            "fontWeight": 400,
+            "letterSpacing": 0,
+            "strokeWidth": 0,
+            "strokeColor": "#17324d",
+            "color": "#17324d",
+            "align": "left",
+            "lineHeight": 1.15,
+            "shadow": {"color": "rgba(255,255,255,0.65)", "blur": 0, "offsetX": 0, "offsetY": 2},
+        },
+        "counter": {
+            "scale": 1.0,
+            "gap": 30,
+            "flame": {"width": 120, "height": 140, "opacity": 1},
+            "number": {
+                "width": 360,
+                "height": 180,
+                "fontSize": 132,
+                "fontWeight": 400,
+                "color": "#ffb020",
+                "align": "left",
+                "lineHeight": 1,
+                "shadow": {"color": "rgba(255,255,255,0.75)", "blur": 0, "offsetX": 0, "offsetY": 3},
+            },
+        },
+    }
+
+
 def default_layout(
     text: str = "连续学习",
     *,
     x: float = 760,
     y: float = 540,
-    streak: tuple[float, float] = (760, 300),
-    flame: tuple[float, float] = (660, 280),
+    counter: tuple[float, float] = (660, 280),
 ) -> dict:
     return {
+        "counter": {"x": counter[0], "y": counter[1]},
         "texts": [{"id": "text-1", "text": text, "x": x, "y": y}],
-        "streak": {"x": streak[0], "y": streak[1]},
-        "flame": {"x": flame[0], "y": flame[1]},
     }
 
 
@@ -62,6 +93,7 @@ def background(
     when: dict | None = None,
     priority: int = 0,
     layout: dict | None = None,
+    styles: dict | None = None,
 ) -> dict:
     return {
         "id": bg_id,
@@ -73,6 +105,7 @@ def background(
         "offsetX": 0,
         "offsetY": 0,
         "scale": 1,
+        "styles": styles or default_styles(),
         "layout": layout or default_layout(),
     }
 
@@ -245,14 +278,26 @@ class WidgetStudioAPITests(unittest.TestCase):
     def test_01_create_read_update_list_delete(self) -> None:
         template = self.create_template()
         self.assertEqual(template["id"], "nijika")
-        self.assertEqual(template["version"], 3)
+        self.assertEqual(template["version"], 4)
         self.assertNotIn("render_token", template)
+        self.assertNotIn("styles", template)
         self.assertEqual(template["canvas"]["width"], 1536)
-        self.assertEqual(set(template["styles"]), {"label", "streak", "flame"})
-        self.assertEqual(template["styles"]["label"]["fontSize"], 64)
-        self.assertEqual(len(template["backgrounds"]), 1)
-        self.assertEqual(template["backgrounds"][0]["when"], {})
-        self.assertEqual(len(template["backgrounds"][0]["layout"]["texts"]), 1)
+        background_item = template["backgrounds"][0]
+        self.assertEqual(set(background_item["styles"]), {"label", "counter"})
+        self.assertEqual(background_item["styles"]["label"]["fontSize"], 64)
+        self.assertEqual(background_item["styles"]["label"]["letterSpacing"], 0)
+        self.assertEqual(background_item["styles"]["label"]["strokeWidth"], 0)
+        self.assertEqual(
+            background_item["styles"]["label"]["strokeColor"],
+            background_item["styles"]["label"]["color"],
+        )
+        self.assertEqual(background_item["styles"]["counter"]["scale"], 1.0)
+        self.assertEqual(background_item["styles"]["counter"]["gap"], 30.0)
+        self.assertEqual(background_item["when"], {})
+        self.assertEqual(len(background_item["layout"]["texts"]), 1)
+        self.assertEqual(background_item["layout"]["counter"], {"x": 660.0, "y": 280.0})
+        self.assertNotIn("streak", background_item["layout"])
+        self.assertNotIn("flame", background_item["layout"])
         self.assertNotIn("layers", template)
 
         listing = self.client.get("/v1/widget-studio/templates", headers=auth())
@@ -271,11 +316,13 @@ class WidgetStudioAPITests(unittest.TestCase):
         self.clock["now"] = datetime(2026, 10, 30, 12, 5, 0, tzinfo=TZ)
         template["name"] = "Nijika Frame"
         template["backgrounds"][0]["layout"]["texts"][0]["text"] = "今日连胜"
+        template["backgrounds"][0]["styles"]["counter"]["gap"] = 72
         updated = self.put(template)
         self.assertEqual(updated["name"], "Nijika Frame")
         self.assertEqual(
             updated["backgrounds"][0]["layout"]["texts"][0]["text"], "今日连胜"
         )
+        self.assertEqual(updated["backgrounds"][0]["styles"]["counter"]["gap"], 72.0)
         self.assertNotEqual(updated["updated_at"], template["updated_at"])
 
         listing = self.client.get("/v1/widget-studio/templates", headers=auth()).json()
@@ -353,30 +400,77 @@ class WidgetStudioAPITests(unittest.TestCase):
         self.assertEqual(asset.status_code, 200)
         self.assertIn("image/png", asset.headers["content-type"])
 
-    def test_03_v3_schema_validation(self) -> None:
+    def test_03_v4_schema_validation_and_v3_migration_hint(self) -> None:
         template = self.create_template()
         cases: list[tuple[str, dict]] = []
 
-        def variant(mutator) -> None:
+        def variant(label: str, mutator) -> None:
             copy = json.loads(json.dumps(template))
             mutator(copy)
-            cases.append(("invalid", copy))
+            cases.append((label, copy))
 
-        variant(lambda item: item.pop("version"))
-        variant(lambda item: item.update(version=2))
-        variant(lambda item: item.pop("styles"))
-        variant(lambda item: item["styles"].pop("label"))
-        variant(lambda item: item["backgrounds"][0].pop("layout"))
-        variant(lambda item: item["backgrounds"][0]["layout"].update(texts=[]))
-        variant(lambda item: item["backgrounds"][0]["layout"].pop("streak"))
-        variant(lambda item: item["backgrounds"][0]["layout"].pop("flame"))
-        variant(lambda item: item["backgrounds"][0]["layout"]["texts"][0].pop("x"))
+        variant("no version", lambda item: item.pop("version"))
+        variant("v2", lambda item: item.update(version=2))
+        variant("top-level styles", lambda item: item.update(styles=default_styles()))
+        variant("no background styles", lambda item: item["backgrounds"][0].pop("styles"))
+        variant("no label", lambda item: item["backgrounds"][0]["styles"].pop("label"))
+        variant("no counter", lambda item: item["backgrounds"][0]["styles"].pop("counter"))
+        variant("no layout", lambda item: item["backgrounds"][0].pop("layout"))
         variant(
+            "empty texts",
+            lambda item: item["backgrounds"][0]["layout"].update(texts=[]),
+        )
+        variant(
+            "no counter anchor",
+            lambda item: item["backgrounds"][0]["layout"].pop("counter"),
+        )
+        variant(
+            "old streak field",
+            lambda item: item["backgrounds"][0]["layout"].update(streak={"x": 1, "y": 2}),
+        )
+        variant(
+            "old flame field",
+            lambda item: item["backgrounds"][0]["layout"].update(flame={"x": 1, "y": 2}),
+        )
+        variant(
+            "text without x",
+            lambda item: item["backgrounds"][0]["layout"]["texts"][0].pop("x"),
+        )
+        variant(
+            "duplicate text id",
             lambda item: item["backgrounds"][0]["layout"]["texts"].append(
                 {"id": "text-1", "text": "dup", "x": 1, "y": 2}
-            )
+            ),
         )
-        variant(lambda item: item.update(layers=[]))
+        variant("legacy layers", lambda item: item.update(layers=[]))
+        variant(
+            "scale too small",
+            lambda item: item["backgrounds"][0]["styles"]["counter"].update(scale=0.4),
+        )
+        variant(
+            "scale too large",
+            lambda item: item["backgrounds"][0]["styles"]["counter"].update(scale=2.1),
+        )
+        variant(
+            "negative gap",
+            lambda item: item["backgrounds"][0]["styles"]["counter"].update(gap=-1),
+        )
+        variant(
+            "gap too large",
+            lambda item: item["backgrounds"][0]["styles"]["counter"].update(gap=161),
+        )
+        variant(
+            "letter spacing too large",
+            lambda item: item["backgrounds"][0]["styles"]["label"].update(letterSpacing=41),
+        )
+        variant(
+            "stroke too wide",
+            lambda item: item["backgrounds"][0]["styles"]["label"].update(strokeWidth=13),
+        )
+        variant(
+            "font weight out of range",
+            lambda item: item["backgrounds"][0]["styles"]["label"].update(fontWeight=50),
+        )
         for label, payload in cases:
             response = self.client.put(
                 f"/v1/widget-studio/templates/{template['id']}",
@@ -385,11 +479,28 @@ class WidgetStudioAPITests(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 422, label)
 
+        # Legacy v3 JSON is rejected with an actionable migration hint instead
+        # of being silently half-read.
+        legacy = json.loads(json.dumps(template))
+        legacy["version"] = 3
+        legacy["styles"] = default_styles()
+        for item in legacy["backgrounds"]:
+            item.pop("styles")
+            item["layout"]["streak"] = {"x": 1, "y": 2}
+            item["layout"]["flame"] = {"x": 3, "y": 4}
+        response = self.client.put(
+            f"/v1/widget-studio/templates/{template['id']}",
+            headers=auth(),
+            json=legacy,
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("migrate_widget_template_v4.py", response.json()["detail"])
+
         # The disk file was never rewritten by the rejected PUTs.
         stored = self.client.get(
             f"/v1/widget-studio/templates/{template['id']}", headers=auth()
         ).json()
-        self.assertEqual(stored["version"], 3)
+        self.assertEqual(stored["version"], 4)
         self.assertEqual(stored["id"], template["id"])
 
     def test_04_conditions_priority_and_fallback_from_status(self) -> None:
@@ -416,8 +527,7 @@ class WidgetStudioAPITests(unittest.TestCase):
                         text=bg_id,
                         x=100 + priority,
                         y=120,
-                        streak=(200 + priority, 220),
-                        flame=(300 + priority, 320),
+                        counter=(300 + priority, 320),
                     ),
                 )
             )
@@ -486,8 +596,7 @@ class WidgetStudioAPITests(unittest.TestCase):
             text="第一条",
             x=700,
             y=500,
-            streak=(700, 260),
-            flame=(620, 240),
+            counter=(620, 240),
         )
         layout_a["texts"] = [
             {"id": "text-1", "text": "第一条", "x": 700, "y": 500},
@@ -535,8 +644,7 @@ class WidgetStudioAPITests(unittest.TestCase):
             text="另一张",
             x=120,
             y=160,
-            streak=(140, 180),
-            flame=(160, 200),
+            counter=(160, 200),
         )
         template = self.put(template)
 
@@ -879,21 +987,44 @@ class WidgetStudioAPITests(unittest.TestCase):
         self.assertGreater(incomplete_flame[4], 1000)
         self.assertGreater(incomplete_label[4], 1000)
 
-    def test_13_migration_script_builds_v3(self) -> None:
+    def test_13_migration_script_builds_v4_idempotently(self) -> None:
         import importlib.util
 
-        script_path = ROOT / "scripts" / "migrate_widget_template_v3.py"
-        spec = importlib.util.spec_from_file_location("migrate_widget_v3", script_path)
+        script_path = ROOT / "scripts" / "migrate_widget_template_v4.py"
+        spec = importlib.util.spec_from_file_location("migrate_widget_v4", script_path)
         module = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
         spec.loader.exec_module(module)
-        raw_v2 = {
-            "version": 2,
+        raw_v3 = {
+            "version": 3,
             "id": "legacy",
             "name": "Legacy",
             "render_token": "a" * 32,
             "updated_at": "2026-10-30T12:00:00",
             "canvas": {"width": 1536, "height": 914, "radius": 128},
+            "styles": {
+                "label": {
+                    "width": 520,
+                    "height": 100,
+                    "fontSize": 64,
+                    "fontWeight": 400,
+                    "color": "#17324d",
+                    "align": "left",
+                    "lineHeight": 1.15,
+                    "shadow": None,
+                },
+                "streak": {
+                    "width": 360,
+                    "height": 180,
+                    "fontSize": 132,
+                    "fontWeight": 400,
+                    "color": "#ffb020",
+                    "align": "left",
+                    "lineHeight": 1,
+                    "shadow": None,
+                },
+                "flame": {"width": 120, "height": 140, "opacity": 1},
+            },
             "backgrounds": [
                 {
                     "id": "bg-default",
@@ -905,68 +1036,302 @@ class WidgetStudioAPITests(unittest.TestCase):
                     "offsetX": 0,
                     "offsetY": 0,
                     "scale": 1,
-                }
-            ],
-            "layers": [
-                {
-                    "id": "label-1",
-                    "type": "text",
-                    "role": "label",
-                    "text": "连续学习",
-                    "x": 760,
-                    "y": 540,
-                    "w": 520,
-                    "h": 100,
-                    "fontSize": 64,
-                    "fontWeight": 400,
-                    "color": "#17324d",
-                    "align": "left",
-                    "lineHeight": 1.15,
-                    "shadow": None,
+                    "layout": {
+                        "texts": [
+                            {"id": "text-1", "text": "连续学习", "x": 760, "y": 540}
+                        ],
+                        "streak": {"x": 760, "y": 300},
+                        "flame": {"x": 660, "y": 280},
+                    },
                 },
                 {
-                    "id": "number-1",
-                    "type": "text",
-                    "role": "streak",
-                    "text": "{streak}",
-                    "x": 760,
-                    "y": 300,
-                    "w": 360,
-                    "h": 180,
-                    "fontSize": 132,
-                    "fontWeight": 400,
-                    "color": "#ffb020",
-                    "align": "left",
-                    "lineHeight": 1,
-                    "shadow": None,
-                },
-                {
-                    "id": "flame-1",
-                    "type": "image",
-                    "role": "flame",
-                    "x": 660,
-                    "y": 280,
-                    "w": 120,
-                    "h": 140,
-                    "src": "flame.png",
-                    "opacity": 1,
+                    "id": "bg-night",
+                    "name": "夜晚",
+                    "src": "backgrounds/bg-night.png",
+                    "when": {"hour_from": 22, "hour_to": 5},
+                    "priority": 10,
+                    "fit": "cover",
+                    "offsetX": 0,
+                    "offsetY": 0,
+                    "scale": 1,
+                    "layout": {
+                        "texts": [
+                            {"id": "text-1", "text": "夜晚", "x": 200, "y": 300}
+                        ],
+                        "streak": {"x": 300, "y": 200},
+                        "flame": {"x": 260, "y": 180},
+                    },
                 },
             ],
         }
-        migrated = module.migrate(raw_v2)
-        self.assertEqual(migrated["version"], 3)
+        migrated = module.migrate(raw_v3)
+        self.assertEqual(migrated["version"], 4)
         self.assertNotIn("layers", migrated)
         self.assertNotIn("render_token", migrated)
-        self.assertEqual(migrated["styles"]["label"]["fontSize"], 64)
-        layout = migrated["backgrounds"][0]["layout"]
+        self.assertNotIn("styles", migrated)
+        self.assertEqual(len(migrated["backgrounds"]), 2)
+        first = migrated["backgrounds"][0]
+        second = migrated["backgrounds"][1]
+        self.assertEqual(first["styles"]["label"]["fontSize"], 64)
+        self.assertEqual(first["styles"]["label"]["letterSpacing"], 0)
+        self.assertEqual(first["styles"]["label"]["strokeWidth"], 0)
+        self.assertEqual(first["styles"]["label"]["strokeColor"], "#17324d")
+        self.assertEqual(first["styles"]["counter"]["scale"], 1.0)
+        self.assertEqual(first["styles"]["counter"]["gap"], 30)
+        self.assertEqual(first["styles"]["counter"]["flame"]["width"], 120)
+        self.assertEqual(first["styles"]["counter"]["number"]["fontSize"], 132)
         self.assertEqual(
-            layout["texts"], [{"id": "text-1", "text": "连续学习", "x": 760, "y": 540}]
+            first["layout"]["texts"], [{"id": "text-1", "text": "连续学习", "x": 760, "y": 540}]
         )
-        self.assertEqual(layout["streak"], {"x": 760, "y": 300})
-        self.assertEqual(layout["flame"], {"x": 660, "y": 280})
-        with self.assertRaises(ValueError):
-            module.migrate(migrated)
+        self.assertEqual(first["layout"]["counter"], {"x": 660, "y": 280})
+        self.assertEqual(second["layout"]["counter"], {"x": 260, "y": 180})
+        self.assertNotIn("streak", first["layout"])
+        self.assertNotIn("flame", first["layout"])
 
+        # Every background owns an independent copy of the old global styles.
+        first["styles"]["counter"]["gap"] = 99
+        self.assertEqual(second["styles"]["counter"]["gap"], 30)
+
+        # Running the migration again is a no-op.
+        self.assertEqual(module.migrate(migrated), migrated)
+        with self.assertRaises(ValueError):
+            module.migrate({"version": 2, "id": "legacy", "name": "Legacy"})
+
+    def _flat_template(self, *, text: str = "连续学习") -> dict:
+        """A template with a flat dark background and an orange flame."""
+
+        template = self.create_template("Flat")
+        self.upload(
+            template["id"],
+            "background",
+            bg_id="bg-flat",
+            data=png_bytes(color=(12, 18, 40)),
+        )
+        self.upload(
+            template["id"],
+            "flame",
+            data=png_bytes(size=(120, 140), color=(255, 120, 30)),
+        )
+        template["backgrounds"] = [
+            background(
+                "bg-flat",
+                "backgrounds/bg-flat.png",
+                layout=default_layout(text=text, x=100, y=100, counter=(700, 260)),
+            )
+        ]
+        return self.put(template)
+
+    def test_14_per_background_styles_are_independent(self) -> None:
+        template = self._flat_template()
+        template = self.add_local_background(template, "bg-alt")
+        fallback = template["backgrounds"][0]
+        alternate = template["backgrounds"][1]
+        fallback["when"] = {}
+        alternate["when"] = {"hour_from": 0, "hour_to": 12}
+        alternate["priority"] = 50
+        fallback["styles"] = default_styles()
+        fallback["styles"]["counter"].update(scale=1.0, gap=30)
+        fallback["styles"]["counter"]["number"].update(fontSize=132, color="#ff2020")
+        alternate["styles"] = default_styles()
+        alternate["styles"]["counter"].update(scale=1.5, gap=100)
+        alternate["styles"]["counter"]["number"].update(fontSize=80, color="#20ff20")
+        template["backgrounds"] = [fallback, alternate]
+        template = self.put(template)
+
+        with patch(
+            "ghost_league.widget_studio.renderer.random.choice",
+            side_effect=lambda entries: entries[0],
+        ):
+            self.clock["now"] = datetime(2026, 10, 30, 6, 0, 0, tzinfo=TZ)
+            morning = self.render(template, status=self.status(checkin="verified"))
+            self.clock["now"] = datetime(2026, 10, 30, 20, 0, 0, tzinfo=TZ)
+            evening = self.render(template, status=self.status(checkin="verified"))
+        self.assertEqual(morning.headers["x-widget-background"], "bg-alt")
+        self.assertEqual(evening.headers["x-widget-background"], "bg-flat")
+        self.assertNotEqual(morning.content, evening.content)
+
+        with Image.open(io.BytesIO(morning.content)) as raw:
+            morning_image = raw.convert("RGBA")
+        with Image.open(io.BytesIO(evening.content)) as raw:
+            evening_image = raw.convert("RGBA")
+        green = color_bbox(
+            morning_image,
+            (0, 0, 1536, 914),
+            lambda r, g, b, a: a > 0 and g > 180 and r < 100 and b < 100,
+        )
+        red = color_bbox(
+            evening_image,
+            (0, 0, 1536, 914),
+            lambda r, g, b, a: a > 0 and r > 180 and g < 100 and b < 100,
+        )
+        self.assertIsNotNone(green)
+        self.assertIsNotNone(red)
+        assert green and red
+        # The alternate background's larger scale pushes its flame right, its
+        # larger gap moves the number further right, and the independent copy
+        # means the fallback keeps its own geometry.
+        self.assertGreater(green[0], red[0] + 40)
+        self.assertLess(green[0], 1536)
+        self.assertLess(green[3] - green[1], red[3] - red[1])
+
+        # Re-rendering the fallback never picks up the alternate background's
+        # styles.
+        self.clock["now"] = datetime(2026, 10, 30, 20, 0, 0, tzinfo=TZ)
+        with patch(
+            "ghost_league.widget_studio.renderer.random.choice",
+            side_effect=lambda entries: entries[0],
+        ):
+            again = self.render(template, status=self.status(checkin="verified"))
+        with Image.open(io.BytesIO(again.content)) as raw:
+            again_image = raw.convert("RGBA")
+        again_red = color_bbox(
+            again_image,
+            (0, 0, 1536, 914),
+            lambda r, g, b, a: a > 0 and r > 180 and g < 100 and b < 100,
+        )
+        self.assertEqual(again_red, red)
+
+    def test_15_gap_moves_only_the_number(self) -> None:
+        template = self._flat_template()
+        template["backgrounds"][0]["styles"]["counter"]["number"]["color"] = "#ff2020"
+        template = self.put(template)
+        style = template["backgrounds"][0]["styles"]["counter"]
+
+        with patch(
+            "ghost_league.widget_studio.renderer.random.choice",
+            side_effect=lambda entries: entries[0],
+        ):
+            first = self.render(template, status=self.status(checkin="verified"))
+            style["gap"] = 120
+            template = self.put(template)
+            second = self.render(template, status=self.status(checkin="verified"))
+
+        def red_box(response):
+            with Image.open(io.BytesIO(response.content)) as raw:
+                image = raw.convert("RGBA")
+            return color_bbox(
+                image,
+                (0, 0, 1536, 914),
+                lambda r, g, b, a: a > 0 and r > 180 and g < 100 and b < 100,
+            )
+
+        def orange_box(response):
+            with Image.open(io.BytesIO(response.content)) as raw:
+                image = raw.convert("RGBA")
+            return color_bbox(
+                image,
+                (0, 0, 1536, 914),
+                lambda r, g, b, a: a > 0 and r > 200 and g >= 100 and b < 80,
+            )
+
+        first_digit = red_box(first)
+        second_digit = red_box(second)
+        first_flame = orange_box(first)
+        second_flame = orange_box(second)
+        assert first_digit and second_digit and first_flame and second_flame
+        self.assertGreater(second_digit[0], first_digit[0] + 80)
+        self.assertGreater(second_digit[2], first_digit[2] + 80)
+        self.assertEqual(first_flame, second_flame)
+
+    def test_16_text_weight_spacing_and_stroke_change_pixels(self) -> None:
+        template = self._flat_template(text="Weight AB")
+        background_item = template["backgrounds"][0]
+        style = background_item["styles"]["label"]
+        style.update(
+            width=1200,
+            height=200,
+            fontSize=120,
+            fontWeight=400,
+            letterSpacing=0,
+            strokeWidth=0,
+            strokeColor="#ff0000",
+            color="#ffffff",
+            shadow=None,
+        )
+        background_item["layout"]["texts"][0].update(x=100, y=100)
+        background_item["layout"]["counter"] = {"x": -800, "y": -800}
+        template = self.put(template)
+        style = template["backgrounds"][0]["styles"]["label"]
+
+        def render_label() -> Image.Image:
+            with patch(
+                "ghost_league.widget_studio.renderer.random.choice",
+                side_effect=lambda entries: entries[0],
+            ):
+                response = self.render(template, status=self.status(checkin="verified"))
+            self.assertEqual(response.status_code, 200, response.text)
+            with Image.open(io.BytesIO(response.content)) as raw:
+                return raw.convert("RGBA")
+
+        def white_box(image: Image.Image):
+            return color_bbox(image, (0, 0, 1400, 400), white_pixel)
+
+        def red_box(image: Image.Image):
+            return color_bbox(
+                image,
+                (0, 0, 1400, 400),
+                lambda r, g, b, a: a > 0 and r > 180 and g < 100 and b < 100,
+            )
+
+        regular = render_label()
+        regular_white = white_box(regular)
+        assert regular_white
+        self.assertIsNone(red_box(regular))
+
+        style["fontWeight"] = 900
+        template = self.put(template)
+        style = template["backgrounds"][0]["styles"]["label"]
+        bold = render_label()
+        bold_white = white_box(bold)
+        assert bold_white
+        self.assertGreater(bold_white[4], regular_white[4] * 1.08)
+
+        style["letterSpacing"] = 30
+        template = self.put(template)
+        style = template["backgrounds"][0]["styles"]["label"]
+        spaced = render_label()
+        spaced_white = white_box(spaced)
+        assert spaced_white
+        self.assertGreater(
+            spaced_white[2] - spaced_white[0],
+            (bold_white[2] - bold_white[0]) * 1.1,
+        )
+
+        style["strokeWidth"] = 10
+        style["strokeColor"] = "#ff0000"
+        template = self.put(template)
+        style = template["backgrounds"][0]["styles"]["label"]
+        stroked = render_label()
+        stroke_red = red_box(stroked)
+        self.assertIsNotNone(stroke_red)
+        assert stroke_red
+        self.assertGreater(stroke_red[4], 1000)
+
+    def test_17_legacy_v3_file_reads_as_422_with_migration_hint(self) -> None:
+        legacy_dir = self.widgets_dir / "legacy-v3"
+        legacy_dir.mkdir(parents=True)
+        (legacy_dir / "template.json").write_text(
+            json.dumps(
+                {
+                    "version": 3,
+                    "id": "legacy-v3",
+                    "name": "Legacy V3",
+                    "canvas": {"width": 1536, "height": 914, "radius": 128},
+                    "styles": default_styles(),
+                    "backgrounds": [
+                        background("bg-default", "backgrounds/bg-default.png")
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        response = self.client.get(
+            "/v1/widget-studio/templates/legacy-v3", headers=auth()
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("migrate_widget_template_v4.py", response.json()["detail"])
+        production = self.render({"id": "legacy-v3"})
+        self.assertEqual(production.status_code, 404)
 
 if __name__ == "__main__":
     unittest.main()

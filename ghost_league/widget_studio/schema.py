@@ -3,10 +3,12 @@
 A template is plain JSON on disk.  This module is deliberately free of HTTP and
 database concerns so the store, renderer and tests share exactly one schema.
 
-Version 3 makes styles global (``styles``) and moves every position next to the
-background it belongs to (``backgrounds[].layout``).  There is no global layer
-list: each background owns its label text variants, streak position and flame
-position.
+Version 4 stores every style next to the background it belongs to:
+``backgrounds[].styles`` is the only style source.  The streak number and the
+flame form one counter component whose layout is only an anchor
+(``backgrounds[].layout.counter``); ``counter.scale`` and ``counter.gap`` drive
+the pair together.  Text variants keep their own positions but share the
+background's ``styles.label``.
 """
 
 from __future__ import annotations
@@ -18,7 +20,8 @@ from typing import Any
 CANVAS_WIDTH = 1536
 CANVAS_HEIGHT = 914
 CANVAS_RADIUS = 128
-TEMPLATE_VERSION = 3
+TEMPLATE_VERSION = 4
+MIGRATION_SCRIPT = "scripts/migrate_widget_template_v4.py"
 MAX_FILE_BYTES = 15 * 1024 * 1024
 
 TEMPLATE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -37,7 +40,15 @@ WHEN_FIELDS = {
 }
 TEXT_ALIGNS = {"left", "center", "right"}
 FITS = {"cover", "contain"}
-STYLE_KEYS = {"label", "streak", "flame"}
+STYLE_KEYS = {"label", "counter"}
+COUNTER_SCALE_MIN = 0.5
+COUNTER_SCALE_MAX = 2.0
+COUNTER_GAP_MIN = 0
+COUNTER_GAP_MAX = 160
+LETTER_SPACING_MIN = -10
+LETTER_SPACING_MAX = 40
+STROKE_WIDTH_MIN = 0
+STROKE_WIDTH_MAX = 12
 
 
 class ValidationError(ValueError):
@@ -59,6 +70,12 @@ def _number(value: Any, field: str, *, minimum: float | None = None) -> float:
     _require(number == number and abs(number) != float("inf"), f"{field} must be finite")
     if minimum is not None:
         _require(number >= minimum, f"{field} must be >= {minimum}")
+    return number
+
+
+def _bounded_number(value: Any, field: str, *, minimum: float, maximum: float) -> float:
+    number = _number(value, field)
+    _require(minimum <= number <= maximum, f"{field} must be {minimum}-{maximum}")
     return number
 
 
@@ -217,7 +234,9 @@ def _normalize_shadow(raw: Any, field: str) -> dict[str, Any] | None:
     }
 
 
-def normalize_text_style(raw: Any, field: str) -> dict[str, Any]:
+def _normalize_text_style(
+    raw: Any, field: str, *, decorated: bool
+) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValidationError(f"{field} must be an object")
     align = raw.get("align", "left")
@@ -229,7 +248,7 @@ def normalize_text_style(raw: Any, field: str) -> dict[str, Any]:
     font_weight = raw.get("fontWeight", 400)
     if not is_int(font_weight) or not 100 <= font_weight <= 900:
         raise ValidationError(f"{field}.fontWeight must be 100-900")
-    return {
+    style = {
         "width": _number(raw.get("width", 520), f"{field}.width", minimum=1),
         "height": _number(raw.get("height", 100), f"{field}.height", minimum=1),
         "fontSize": _number(raw.get("fontSize", 48), f"{field}.fontSize", minimum=1),
@@ -239,6 +258,38 @@ def normalize_text_style(raw: Any, field: str) -> dict[str, Any]:
         "lineHeight": _number(raw.get("lineHeight", 1.2), f"{field}.lineHeight", minimum=0.1),
         "shadow": _normalize_shadow(raw.get("shadow"), f"{field}.shadow"),
     }
+    if decorated:
+        letter_spacing = _bounded_number(
+            raw.get("letterSpacing", 0),
+            f"{field}.letterSpacing",
+            minimum=LETTER_SPACING_MIN,
+            maximum=LETTER_SPACING_MAX,
+        )
+        stroke_width = _bounded_number(
+            raw.get("strokeWidth", 0),
+            f"{field}.strokeWidth",
+            minimum=STROKE_WIDTH_MIN,
+            maximum=STROKE_WIDTH_MAX,
+        )
+        stroke_color = raw.get("strokeColor", color)
+        if not isinstance(stroke_color, str) or not 1 <= len(stroke_color) <= 64:
+            raise ValidationError(f"{field}.strokeColor must be a CSS color")
+        style["letterSpacing"] = letter_spacing
+        style["strokeWidth"] = stroke_width
+        style["strokeColor"] = stroke_color
+    return style
+
+
+def normalize_text_style(raw: Any, field: str) -> dict[str, Any]:
+    """Normalize the shared text/label style (includes typography extras)."""
+
+    return _normalize_text_style(raw, field, decorated=True)
+
+
+def normalize_number_style(raw: Any, field: str) -> dict[str, Any]:
+    """Normalize the counter number style (no letter spacing/stroke knobs)."""
+
+    return _normalize_text_style(raw, field, decorated=False)
 
 
 def normalize_flame_style(raw: Any, field: str) -> dict[str, Any]:
@@ -254,16 +305,36 @@ def normalize_flame_style(raw: Any, field: str) -> dict[str, Any]:
     }
 
 
-def normalize_styles(raw: Any) -> dict[str, Any]:
+def normalize_counter_style(raw: Any, field: str = "styles.counter") -> dict[str, Any]:
     if not isinstance(raw, dict):
-        raise ValidationError("styles must be an object")
+        raise ValidationError(f"{field} must be an object")
+    return {
+        "scale": _bounded_number(
+            raw.get("scale", 1.0),
+            f"{field}.scale",
+            minimum=COUNTER_SCALE_MIN,
+            maximum=COUNTER_SCALE_MAX,
+        ),
+        "gap": _bounded_number(
+            raw.get("gap", 30),
+            f"{field}.gap",
+            minimum=COUNTER_GAP_MIN,
+            maximum=COUNTER_GAP_MAX,
+        ),
+        "flame": normalize_flame_style(raw.get("flame"), f"{field}.flame"),
+        "number": normalize_number_style(raw.get("number"), f"{field}.number"),
+    }
+
+
+def normalize_styles(raw: Any, field: str = "styles") -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValidationError(f"{field} must be an object")
     missing = STYLE_KEYS - set(raw)
     if missing:
-        raise ValidationError(f"styles is missing: {', '.join(sorted(missing))}")
+        raise ValidationError(f"{field} is missing: {', '.join(sorted(missing))}")
     return {
-        "label": normalize_text_style(raw["label"], "styles.label"),
-        "streak": normalize_text_style(raw["streak"], "styles.streak"),
-        "flame": normalize_flame_style(raw["flame"], "styles.flame"),
+        "label": normalize_text_style(raw["label"], f"{field}.label"),
+        "counter": normalize_counter_style(raw["counter"], f"{field}.counter"),
     }
 
 
@@ -280,6 +351,12 @@ def normalize_layout(raw: Any, index: int) -> dict[str, Any]:
     field = f"backgrounds[{index}].layout"
     if not isinstance(raw, dict):
         raise ValidationError(f"{field} must be an object")
+    unknown = set(raw) - {"counter", "texts"}
+    if unknown:
+        raise ValidationError(
+            f"{field} has unknown fields: {', '.join(sorted(unknown))}; "
+            "version 4 only has counter and texts"
+        )
     texts_raw = raw.get("texts")
     if not isinstance(texts_raw, list) or not texts_raw:
         raise ValidationError(f"{field}.texts must be a non-empty list")
@@ -304,9 +381,8 @@ def normalize_layout(raw: Any, index: int) -> dict[str, Any]:
             }
         )
     return {
+        "counter": _normalize_position(raw.get("counter"), f"{field}.counter"),
         "texts": texts,
-        "streak": _normalize_position(raw.get("streak"), f"{field}.streak"),
-        "flame": _normalize_position(raw.get("flame"), f"{field}.flame"),
     }
 
 
@@ -340,6 +416,9 @@ def normalize_background(
         "offsetX": _number(raw.get("offsetX", 0), f"backgrounds[{index}].offsetX"),
         "offsetY": _number(raw.get("offsetY", 0), f"backgrounds[{index}].offsetY"),
         "scale": _number(raw.get("scale", 1), f"backgrounds[{index}].scale", minimum=0.01),
+        "styles": normalize_styles(
+            raw.get("styles"), f"backgrounds[{index}].styles"
+        ),
         "layout": normalize_layout(raw.get("layout"), index),
     }
 
@@ -355,9 +434,20 @@ def normalize_template(
         raise ValidationError("template must be a JSON object")
     version = raw.get("version")
     if version != TEMPLATE_VERSION:
-        raise ValidationError(f"template version must be {TEMPLATE_VERSION}")
+        raise ValidationError(
+            f"template version must be {TEMPLATE_VERSION}; "
+            f"version {version!r} must be migrated with {MIGRATION_SCRIPT}"
+        )
     if "layers" in raw:
-        raise ValidationError("version 3 templates do not have global layers")
+        raise ValidationError(
+            f"version {TEMPLATE_VERSION} templates do not have global layers; "
+            f"migrate with {MIGRATION_SCRIPT}"
+        )
+    if "styles" in raw:
+        raise ValidationError(
+            f"version {TEMPLATE_VERSION} stores styles per background; "
+            f"remove top-level styles and migrate with {MIGRATION_SCRIPT}"
+        )
     template_id = validate_template_id(raw.get("id"))
     if expected_id is not None and template_id != expected_id:
         raise ValidationError("template id does not match the URL")
@@ -377,8 +467,6 @@ def normalize_template(
         raise ValidationError("canvas.height must be 1-8192")
     if not is_int(radius) or not 0 <= radius <= min(width, height) // 2:
         raise ValidationError("canvas.radius is out of range")
-
-    styles = normalize_styles(raw.get("styles"))
 
     backgrounds_raw = raw.get("backgrounds")
     if not isinstance(backgrounds_raw, list):
@@ -404,7 +492,6 @@ def normalize_template(
         "id": template_id,
         "name": name.strip(),
         "canvas": {"width": width, "height": height, "radius": radius},
-        "styles": styles,
         "backgrounds": backgrounds,
     }
     updated_at = raw.get("updated_at")
@@ -484,16 +571,27 @@ __all__ = [
     "CANVAS_HEIGHT",
     "CANVAS_RADIUS",
     "CANVAS_WIDTH",
+    "COUNTER_GAP_MAX",
+    "COUNTER_GAP_MIN",
+    "COUNTER_SCALE_MAX",
+    "COUNTER_SCALE_MIN",
     "FITS",
     "IMAGE_SUFFIXES",
+    "LETTER_SPACING_MAX",
+    "LETTER_SPACING_MIN",
     "MAX_FILE_BYTES",
+    "MIGRATION_SCRIPT",
+    "STROKE_WIDTH_MAX",
+    "STROKE_WIDTH_MIN",
     "STYLE_KEYS",
     "TEMPLATE_VERSION",
     "ValidationError",
     "background_matches",
     "normalize_background",
+    "normalize_counter_style",
     "normalize_flame_style",
     "normalize_layout",
+    "normalize_number_style",
     "normalize_styles",
     "normalize_template",
     "normalize_text_style",

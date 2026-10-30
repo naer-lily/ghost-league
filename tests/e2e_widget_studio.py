@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Playwright E2E for Widget Studio (schema v3, explicit save).
+"""Playwright E2E for Widget Studio (schema v4, explicit save).
 
 Run explicitly with the shared UI environment::
 
@@ -13,6 +13,7 @@ positions, and writes screenshots under ``artifacts/``.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -300,6 +301,14 @@ def main() -> int:
             assert page.inner_text("#widget-template-id") == "nijika-e2e"
             print("PASS editor shows the fixed user_id + template_id URL")
 
+            # Give the sample template a real flame so the joined counter
+            # component has both visible halves in screenshots and drag tests.
+            if reference_template.is_dir():
+                page.set_input_files(
+                    "#flame-input", str(reference_template / "flame.png")
+                )
+                page.wait_for_timeout(400)
+
             # Uploads only write files; they mark the in-memory template dirty
             # and never PUT on their own.
             put_requests.clear()
@@ -371,6 +380,7 @@ def main() -> int:
             old_x = float(page.input_value("#text-x"))
             old_y = float(page.input_value("#text-y"))
             put_requests.clear()
+            page.locator("#studio-canvas").scroll_into_view_if_needed()
             drag_element(page, old_x + 120, old_y + 50, 90, 40)
             wait_dirty(page)
             page.wait_for_timeout(1700)
@@ -379,17 +389,17 @@ def main() -> int:
             print("PASS text drag local for >1.5s, 0 PUT")
 
             put_requests.clear()
-            drag_element(page, 940, 390, -60, 50)
+            old_counter_x = float(page.input_value("#counter-x"))
+            old_counter_y = float(page.input_value("#counter-y"))
+            page.locator("#studio-canvas").scroll_into_view_if_needed()
+            drag_element(page, 720, 330, 40, -20)
             page.wait_for_timeout(1700)
-            assert not put_requests, "streak drag must not auto-PUT"
-            streak_x = float(page.input_value("#streak-x"))
-            print("PASS streak drag local for >1.5s, 0 PUT")
-
-            put_requests.clear()
-            drag_element(page, 720, 350, 40, -20)
-            page.wait_for_timeout(1700)
-            assert not put_requests, "flame drag must not auto-PUT"
-            print("PASS flame drag local for >1.5s, 0 PUT")
+            assert not put_requests, "counter component drag must not auto-PUT"
+            counter_x = float(page.input_value("#counter-x"))
+            counter_y = float(page.input_value("#counter-y"))
+            assert counter_x > old_counter_x + 20
+            assert counter_y < old_counter_y - 10
+            print("PASS counter component (flame + number) drag local for >1.5s, 0 PUT")
 
             put_requests.clear()
             page.keyboard.press("Control+s")
@@ -399,7 +409,8 @@ def main() -> int:
             saved = fetch_template(context, origin, "nijika-e2e")
             morning = next(bg for bg in saved["backgrounds"] if bg["id"] == "bg-morning")
             assert abs(morning["layout"]["texts"][0]["x"] - float(page.input_value("#text-x"))) < 0.5
-            assert abs(morning["layout"]["streak"]["x"] - streak_x) < 0.5
+            assert abs(morning["layout"]["counter"]["x"] - counter_x) < 0.5
+            assert abs(morning["layout"]["counter"]["y"] - counter_y) < 0.5
             print("PASS Ctrl+S PUTs and status goes 未保存 -> 已保存")
 
             # Text content / condition change: no PUT, confirm on switch/reload.
@@ -515,10 +526,8 @@ def main() -> int:
             page.fill("#text-content", "夜晚文字")
             page.fill("#text-x", "320")
             page.fill("#text-y", "360")
-            page.fill("#streak-x", "300")
-            page.fill("#streak-y", "200")
-            page.fill("#flame-x", "260")
-            page.fill("#flame-y", "180")
+            page.fill("#counter-x", "300")
+            page.fill("#counter-y", "200")
             wait_dirty(page)
             page.click("#save-template-btn")
             wait_saved(page)
@@ -527,10 +536,9 @@ def main() -> int:
             morning = next(bg for bg in saved["backgrounds"] if bg["id"] == "bg-morning")
             assert night["layout"]["texts"][0]["x"] == 320
             assert night["layout"]["texts"][0]["y"] == 360
-            assert night["layout"]["streak"] == {"x": 300, "y": 200}
-            assert night["layout"]["flame"] == {"x": 260, "y": 180}
+            assert night["layout"]["counter"] == {"x": 300, "y": 200}
             assert morning["layout"]["texts"][0]["x"] != 320
-            assert morning["layout"]["streak"]["x"] != 300
+            assert morning["layout"]["counter"]["x"] != 300
             print("PASS background B stores different coordinates than A")
 
             page.reload(wait_until="networkidle")
@@ -541,8 +549,8 @@ def main() -> int:
             page.click('.bg-card[data-bg-id="bg-night"] .bg-card-head')
             assert float(page.input_value("#text-x")) == 320
             assert float(page.input_value("#text-y")) == 360
-            assert float(page.input_value("#streak-x")) == 300
-            assert float(page.input_value("#flame-x")) == 260
+            assert float(page.input_value("#counter-x")) == 300
+            assert float(page.input_value("#counter-y")) == 200
             page.click('.bg-card[data-bg-id="bg-morning"] .bg-card-head')
             page.click('.text-item[data-text-id="text-2"]')
             assert float(page.input_value("#text-x")) == 100
@@ -560,19 +568,51 @@ def main() -> int:
             direct.close()
             print("PASS direct fixed URL opens without a query")
 
-            # Final view for screenshots: three readable text variants on A.
+            # Final editor view: select the counter component so the whole
+            # flame + number box and its label are visible, then capture both
+            # desktop and mobile full-page screenshots with the current
+            # background label and all style controls in frame.
+            page.click('.bg-card[data-bg-id="bg-morning"] .bg-card-head')
+            page.click('.text-item[data-text-id="text-2"]')
+            page.locator("#studio-canvas").scroll_into_view_if_needed()
+            click_at = canvas_point(
+                page,
+                float(page.input_value("#counter-x")) + 45,
+                float(page.input_value("#counter-y")) + 70,
+            )
+            page.mouse.click(*click_at)
             page.wait_for_timeout(300)
-            page.screenshot(path=str(ARTIFACTS / "widget-studio-1440.png"), full_page=False)
+            assert page.inner_text("#current-bg-label") == "bg-morning"
+            for selector in (
+                "#counter-scale",
+                "#counter-gap",
+                "#label-font-size",
+                "#label-font-weight",
+                "#label-letter-spacing",
+                "#label-stroke-width",
+                "#label-color",
+                "#label-stroke-color",
+            ):
+                assert page.locator(selector).is_visible(), selector
+            page.set_viewport_size({"width": 1440, "height": 900})
+            page.wait_for_timeout(400)
             desktop_box = page.locator("#studio-canvas").bounding_box()
+            page.screenshot(
+                path=str(ARTIFACTS / "widget-studio-1440.png"),
+                full_page=True,
+            )
             page.set_viewport_size({"width": 390, "height": 844})
             page.wait_for_timeout(500)
             mobile_box = page.locator("#studio-canvas").bounding_box()
             assert mobile_box is not None and 0 < mobile_box["width"] <= 390
             assert page.is_visible("#new-template-btn")
             assert page.is_visible("#widget-fixed-url")
-            assert page.locator("#text-variant-list .text-item").count() == 3
-            page.screenshot(path=str(ARTIFACTS / "widget-studio-390.png"), full_page=False)
-            print("PASS desktop/mobile screenshots")
+            assert page.inner_text("#current-bg-label") == "bg-morning"
+            page.screenshot(
+                path=str(ARTIFACTS / "widget-studio-390.png"),
+                full_page=True,
+            )
+            print("PASS desktop/mobile screenshots include current background and component controls")
             print(f"  desktop canvas {desktop_box}")
             print(f"  mobile canvas {mobile_box}")
 
@@ -670,6 +710,63 @@ def main() -> int:
                 )
                 print("PASS nijika-ref completed switch restores/grays flame and number")
                 print("PASS nijika-ref proportions keep flame >=1.8x the number")
+
+                # Scale + gap + text weight/spacing/stroke, only for the
+                # current background, then explicit save, reload and fixed URL.
+                page.set_viewport_size({"width": 1440, "height": 900})
+                page.click('.bg-card[data-bg-id="bg-nijika"] .bg-card-head')
+                page.fill("#counter-scale", "1.2")
+                page.fill("#counter-gap", "90")
+                page.fill("#label-font-weight", "900")
+                page.fill("#label-letter-spacing", "8")
+                page.fill("#label-stroke-width", "4")
+                page.evaluate(
+                    """() => {
+                      const color = document.getElementById("label-color");
+                      color.value = "#ffe28a";
+                      color.dispatchEvent(new Event("input", {bubbles: true}));
+                      const stroke = document.getElementById("label-stroke-color");
+                      stroke.value = "#1b4f86";
+                      stroke.dispatchEvent(new Event("input", {bubbles: true}));
+                    }"""
+                )
+                wait_dirty(page)
+                page.click("#save-template-btn")
+                wait_saved(page)
+                saved_ref = fetch_template(context, origin, "nijika-ref")
+                ref_bg = saved_ref["backgrounds"][0]
+                assert ref_bg["styles"]["counter"]["scale"] == 1.2, ref_bg["styles"]
+                assert ref_bg["styles"]["counter"]["gap"] == 90, ref_bg["styles"]
+                assert ref_bg["styles"]["label"]["fontWeight"] == 900, ref_bg["styles"]
+                assert ref_bg["styles"]["label"]["letterSpacing"] == 8, ref_bg["styles"]
+                assert ref_bg["styles"]["label"]["strokeWidth"] == 4, ref_bg["styles"]
+                assert ref_bg["styles"]["label"]["strokeColor"] == "#1b4f86", ref_bg["styles"]
+                print("PASS scale/gap/text style edits save on the current background only")
+
+                styled = context.request.get(reference_url)
+                assert styled.status == 200, styled.text()
+                assert styled.headers["content-type"].startswith("image/png")
+                with Image.open(io.BytesIO(styled.body())) as image:
+                    assert image.size == (1536, 914), image.size
+                    image.save(ARTIFACTS / "nijika-ref-styled.png")
+                page.screenshot(
+                    path=str(ARTIFACTS / "nijika-ref-styled-1440.png"),
+                    full_page=True,
+                )
+
+                page.reload(wait_until="networkidle")
+                page.wait_for_function(
+                    "document.querySelector('#template-select').value === 'nijika-ref'",
+                    timeout=15000,
+                )
+                page.click('.bg-card[data-bg-id="bg-nijika"] .bg-card-head')
+                assert float(page.input_value("#counter-scale")) == 1.2
+                assert float(page.input_value("#counter-gap")) == 90
+                assert float(page.input_value("#label-font-weight")) == 900
+                assert float(page.input_value("#label-letter-spacing")) == 8
+                assert float(page.input_value("#label-stroke-width")) == 4
+                assert page.input_value("#label-stroke-color") == "#1b4f86"
+                print("PASS reload restores per-background scale/gap/text styles")
             browser.close()
     finally:
         stop_server(server)

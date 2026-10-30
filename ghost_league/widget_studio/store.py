@@ -57,23 +57,29 @@ FRAME_LABELS = {
     "frame_ember": "余烬边框",
     "frame_clown": "小丑边框",
 }
-DEFAULT_STYLES: dict[str, Any] = {
-    "label": {
-        "width": 520,
-        "height": 100,
-        "fontSize": 64,
-        "fontWeight": 400,
-        "color": "#17324d",
-        "align": "left",
-        "lineHeight": 1.15,
-        "shadow": {
-            "color": "rgba(255,255,255,0.65)",
-            "blur": 0,
-            "offsetX": 0,
-            "offsetY": 2,
-        },
+DEFAULT_LABEL_STYLE: dict[str, Any] = {
+    "width": 520,
+    "height": 100,
+    "fontSize": 64,
+    "fontWeight": 400,
+    "letterSpacing": 0,
+    "strokeWidth": 0,
+    "strokeColor": "#17324d",
+    "color": "#17324d",
+    "align": "left",
+    "lineHeight": 1.15,
+    "shadow": {
+        "color": "rgba(255,255,255,0.65)",
+        "blur": 0,
+        "offsetX": 0,
+        "offsetY": 2,
     },
-    "streak": {
+}
+DEFAULT_COUNTER_STYLE: dict[str, Any] = {
+    "scale": 1.0,
+    "gap": 30,
+    "flame": {"width": 120, "height": 140, "opacity": 1},
+    "number": {
         "width": 360,
         "height": 180,
         "fontSize": 132,
@@ -88,12 +94,14 @@ DEFAULT_STYLES: dict[str, Any] = {
             "offsetY": 3,
         },
     },
-    "flame": {"width": 120, "height": 140, "opacity": 1},
+}
+DEFAULT_STYLES: dict[str, Any] = {
+    "label": DEFAULT_LABEL_STYLE,
+    "counter": DEFAULT_COUNTER_STYLE,
 }
 DEFAULT_LAYOUT: dict[str, Any] = {
+    "counter": {"x": 660, "y": 280},
     "texts": [{"id": "text-1", "text": "连续学习", "x": 760, "y": 540}],
-    "streak": {"x": 760, "y": 300},
-    "flame": {"x": 660, "y": 280},
 }
 
 
@@ -341,7 +349,6 @@ class WidgetStore:
                     "height": CANVAS_HEIGHT,
                     "radius": CANVAS_RADIUS,
                 },
-                "styles": _default_styles(),
                 "backgrounds": [
                     {
                         "id": "bg-default",
@@ -353,6 +360,7 @@ class WidgetStore:
                         "offsetX": 0,
                         "offsetY": 0,
                         "scale": 1,
+                        "styles": _default_styles(),
                         "layout": _default_layout(),
                     }
                 ],
