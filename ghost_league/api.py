@@ -50,6 +50,9 @@ from .schedule import TZ
 from .social import FollowStore
 from .themes import icon_theme_or_default
 from .webhooks import STREAK_MILESTONES, WebhookService
+from .widget_studio import DEFAULT_WEB_ROOT as DEFAULT_WIDGET_WEB_ROOT
+from .widget_studio import DEFAULT_WIDGETS_DIR, WidgetStore
+from .widget_studio import build_router as build_widget_studio_router
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE_PATH = PROJECT_ROOT / "data" / "league" / "state.json"
@@ -1444,6 +1447,8 @@ def create_app(
     now_fn: Callable[[], datetime] | None = None,
     game_db_path: str | Path | None = None,
     game_now_fn: Callable[[], datetime] | None = None,
+    widgets_dir: str | Path | None = None,
+    widget_web_root: str | Path | None = None,
 ) -> FastAPI:
     """Application factory used by production and tests.
 
@@ -1481,6 +1486,15 @@ def create_app(
         now_fn=now_fn,
         game_now_fn=game_now_fn,
     )
+    widget_store = WidgetStore(
+        widgets_dir
+        or os.environ.get("GHOST_LEAGUE_WIDGETS_DIR", str(DEFAULT_WIDGETS_DIR)),
+        web_root=(
+            widget_web_root
+            or os.environ.get("GHOST_LEAGUE_WEB_ROOT", str(DEFAULT_WIDGET_WEB_ROOT))
+        ),
+        now_fn=service.now,
+    )
     webhook_service = WebhookService(
         webhooks_db
         or os.environ.get("GHOST_LEAGUE_WEBHOOKS_DB", resolved_api_dir / "webhooks.db"),
@@ -1490,6 +1504,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         service.initialize()
+        widget_store.initialize()
         webhook_service.initialize()
         if start_webhook_worker:
             webhook_service.start_worker()
@@ -1513,8 +1528,16 @@ def create_app(
     )
     app.state.game_service = service
     app.state.webhook_service = webhook_service
+    app.state.widget_store = widget_store
     auth = _auth_dependency(service)
     channel_auth = _channel_auth_dependency(service)
+    app.include_router(
+        build_widget_studio_router(
+            store=widget_store,
+            auth=auth,
+            now_fn=service.now,
+        )
+    )
 
     @app.middleware("http")
     async def security_headers(request, call_next):

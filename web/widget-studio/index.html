@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Widget Studio · Ghost League</title>
+  <link rel="stylesheet" href="/widget-studio/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="返回 Ghost League">
+      <span class="brand-mark" aria-hidden="true">W</span>
+      <span class="brand-copy">
+        <strong>Widget Studio</strong>
+        <small>Ghost League · 模版工作台</small>
+      </span>
+    </a>
+    <div class="template-controls">
+      <label class="sr-only" for="template-select">选择模版</label>
+      <select id="template-select" aria-label="选择模版"></select>
+      <button id="new-template-btn" class="btn" type="button">新建</button>
+      <button id="duplicate-template-btn" class="btn" type="button">复制</button>
+      <button id="delete-template-btn" class="btn btn-danger" type="button">删除</button>
+    </div>
+    <div class="top-actions">
+      <button id="copy-production-url" class="btn btn-accent" type="button">复制生产 URL</button>
+      <span id="sync-status" class="sync-status" role="status">未加载</span>
+    </div>
+  </header>
+
+  <section id="auth-gate" class="auth-gate" hidden>
+    <form id="token-form" class="auth-card">
+      <p class="eyebrow">Ghost League</p>
+      <h1>先登录 Ghost</h1>
+      <p class="muted">编辑器复用 Ghost 现有 Bearer 令牌，令牌只保存在本机 localStorage，不写进 URL。</p>
+      <label for="token-input">Ghost 令牌</label>
+      <input id="token-input" type="password" autocomplete="current-password" placeholder="粘贴 gl.token.v1" required>
+      <button class="btn btn-accent" type="submit">使用令牌</button>
+      <p id="auth-error" class="form-error" role="alert"></p>
+    </form>
+  </section>
+
+  <div id="studio-shell" class="studio-shell" hidden>
+    <main class="studio">
+      <aside class="panel panel-left">
+        <section class="panel-section">
+          <div class="section-head">
+            <h2>图层</h2>
+            <button id="add-text-layer" class="btn btn-small" type="button">添加文字</button>
+          </div>
+          <ul id="layer-list" class="layer-list" aria-label="图层列表"></ul>
+          <label class="file-button">
+            上传火焰 PNG
+            <input id="flame-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+          </label>
+        </section>
+
+        <section class="panel-section bg-section">
+          <div class="section-head">
+            <h2>底图</h2>
+            <div class="head-actions">
+              <button id="add-bg-upload" class="btn btn-small" type="button">上传</button>
+              <button id="library-open" class="btn btn-small" type="button">资源库</button>
+            </div>
+          </div>
+          <input id="bg-file-input" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+          <p class="hint">新增上传默认 <code>when:{}</code>、priority 0；已有 fallback 时 priority 10。</p>
+          <ul id="background-list" class="background-list" aria-label="底图列表"></ul>
+        </section>
+      </aside>
+
+      <section class="stage-panel">
+        <div id="canvas-wrap" class="canvas-wrap">
+          <canvas id="studio-canvas" width="1536" height="914" aria-label="1536×914 Widget 画布"></canvas>
+          <span id="bg-match-badge" class="bg-match-badge">自动 · fallback</span>
+        </div>
+
+        <div class="context-bar">
+          <div class="context-row">
+            <label class="switch-label">
+              <input id="auto-select-toggle" type="checkbox" checked>
+              <span>自动选择底图</span>
+            </label>
+            <label class="inline-field">
+              手动底图
+              <select id="manual-bg-select" disabled></select>
+            </label>
+            <button id="production-preview-btn" class="btn btn-small btn-accent" type="button">生产预览</button>
+          </div>
+          <div class="context-row context-fields">
+            <label>小时 <input id="preview-hour" type="number" min="0" max="23" value="10"></label>
+            <label>星期
+              <select id="preview-weekday">
+                <option value="1">周一</option>
+                <option value="2">周二</option>
+                <option value="3">周三</option>
+                <option value="4">周四</option>
+                <option value="5">周五</option>
+                <option value="6">周六</option>
+                <option value="7">周日</option>
+              </select>
+            </label>
+            <label>连胜 <input id="preview-streak" type="number" min="0" value="12"></label>
+            <label class="check-field"><input id="preview-completed" type="checkbox"> 今日已完成</label>
+            <label>段位 <input id="preview-league" type="text" maxlength="64" placeholder="bronze"></label>
+            <label>事件 <input id="preview-event" type="text" maxlength="64" placeholder="rush"></label>
+          </div>
+          <div class="context-row production-row">
+            <span class="production-label">生产 URL</span>
+            <input id="production-url-inline" type="text" readonly aria-label="生产 URL">
+            <button id="copy-production-inline" class="btn btn-small" type="button">复制</button>
+          </div>
+        </div>
+
+        <div class="sample-bar">
+          <span class="eyebrow">预览样例 · 只影响画布</span>
+          <label>streak <input id="sample-streak" type="number" min="0" value="12"></label>
+          <label>xp <input id="sample-xp" type="number" min="0" value="345"></label>
+          <label>rank <input id="sample-rank" type="number" min="0" value="3"></label>
+          <label>name <input id="sample-name" type="text" maxlength="40" value="那尔"></label>
+        </div>
+      </section>
+
+      <aside class="panel panel-right">
+        <section class="panel-section">
+          <div class="section-head">
+            <h2>选中图层</h2>
+            <span id="layer-kind" class="pill">未选择</span>
+          </div>
+          <div id="layer-inspector" class="inspector"></div>
+        </section>
+        <section class="panel-section">
+          <div class="section-head">
+            <h2>底图属性</h2>
+            <span id="bg-kind" class="pill">未选择</span>
+          </div>
+          <div id="background-inspector" class="inspector"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <div id="modal-backdrop" class="modal-backdrop" hidden>
+    <section id="template-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="template-modal-title" hidden>
+      <h2 id="template-modal-title">新建模版</h2>
+      <p class="muted">id 会从名称生成 slug；冲突时自动加 -2。</p>
+      <label for="template-name-input">模版名称</label>
+      <input id="template-name-input" type="text" maxlength="80" placeholder="例如 Nijika">
+      <div class="modal-actions">
+        <button id="template-modal-cancel" class="btn" type="button">取消</button>
+        <button id="template-modal-confirm" class="btn btn-accent" type="button">创建</button>
+      </div>
+    </section>
+
+    <section id="library-modal" class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="library-modal-title" hidden>
+      <div class="section-head">
+        <h2 id="library-modal-title">Ghost 资源库</h2>
+        <button id="library-close" class="btn btn-small" type="button">关闭</button>
+      </div>
+      <p class="muted">只读引用 <code>ghost:assets/...</code>，不会复制 tiers / frames 文件。</p>
+      <div id="library-list" class="library-list"></div>
+    </section>
+
+    <section id="preview-modal" class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="preview-modal-title" hidden>
+      <div class="section-head">
+        <h2 id="preview-modal-title">生产预览</h2>
+        <button id="preview-close" class="btn btn-small" type="button">关闭</button>
+      </div>
+      <p class="muted">由 Ghost API 按当前保存后的 JSON 实时渲染，不替代主画布。</p>
+      <img id="production-image" class="production-image" alt="生产 Widget 预览">
+      <label for="production-url">生产 URL</label>
+      <div class="url-row">
+        <input id="production-url" type="text" readonly>
+        <button id="preview-copy-btn" class="btn btn-small" type="button">复制</button>
+        <a id="preview-open-link" class="btn btn-small" href="#" target="_blank" rel="noopener">打开</a>
+      </div>
+      <p id="preview-error" class="form-error" role="alert"></p>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="/widget-studio/app.js" defer></script>
+</body>
+</html>

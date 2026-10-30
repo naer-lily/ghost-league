@@ -124,6 +124,26 @@ token。systemd 模板把 token 放在 `/etc/ghost-league/waka.env`（0600）；
 <iframe src="https://your-host.example/embed/owner" width="880" height="260" style="border:0;max-width:100%" title="联赛状态"></iframe>
 ```
 
+## Widget Studio
+
+`web/widget-studio/` 是挂在现有 PWA 上的图片模版编辑器，地址为
+`https://your-host.example/widget-studio/`。它复用 Ghost 现有 Bearer 认证和 TLS 入口，
+不新增服务或端口。编辑器从 `localStorage["gl.token.v1"]` 读取 token；没有 token 时只显示
+“先登录 Ghost”和输入框。
+
+- 模版数据：`data/widgets/<id>/template.json`、`flame.png`、`backgrounds/*.png`；目录文件
+  是唯一真相源，保存后生产图立即生效，不需要重启。
+- Ghost 现有 `web/assets/tiers/card/*.png` 和 `web/assets/frames/*.png` 通过
+  `ghost:assets/...` 原地引用，不复制。
+- API：`/v1/widget-studio`（模版列表/详情与写接口要求现有 Bearer；图片、缩略图和资源库只读公开）；生产图：
+  `GET /v1/widgets/<id>.png?token=<render_token>&streak=...&xp=...&rank=...&name=...`。
+  生产图不需要 Bearer，无 token / 错 token 返回 404；支持 `size=1x`（368×219）和仅调试用的
+  `bg=<bg_id>`。
+- 主画布即时绘制，`pointermove` 不发请求；拖动/输入停止 400ms 后才 `PUT`，切模版和
+  `pagehide` 有 keepalive 兜底。
+- 详细 schema、条件规则、API 表、生产 URL 和测试命令见
+  [`docs/WIDGET_STUDIO.md`](docs/WIDGET_STUDIO.md)。
+
 ## 数据与隐私
 
 仓库只包含代码、文档和通用示例，**不提交**：
@@ -147,6 +167,7 @@ ghost_league/
   accounts.py         # 本地账号、token 哈希、资料/头像 CLI
   badge.py            # SVG 状态卡与 embed 页面
   pwa.py              # 挂载 web/ PWA
+  widget_studio/      # Widget 模版 schema、文件 store、Pillow 渲染、API 路由
   webhooks.py         # webhook 订阅、签名与投递
   schedule.py         # 周/小时投影纯函数（Channel 复用）
   themes.py           # 图标主题
@@ -155,7 +176,8 @@ ghost_league/
   source/             # 旧的归一化工具，仅供 Channel/fetch 兼容
   fetch.py            # 公开榜抓取（只写 cache）
 waka_channel/         # 独立 WakaTime Channel 包
-web/                  # PWA 静态资源
+web/                  # PWA 静态资源（含 web/widget-studio/ 编辑器）
+data/widgets/         # Widget Studio 运行时模版目录（gitignore，仅 .gitkeep 入库）
 scripts/              # API/PWA 启动与抓取脚本
 deploy/               # systemd/服务模板
 docs/                 # API、Channel、Webhook 文档

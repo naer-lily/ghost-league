@@ -23,6 +23,11 @@ reports/closed-beta-52w.md
 data/api/
 data/api.backup-*/
 
+# Widget Studio templates are runtime data; only the directory marker is tracked.
+data/widgets/*
+!data/widgets/.gitkeep
+
+
 # Internal TLS leaf certificate and private key stay local.
 deploy/tls/
 
