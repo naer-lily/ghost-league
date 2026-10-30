@@ -1411,6 +1411,7 @@
     state.dirty = false;
     state.revision += 1;
     state.template = result.template;
+    state.imageCache.clear();
     state.selectedBgId = bgId;
     state.manualBgId = bgId;
     renderAll();
@@ -1431,6 +1432,7 @@
     state.dirty = false;
     state.revision += 1;
     state.template = result.template;
+    state.imageCache.clear();
     const flame = state.template.layers.find((layer) => layer.role === "flame");
     if (flame) state.selectedLayerId = flame.id;
     renderAll();
