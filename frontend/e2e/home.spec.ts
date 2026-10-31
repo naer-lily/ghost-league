@@ -103,6 +103,15 @@ interface PageChecks {
   }>
 }
 
+interface AvatarCheck {
+  label: string
+  initial: string
+  hasImage: boolean
+  imageLoaded: boolean
+  fallbackVisible: boolean
+  noEmptyCircle: boolean
+}
+
 async function inspectPage(page: import('@playwright/test').Page): Promise<PageChecks> {
   return page.evaluate(() => {
     const overflow =
@@ -228,6 +237,8 @@ test('home shows the same real numbers as web/ at 390 and 1440', async ({
   }
   const topThree = standings.standings.slice(0, 3)
   const selfRow = standings.standings.find((row) => row.is_me)
+  const selfIsInTopThree = topThree.some((row) => row.is_me)
+  const expectedAvatarRows = topThree.length + (selfRow && !selfIsInTopThree ? 1 : 0)
   const tierLabel = TIER_LABELS[status.tier] ?? status.tier
   const viewportReports: Record<string, Record<string, unknown>> = {}
   const artifacts: Record<string, string> = {}
@@ -307,6 +318,59 @@ test('home shows the same real numbers as web/ at 390 and 1440', async ({
       }
     }
 
+    const boardSelector = 'section[aria-labelledby="board-title"] li[aria-label]'
+    await expect(page.locator(boardSelector).first()).toBeVisible()
+    await page.waitForFunction((selector) => {
+      return Array.from(document.querySelectorAll<HTMLImageElement>(`${selector} img`))
+        .every((img) => img.complete)
+    }, boardSelector)
+    const avatarChecks = await page.evaluate<AvatarCheck[], string>((selector) => {
+      const rows = Array.from(document.querySelectorAll<HTMLElement>(selector))
+      return rows.map((row) => {
+        const avatar = row.querySelector<HTMLElement>('span[class*="avatar"]')
+        const img = avatar?.querySelector<HTMLImageElement>('img') ?? null
+        const fallback =
+          avatar?.querySelector<HTMLElement>('span[class*="fallback"]') ?? null
+        const label = row.getAttribute('aria-label') ?? ''
+        const fallbackStyle = fallback ? window.getComputedStyle(fallback) : null
+        const initial = fallback?.textContent?.trim() ?? ''
+        const fallbackVisible = Boolean(
+          initial &&
+            fallbackStyle &&
+            fallbackStyle.display !== 'none' &&
+            fallbackStyle.visibility !== 'hidden' &&
+            Number(fallbackStyle.opacity) > 0 &&
+            (fallback?.getBoundingClientRect().width ?? 0) > 0,
+        )
+        const imageLoaded = Boolean(
+          img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0,
+        )
+        return {
+          label,
+          initial,
+          hasImage: Boolean(img),
+          imageLoaded,
+          fallbackVisible,
+          noEmptyCircle: imageLoaded || fallbackVisible,
+        }
+      })
+    }, boardSelector)
+
+    expect(avatarChecks).toHaveLength(expectedAvatarRows)
+    expect(avatarChecks.every((check) => check.initial.length > 0)).toBeTruthy()
+    expect(avatarChecks.every((check) => check.fallbackVisible)).toBeTruthy()
+    expect(
+      avatarChecks.every((check) => !check.hasImage || check.imageLoaded),
+    ).toBeTruthy()
+    expect(avatarChecks.every((check) => check.noEmptyCircle)).toBeTruthy()
+    for (const row of [...topThree, ...(selfRow ? [selfRow] : [])]) {
+      const check = avatarChecks.find((entry) =>
+        entry.label.startsWith(`${row.display_name}，`),
+      )
+      expect(check, `avatar row for ${row.display_name}`).toBeDefined()
+      expect(check?.initial).toBe(Array.from(row.display_name)[0] ?? '?')
+    }
+
     const checks = await inspectPage(page)
     expect(checks.overflow).toBeLessThanOrEqual(1)
     expect(checks.smallTargets).toEqual([])
@@ -324,6 +388,15 @@ test('home shows the same real numbers as web/ at 390 and 1440', async ({
     const newShot = path.join(OUT_DIR, viewport.name, 'home.png')
     fs.mkdirSync(path.dirname(newShot), { recursive: true })
     await page.screenshot({ path: newShot, fullPage: false, animations: 'disabled' })
+    const avatarShot = path.join(
+      OUT_DIR,
+      `avatar-fallback-${viewport.name}.png`,
+    )
+    await page.screenshot({
+      path: avatarShot,
+      fullPage: false,
+      animations: 'disabled',
+    })
 
     viewportReports[viewport.name] = {
       new: {
@@ -332,9 +405,14 @@ test('home shows the same real numbers as web/ at 390 and 1440', async ({
         console_errors: consoleErrors,
         page_errors: pageErrors,
         forbidden_terms: forbiddenFound,
+        avatars: avatarChecks,
       },
     }
     artifacts[`${viewport.name}/home.png`] = path.relative(REPO_ROOT, newShot)
+    artifacts[`avatar-fallback-${viewport.name}.png`] = path.relative(
+      REPO_ROOT,
+      avatarShot,
+    )
 
     if (OLD_BASE) {
       const oldContext = await makeContext(browser, viewport, token)

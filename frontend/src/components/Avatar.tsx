@@ -39,6 +39,9 @@ export function Avatar({
       className={[styles.avatar, className].filter(Boolean).join(' ')}
       style={style}
     >
+      <span className={styles.fallback} aria-hidden="true">
+        {initialOf(name)}
+      </span>
       {src && !failed ? (
         <img
           src={resolveApiUrl(src)}
@@ -48,11 +51,7 @@ export function Avatar({
           referrerPolicy="no-referrer"
           onError={() => setFailed(true)}
         />
-      ) : (
-        <span className={styles.fallback} aria-hidden="true">
-          {initialOf(name)}
-        </span>
-      )}
+      ) : null}
     </span>
   )
 }

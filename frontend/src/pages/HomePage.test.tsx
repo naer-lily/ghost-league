@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -53,7 +53,9 @@ describe('HomePage real data', () => {
   })
 
   it('renders the tier, today XP, rank, streak and top-three board', async () => {
-    vi.stubGlobal('fetch', mockSnapshot())
+    const snapshot = makeSnapshot()
+    snapshot.standings.standings[0]!.avatar_url = '/avatars/ch-xkein'
+    vi.stubGlobal('fetch', mockSnapshot(snapshot))
 
     renderHome()
 
@@ -68,6 +70,18 @@ describe('HomePage real data', () => {
     expect(screen.getByText('@Xkein')).toBeInTheDocument()
     expect(screen.getByText('我的位置')).toBeInTheDocument()
     expect(screen.getAllByText('那尔').length).toBeGreaterThan(0)
+
+    const leader = screen.getByRole('listitem', { name: /@Xkein，第 1 名/ })
+    expect(within(leader).getByText('@', { exact: true })).toBeInTheDocument()
+    expect(leader.querySelector('img')).not.toBeNull()
+    for (const [name, initial] of [
+      [/RogerRordo，第 2 名/, 'R'],
+      [/RedMcro，第 3 名/, 'R'],
+      [/那尔，第 10 名.*我的位置/, '那'],
+    ] as const) {
+      const row = screen.getByRole('listitem', { name })
+      expect(within(row).getByText(initial, { exact: true })).toBeInTheDocument()
+    }
     expect(screen.getByLabelText('连续 2 天')).toBeInTheDocument()
     expect(
       screen.getByRole('progressbar', { name: '今日 XP 目标' }),
