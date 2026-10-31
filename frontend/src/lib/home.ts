@@ -143,6 +143,23 @@ export function formatSettlement(
   return `${days} 天 ${hours % 24} 小时后结算`
 }
 
+export function formatSettlementShort(
+  nextSettlementAt: string,
+  now: Date = new Date(),
+): string {
+  const target = new Date(nextSettlementAt)
+  if (Number.isNaN(target.getTime())) return '—'
+  const diff = target.getTime() - now.getTime()
+  if (diff <= 0) return '结算中'
+  const minutes = Math.floor(diff / 60_000)
+  if (minutes < 60) return `${Math.max(1, minutes)} 分`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时`
+  const days = Math.floor(hours / 24)
+  const rest = hours % 24
+  return rest ? `${days} 天 ${rest} 小时` : `${days} 天`
+}
+
 export function groupLabel(group: LeagueGroup | null): string {
   if (!group) return '待分入小组'
   const suffix = `G${String(group.no).padStart(2, '0')}`
@@ -182,10 +199,9 @@ function findSelfRow(
 
 export interface HomeView {
   tier: TierMeta
+  iconTheme: string
   displayName: string
   avatarUrl: string | null
-  activityLabel: string
-  equippedTitle: string | null
   group: LeagueGroup | null
   groupLabel: string
   groupSize: number
@@ -197,17 +213,13 @@ export interface HomeView {
   todayRatio: number
   todayPercent: number
   checkedIn: boolean
-  todayStatusText: string
-  todayDetail: string
   streak: number
   longestStreak: number
-  streakCopy: string
   weekXp: number
   rank: number | null
   leaderXp: number
   rankRatio: number
   rankPercent: number
-  rankHelper: string
   nextRankXpGap: number | null
   nextRank: number | null
   topThree: StandingRow[]
@@ -247,41 +259,13 @@ export function buildHomeView(
       ? Math.max(0, nextRankRow.xp - status.xp + 1)
       : null
 
-  const rankHelper =
-    rank === null
-      ? '等待本周分组'
-      : rank === 1
-        ? '你在小组最前，继续保持。'
-        : nextRankXpGap !== null
-          ? `再得 ${formatNumber(nextRankXpGap)} XP 可超过第 ${nextRank} 名`
-          : '继续积累，名次会往上走。'
-
   const todayRemaining = Math.max(0, goalXp - todayXp)
-  const todayStatusText = checkedIn
-    ? '今日目标已完成'
-    : todayXp > 0
-      ? `还差 ${formatNumber(todayRemaining)} XP`
-      : '从第一笔专注开始'
-
-  const todayDetail = checkedIn
-    ? '已锁定今日目标，火焰继续燃烧。'
-    : todayXp > 0
-      ? `今天已积累 ${formatNumber(todayXp)} / ${formatNumber(goalXp)} XP。`
-      : '完成今日目标，点亮火焰。'
-
   const streak = Math.max(0, Math.trunc(status.streak.current))
-  const streakCopy = checkedIn
-    ? '今天已续上，火焰继续燃烧。'
-    : streak > 0
-      ? `今天还没完成目标，别让 ${streak} 天连胜断掉。`
-      : '今天完成目标，点亮火焰。'
-
   return {
     tier,
+    iconTheme: status.icon_theme || profile.icon_theme || 'classic',
     displayName: status.display_name || profile.display_name,
     avatarUrl: status.avatar_url ?? profile.avatar_url,
-    activityLabel: status.activity_label || profile.activity_label || '专注',
-    equippedTitle: status.equipped_title ?? profile.equipped_title,
     group,
     groupLabel: groupLabel(group),
     groupSize: Math.max(0, status.group_size || standings.group_size || 0),
@@ -293,18 +277,14 @@ export function buildHomeView(
     todayRatio,
     todayPercent: Math.round(todayRatio * 100),
     checkedIn,
-    todayStatusText,
-    todayDetail,
     streak,
     longestStreak: Math.max(0, Math.trunc(status.streak.longest)),
-    streakCopy,
     weekXp: Math.max(0, Math.trunc(status.xp)),
     rank,
     leaderXp,
     rankRatio: leaderXp > 0 ? Math.min(1, status.xp / leaderXp) : 0,
     rankPercent:
       leaderXp > 0 ? Math.round(Math.min(1, status.xp / leaderXp) * 100) : 0,
-    rankHelper,
     nextRankXpGap,
     nextRank,
     topThree,

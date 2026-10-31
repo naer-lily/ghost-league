@@ -1,5 +1,6 @@
-import { CalendarDays, Flame, Sparkles, Timer, Users } from 'lucide-react'
+import { CalendarDays, Sparkles, Timer, Users } from 'lucide-react'
 import { formatNumber, type HomeView } from '../lib/home'
+import { StreakBadge } from './StreakBadge'
 import styles from './PageAside.module.css'
 
 interface PageAsideProps {
@@ -36,10 +37,14 @@ export function PageAside({ view }: PageAsideProps) {
             <dd>{formatNumber(view.weekXp)} XP</dd>
           </div>
           <div>
-            <dt>最长连胜</dt>
+            <dt>最长</dt>
             <dd>
-              <Flame size={14} aria-hidden="true" />
-              {view.longestStreak} 天
+              <StreakBadge
+                value={view.longestStreak}
+                checkedIn={view.checkedIn}
+                size="sm"
+                label={`最长连续 ${view.longestStreak} 天`}
+              />
             </dd>
           </div>
           <div>
@@ -78,12 +83,8 @@ export function PageAside({ view }: PageAsideProps) {
         <p className="eyebrow" id="rule-title">
           计分
         </p>
-        <p>
-          每 6 秒{view.activityLabel} = 1 XP，每日 {view.goalXp} XP 完成目标。
-        </p>
-        <p className={styles.muted}>
-          小组按本周 XP 排名，组内前 3 名显示在首页榜单。
-        </p>
+        <p>6 秒 = 1 XP</p>
+        <p className={styles.muted}>每日 {view.goalXp} XP</p>
       </section>
     </aside>
   )

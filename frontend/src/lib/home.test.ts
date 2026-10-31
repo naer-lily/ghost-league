@@ -6,6 +6,7 @@ import {
   describeApiError,
   formatNumber,
   formatSettlement,
+  formatSettlementShort,
   formatWeekStart,
   groupLabel,
   tierMeta,
@@ -26,7 +27,6 @@ describe('home mapping', () => {
     expect(view.todayPercent).toBe(100)
     expect(view.todayRemaining).toBe(0)
     expect(view.checkedIn).toBe(true)
-    expect(view.todayStatusText).toBe('今日目标已完成')
     expect(view.weekXp).toBe(524)
     expect(view.rank).toBe(10)
     expect(view.groupSize).toBe(15)
@@ -40,7 +40,6 @@ describe('home mapping', () => {
     expect(view.selfInTopThree).toBe(false)
     expect(view.nextRankXpGap).toBe(225)
     expect(view.nextRank).toBe(9)
-    expect(view.rankHelper).toBe('再得 225 XP 可超过第 9 名')
     expect(view.leaderXp).toBe(8019)
     expect(view.weekStartLabel).toBe('10月26日')
     expect(view.settlementLabel).toBe('1 天 15 小时后结算')
@@ -79,9 +78,7 @@ describe('home mapping', () => {
     expect(view.rank).toBeNull()
     expect(view.topThree).toEqual([])
     expect(view.selfRow).toBeNull()
-    expect(view.rankHelper).toBe('等待本周分组')
     expect(view.groupLabel).toBe('待分入小组')
-    expect(view.todayStatusText).toBe('从第一笔专注开始')
   })
 
   it('uses the board row when the current player is in the top three', () => {
@@ -114,7 +111,6 @@ describe('home mapping', () => {
     expect(view.selfRow?.xp).toBe(8019)
     expect(view.nextRank).toBeNull()
     expect(view.nextRankXpGap).toBeNull()
-    expect(view.rankHelper).toBe('你在小组最前，继续保持。')
   })
 
   it('derives the self row from status when the board omits it', () => {
@@ -144,6 +140,15 @@ describe('formatting', () => {
     )
     expect(formatSettlement('2026-10-31T08:00:00+08:00', now)).toBe('等待结算')
     expect(formatSettlement('not-a-date', now)).toBe('等待结算时间')
+    expect(formatSettlementShort('2026-11-02T00:00:00+08:00', now)).toBe(
+      '1 天 15 小时',
+    )
+    expect(formatSettlementShort('2026-10-31T09:40:00+08:00', now)).toBe(
+      '40 分',
+    )
+    expect(formatSettlementShort('2026-10-31T08:00:00+08:00', now)).toBe(
+      '结算中',
+    )
   })
 
   it('falls back to the bronze tier for unknown values', () => {

@@ -43,6 +43,11 @@ function mockSnapshot(snapshot = makeSnapshot()) {
   })
 }
 
+function assertNoVisibleStreakCopy() {
+  const text = document.body.textContent ?? ''
+  expect(text).not.toMatch(/连胜|连续|已打卡/)
+}
+
 describe('HomePage real data', () => {
   beforeEach(() => {
     window.localStorage.setItem(TOKEN_KEY, 'test-token')
@@ -52,7 +57,7 @@ describe('HomePage real data', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders the tier, today XP, rank, streak and top-three board', async () => {
+  it('renders the real tier icon, ring, rank, streak badges and top-three board', async () => {
     const snapshot = makeSnapshot()
     snapshot.standings.standings[0]!.avatar_url = '/avatars/ch-xkein'
     vi.stubGlobal('fetch', mockSnapshot(snapshot))
@@ -61,18 +66,19 @@ describe('HomePage real data', () => {
 
     expect(await screen.findByText('小组榜')).toBeInTheDocument()
     expect(screen.getAllByText('青铜').length).toBeGreaterThan(0)
+    expect(screen.getByTestId('tier-icon')).toBeInTheDocument()
+    expect(
+      screen.getByTestId('tier-icon').querySelector('img')?.getAttribute('src'),
+    ).toBe('/assets/tiers/material/bronze.png')
     expect(screen.getByText('129')).toBeInTheDocument()
-    expect(screen.getByText('今日目标已完成')).toBeInTheDocument()
     expect(screen.getByLabelText('本周名次 第 10 名')).toBeInTheDocument()
     expect(screen.getAllByText('524').length).toBeGreaterThan(0)
-    expect(screen.getByText('再得 225 XP 可超过第 9 名')).toBeInTheDocument()
     expect(screen.getByText('8,019')).toBeInTheDocument()
     expect(screen.getByText('@Xkein')).toBeInTheDocument()
     expect(screen.getByText('我的位置')).toBeInTheDocument()
     expect(screen.getAllByText('那尔').length).toBeGreaterThan(0)
 
     const leader = screen.getByRole('listitem', { name: /@Xkein，第 1 名/ })
-    expect(within(leader).getByText('@', { exact: true })).toBeInTheDocument()
     expect(leader.querySelector('img')).not.toBeNull()
     for (const [name, initial] of [
       [/RogerRordo，第 2 名/, 'R'],
@@ -82,10 +88,22 @@ describe('HomePage real data', () => {
       const row = screen.getByRole('listitem', { name })
       expect(within(row).getByText(initial, { exact: true })).toBeInTheDocument()
     }
-    expect(screen.getByLabelText('连续 2 天')).toBeInTheDocument()
+
+    const badges = screen.getAllByTestId('streak-badge')
+    expect(badges.length).toBeGreaterThanOrEqual(5)
+    for (const badge of badges) {
+      expect(badge.textContent).toMatch(/^\d+$/)
+    }
+    const heroBadge = badges.find(
+      (badge) => badge.getAttribute('aria-label') === '连续 2 天，今天已打卡',
+    )
+    expect(heroBadge).toBeDefined()
+
     expect(
       screen.getByRole('progressbar', { name: '今日 XP 目标' }),
     ).toHaveAttribute('aria-valuenow', '100')
+    assertNoVisibleStreakCopy()
+
     const calls = vi.mocked(fetch).mock.calls.map(([input]) => String(input))
     expect(calls).toContain('/v1/me/profile')
     expect(calls).toContain('/v1/me/status')
@@ -125,7 +143,7 @@ describe('HomePage real data', () => {
     expect(screen.getAllByText('待分入小组').length).toBeGreaterThan(0)
     expect(screen.getByLabelText('本周名次 第 — 名')).toBeInTheDocument()
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
-    expect(screen.getByText('从第一笔专注开始')).toBeInTheDocument()
+    assertNoVisibleStreakCopy()
   })
 
   it('shows the error state and retries into real data', async () => {
@@ -152,7 +170,7 @@ describe('HomePage real data', () => {
     await userEvent.click(screen.getByRole('button', { name: '重试' }))
 
     expect(await screen.findByText('8,019')).toBeInTheDocument()
-    expect(screen.getByText('今日目标已完成')).toBeInTheDocument()
+    expect(screen.getAllByTestId('tier-icon').length).toBeGreaterThan(0)
   })
 
   it('renders a loading state before the first snapshot arrives', () => {

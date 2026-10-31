@@ -12,10 +12,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react'
-import {
-  type ReactNode,
-  useState,
-} from 'react'
+import { type CSSProperties, type ReactNode, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useHomeSnapshot } from '../api/queries'
 import type { HomeSnapshot } from '../api/types'
@@ -32,12 +29,49 @@ import { Toast } from './Toast'
 import styles from './AppShell.module.css'
 
 const NAV_ITEMS = [
-  { to: '/', label: '首页', icon: Home, end: true },
-  { to: '/league', label: '小组', icon: Trophy, end: false },
-  { to: '/embers', label: '余烬', icon: Flame, end: false },
-  { to: '/history', label: '历史', icon: History, end: false },
-  { to: '/me', label: '我的', icon: User, end: false },
+  {
+    to: '/',
+    label: '首页',
+    icon: Home,
+    end: true,
+    color: '#58cc02',
+    soft: 'rgba(88, 204, 2, 0.16)',
+  },
+  {
+    to: '/league',
+    label: '小组',
+    icon: Trophy,
+    end: false,
+    color: '#ffc800',
+    soft: 'rgba(255, 200, 0, 0.16)',
+  },
+  {
+    to: '/embers',
+    label: '余烬',
+    icon: Flame,
+    end: false,
+    color: '#ff9600',
+    soft: 'rgba(255, 150, 0, 0.16)',
+  },
+  {
+    to: '/history',
+    label: '历史',
+    icon: History,
+    end: false,
+    color: '#1cb0f6',
+    soft: 'rgba(28, 176, 246, 0.16)',
+  },
+  {
+    to: '/me',
+    label: '我的',
+    icon: User,
+    end: false,
+    color: '#ce82ff',
+    soft: 'rgba(206, 130, 255, 0.16)',
+  },
 ] as const
+
+type NavItemConfig = (typeof NAV_ITEMS)[number]
 
 interface IconActionProps {
   label: string
@@ -96,11 +130,6 @@ function TopBar({
   const [refreshing, setRefreshing] = useState(false)
 
   const view = home.data ? buildHomeView(home.data) : null
-  const groupText = view
-    ? view.groupLabel
-    : home.isLoading
-      ? '正在读取本周数据…'
-      : '本周数据未连接'
 
   async function handleRefresh() {
     if (refreshing) return
@@ -127,10 +156,6 @@ function TopBar({
         <Link className={styles.brand} to="/" aria-label="炉火联赛首页">
           <span className={styles.brandMark} aria-hidden="true">
             <Flame size={22} />
-          </span>
-          <span className={styles.brandCopy}>
-            <strong>炉火联赛</strong>
-            <small>{groupText}</small>
           </span>
         </Link>
 
@@ -183,61 +208,90 @@ function TopBar({
   )
 }
 
-function NavRail() {
+function NavItem({
+  item,
+  variant,
+}: {
+  item: NavItemConfig
+  variant: 'rail' | 'bottom'
+}) {
   const soundEnabled = useUiStore((state) => state.soundEnabled)
+  const location = useLocation()
+  const Icon = item.icon
+  const isActive = item.end
+    ? location.pathname === item.to
+    : location.pathname === item.to ||
+      location.pathname.startsWith(`${item.to}/`)
+  const style = {
+    '--nav-color': item.color,
+    '--nav-soft': item.soft,
+  } as CSSProperties
+
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>
+        <NavLink
+          to={item.to}
+          end={item.end}
+          aria-label={item.label}
+          style={style}
+          onClick={() => playClick(soundEnabled, 640)}
+          className={[
+            variant === 'rail' ? styles.railItem : styles.bottomItem,
+            isActive
+              ? variant === 'rail'
+                ? styles.railActive
+                : styles.bottomActive
+              : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <span
+            className={
+              variant === 'rail' ? styles.railIconBlock : styles.bottomIconBlock
+            }
+            aria-hidden="true"
+          >
+            <Icon size={variant === 'rail' ? 25 : 24} />
+          </span>
+        </NavLink>
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content
+          className={styles.tooltip}
+          side={variant === 'rail' ? 'right' : 'top'}
+          sideOffset={8}
+        >
+          {item.label}
+          <Tooltip.Arrow className={styles.tooltipArrow} />
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  )
+}
+
+function NavRail() {
   return (
     <nav className={styles.rail} aria-label="主导航">
       <Link className={styles.railBrand} to="/" aria-label="炉火联赛首页">
         <Flame size={24} aria-hidden="true" />
       </Link>
       <div className={styles.railItems}>
-        {NAV_ITEMS.map((item) => {
-          const Icon = item.icon
-          return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              onClick={() => playClick(soundEnabled, 640)}
-              className={({ isActive }) =>
-                [styles.railItem, isActive ? styles.railActive : '']
-                  .filter(Boolean)
-                  .join(' ')
-              }
-            >
-              <Icon size={24} aria-hidden="true" />
-              <span>{item.label}</span>
-            </NavLink>
-          )
-        })}
+        {NAV_ITEMS.map((item) => (
+          <NavItem key={item.to} item={item} variant="rail" />
+        ))}
       </div>
     </nav>
   )
 }
 
 function BottomNav() {
-  const soundEnabled = useUiStore((state) => state.soundEnabled)
   return (
     <nav className={styles.bottomNav} aria-label="主导航">
-      {NAV_ITEMS.map((item) => {
-        const Icon = item.icon
-        return (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            onClick={() => playClick(soundEnabled, 640)}
-            className={({ isActive }) =>
-              [styles.bottomItem, isActive ? styles.bottomActive : '']
-                .filter(Boolean)
-                .join(' ')
-            }
-          >
-            <Icon size={22} aria-hidden="true" />
-            <span>{item.label}</span>
-          </NavLink>
-        )
-      })}
+      {NAV_ITEMS.map((item) => (
+        <NavItem key={item.to} item={item} variant="bottom" />
+      ))}
     </nav>
   )
 }

@@ -1,13 +1,18 @@
-import { expect, test, type APIRequestContext, type Browser } from '@playwright/test'
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Browser,
+  type Page,
+} from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
 
 const TOKEN_KEY = 'gl.token.v1'
 const NEW_BASE = process.env.E2E_NEW_BASE_URL ?? 'http://127.0.0.1:4174'
-const OLD_BASE = process.env.E2E_OLD_BASE_URL ?? ''
 const FRONTEND_DIR = process.cwd()
 const REPO_ROOT = path.resolve(FRONTEND_DIR, '..')
-const OUT_DIR = path.join(REPO_ROOT, 'artifacts', 'frontend-iteration-1')
+const OUT_DIR = path.join(REPO_ROOT, 'artifacts', 'frontend-iteration-2')
 
 const TIER_LABELS: Record<string, string> = {
   Bronze: '青铜',
@@ -43,47 +48,70 @@ function readToken(): string | null {
 interface StatusPayload {
   user_id: string
   display_name: string
+  avatar_url: string | null
+  icon_theme: string
   tier: string
   today_xp: number
+  required_xp: number
   xp: number
   rank: number | null
   group_size: number
-  streak: { current: number }
+  checkin: string | null
+  streak: { current: number; longest: number }
+  embers: { balance: number; cap: number }
+  group: { no: number; tier: string } | null
+  next_settlement_at: string
+}
+
+interface StandingRowPayload {
+  rank: number
+  user_id: string
+  display_name: string
+  avatar_url: string | null
+  is_me: boolean
+  xp: number
+  checkin: string | null
+  streak: number
 }
 
 interface StandingsPayload {
   group: { no: number; tier: string } | null
   group_size: number
-  standings: Array<{
-    rank: number
-    display_name: string
-    xp: number
-    is_me: boolean
-  }>
+  standings: StandingRowPayload[]
 }
 
-function signature(status: StatusPayload, standings: StandingsPayload): string {
+interface Snapshot {
+  status: StatusPayload
+  standings: StandingsPayload
+}
+
+function signature(snapshot: Snapshot): string {
+  const { status, standings } = snapshot
   return JSON.stringify({
     user_id: status.user_id,
     today_xp: status.today_xp,
     xp: status.xp,
     rank: status.rank,
     streak: status.streak.current,
-    top: standings.standings.slice(0, 3).map((row) => [row.rank, row.display_name, row.xp]),
-    me: standings.standings.find((row) => row.is_me)?.xp ?? null,
+    rows: standings.standings.map((row) => [
+      row.rank,
+      row.display_name,
+      row.xp,
+      row.checkin,
+      row.streak,
+    ]),
     group: standings.group,
   })
 }
 
 async function fetchSnapshot(
   request: APIRequestContext,
-  base: string,
   token: string,
-): Promise<{ status: StatusPayload; standings: StandingsPayload }> {
+): Promise<Snapshot> {
   const headers = { Authorization: `Bearer ${token}` }
   const [statusResponse, standingsResponse] = await Promise.all([
-    request.get(`${base}/v1/me/status`, { headers }),
-    request.get(`${base}/v1/league/standings`, { headers }),
+    request.get(`${NEW_BASE}/v1/me/status`, { headers }),
+    request.get(`${NEW_BASE}/v1/league/standings`, { headers }),
   ])
   expect(statusResponse.ok()).toBeTruthy()
   expect(standingsResponse.ok()).toBeTruthy()
@@ -93,35 +121,49 @@ async function fetchSnapshot(
   }
 }
 
-interface PageChecks {
-  overflow: number
-  smallTargets: Array<{
-    tag: string
-    label: string
-    width: number
-    height: number
-  }>
+async function makeContext(
+  browser: Browser,
+  viewport: { width: number; height: number },
+  token: string,
+) {
+  const context = await browser.newContext({
+    viewport,
+    deviceScaleFactor: 1,
+    ignoreHTTPSErrors: true,
+  })
+  await context.addInitScript(
+    ([key, value]) => window.localStorage.setItem(key, value),
+    [TOKEN_KEY, token] as const,
+  )
+  return context
 }
 
-interface AvatarCheck {
-  label: string
-  initial: string
-  hasImage: boolean
-  imageLoaded: boolean
-  fallbackVisible: boolean
-  noEmptyCircle: boolean
+function trackErrors(page: Page): { console: string[]; page: string[] } {
+  const consoleErrors: string[] = []
+  const pageErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text())
+  })
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  return { console: consoleErrors, page: pageErrors }
 }
 
-async function inspectPage(page: import('@playwright/test').Page): Promise<PageChecks> {
-  return page.evaluate(() => {
-    const overflow =
+async function assertNoOverflow(page: Page): Promise<number> {
+  const overflow = await page.evaluate(() => {
+    return (
       Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) -
       window.innerWidth
+    )
+  })
+  expect(overflow).toBeLessThanOrEqual(1)
+  return overflow
+}
+
+async function assertTouchTargets(page: Page): Promise<void> {
+  const smallTargets = await page.evaluate(() => {
     const selector =
       'a[href], button, [role="button"], [role="switch"], [role="radio"], input, select'
-    const smallTargets = Array.from(
-      document.querySelectorAll<HTMLElement>(selector),
-    )
+    return Array.from(document.querySelectorAll<HTMLElement>(selector))
       .filter((node) => {
         const style = window.getComputedStyle(node)
         if (style.display === 'none' || style.visibility === 'hidden') return false
@@ -148,123 +190,188 @@ async function inspectPage(page: import('@playwright/test').Page): Promise<PageC
         }
       })
       .filter((node) => node.width < 44 || node.height < 44)
-    return { overflow, smallTargets }
   })
+  expect(smallTargets).toEqual([])
 }
 
-async function makeContext(
-  browser: Browser,
-  viewport: { width: number; height: number },
-  token: string,
-) {
-  const context = await browser.newContext({
-    viewport,
-    deviceScaleFactor: 1,
-    ignoreHTTPSErrors: true,
-  })
-  await context.addInitScript(
-    ([key, value]) => window.localStorage.setItem(key, value),
-    [TOKEN_KEY, token] as const,
+async function assertIconOnlyNav(page: Page): Promise<void> {
+  const visibleNav = page.locator('nav[aria-label="主导航"]:visible').first()
+  await expect(visibleNav).toBeVisible()
+  const links = visibleNav.locator('a')
+  const count = await links.count()
+  expect(count).toBeGreaterThanOrEqual(5)
+  const info = await links.evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      text: node.textContent?.trim() ?? '',
+      label: node.getAttribute('aria-label') ?? '',
+    })),
   )
-  return context
+  expect(info.map((entry) => entry.text)).toEqual(
+    new Array(count).fill(''),
+  )
+  expect(info.every((entry) => entry.label.length > 0)).toBeTruthy()
+  for (const label of ['首页', '小组', '余烬', '历史', '我的']) {
+    expect(info.some((entry) => entry.label === label)).toBeTruthy()
+  }
 }
 
-async function makeComparison(
-  browser: Browser,
-  oldShot: string,
-  newShot: string,
-  output: string,
-  width: number,
-  height: number,
-  viewportLabel: string,
+async function assertTierIcon(
+  page: Page,
+  tier: string,
+  theme: string,
 ): Promise<void> {
-  const oldData = fs.readFileSync(oldShot).toString('base64')
-  const newData = fs.readFileSync(newShot).toString('base64')
-  const context = await browser.newContext({
-    viewport: { width: width * 2 + 56, height: height + 120 },
-    deviceScaleFactor: 1,
-  })
-  const page = await context.newPage()
-  await page.setContent(`<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8" />
-<style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    padding: 18px 20px 22px;
-    background: #0d171c;
-    color: #fff;
-    font-family: "Nunito", "Noto Sans CJK SC", "PingFang SC", system-ui, sans-serif;
+  const expectedTheme = theme === 'material' ? 'material' : 'classic'
+  const slug = tier.toLowerCase()
+  const icon = page.getByTestId('tier-icon').first()
+  await expect(icon).toBeVisible()
+  await expect(icon).toHaveAttribute('data-tier', tier)
+  const img = icon.locator('img')
+  await expect(img).toHaveAttribute(
+    'src',
+    new RegExp(`/assets/tiers/${expectedTheme}/${slug}\\.png$`),
+  )
+  await expect
+    .poll(async () => img.evaluate((node: HTMLImageElement) => node.naturalWidth))
+    .toBeGreaterThan(0)
+}
+
+async function assertNoStreakCopy(page: Page): Promise<void> {
+  const text = await page.locator('body').innerText()
+  for (const term of ['连胜', '连续', '已打卡']) {
+    expect(text).not.toContain(term)
   }
-  h1 { margin: 0 0 14px; font-size: 15px; letter-spacing: .04em; color: #8fa6b2; font-weight: 800; }
-  .row { display: flex; gap: 16px; align-items: flex-start; }
-  figure { margin: 0; }
-  figcaption { margin: 0 0 7px; color: #cfd8e6; font-size: 13px; font-weight: 800; }
-  img { display: block; width: ${width}px; height: auto; border: 2px solid #37464f; border-radius: 14px; }
-</style>
-</head>
-<body>
-  <h1>同一账号 · 同一时刻 · ${viewportLabel} · 旧页面 / 新页面</h1>
-  <div class="row">
-    <figure><figcaption>旧页面 web/</figcaption><img alt="旧首页" src="data:image/png;base64,${oldData}" /></figure>
-    <figure><figcaption>新页面 web-next/</figcaption><img alt="新首页" src="data:image/png;base64,${newData}" /></figure>
-  </div>
-</body>
-</html>`)
-  await page.screenshot({ path: output, fullPage: true, animations: 'disabled' })
-  await context.close()
+}
+
+async function assertAvatarRows(
+  page: Page,
+  selector: string,
+  expectedRows: number,
+): Promise<void> {
+  await page.waitForFunction((rowSelector) => {
+    return Array.from(
+      document.querySelectorAll<HTMLImageElement>(`${rowSelector} img`),
+    ).every((img) => img.complete)
+  }, selector)
+
+  const checks = await page.evaluate<
+    Array<{
+      initial: string
+      label: string
+      hasImage: boolean
+      imageLoaded: boolean
+      fallbackVisible: boolean
+      noEmptyCircle: boolean
+    }>,
+    string
+  >((rowSelector) => {
+    return Array.from(document.querySelectorAll<HTMLElement>(rowSelector)).map(
+      (row) => {
+        const avatar = row.querySelector<HTMLElement>('span[class*="avatar"]')
+        const img = avatar?.querySelector<HTMLImageElement>('img') ?? null
+        const fallback =
+          avatar?.querySelector<HTMLElement>('span[class*="fallback"]') ?? null
+        const style = fallback ? window.getComputedStyle(fallback) : null
+        const initial = fallback?.textContent?.trim() ?? ''
+        const fallbackVisible = Boolean(
+          initial &&
+            style &&
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            Number(style.opacity) > 0 &&
+            (fallback?.getBoundingClientRect().width ?? 0) > 0,
+        )
+        const imageLoaded = Boolean(
+          img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0,
+        )
+        return {
+          initial,
+          label: row.getAttribute('aria-label') ?? '',
+          hasImage: Boolean(img),
+          imageLoaded,
+          fallbackVisible,
+          noEmptyCircle: imageLoaded || fallbackVisible,
+        }
+      },
+    )
+  }, selector)
+
+  expect(checks).toHaveLength(expectedRows)
+  expect(checks.every((entry) => entry.initial.length > 0)).toBeTruthy()
+  expect(checks.every((entry) => entry.fallbackVisible)).toBeTruthy()
+  expect(
+    checks.every((entry) => !entry.hasImage || entry.imageLoaded),
+  ).toBeTruthy()
+  expect(checks.every((entry) => entry.noEmptyCircle)).toBeTruthy()
+}
+
+function parseRgb(value: string): [number, number, number] {
+  const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+  if (!match) throw new Error(`not an rgb color: ${value}`)
+  return [Number(match[1]), Number(match[2]), Number(match[3])]
+}
+
+async function streakStyles(page: Page, rowSelector: string) {
+  return page.evaluate((selector) => {
+    return Array.from(document.querySelectorAll<HTMLElement>(selector)).map(
+      (row) => {
+        const badge = row.querySelector<HTMLElement>(
+          '[data-testid="streak-badge"]',
+        )
+        if (!badge) return null
+        const flame = badge.querySelector<SVGElement>('svg')
+        const number = badge.querySelector<HTMLElement>(
+          '[data-streak-value]',
+        )
+        return {
+          checked: badge.getAttribute('data-checked') === 'true',
+          text: badge.textContent?.trim() ?? '',
+          flame: flame ? window.getComputedStyle(flame).color : '',
+          number: number ? window.getComputedStyle(number).color : '',
+        }
+      },
+    )
+  }, rowSelector)
 }
 
 const token = readToken()
 test.skip(!token, 'Set GHOST_LEAGUE_TOKEN or GHOST_LEAGUE_TOKEN_FILE to run live-data capture.')
 
-test('home shows the same real numbers as web/ at 390 and 1440', async ({
+test('home, league and me use real data at 390 and 1440', async ({
   browser,
   request,
 }) => {
   if (!token) return
   fs.mkdirSync(OUT_DIR, { recursive: true })
 
-  const before = await fetchSnapshot(request, NEW_BASE, token)
-  const status = before.status
-  const standings = before.standings
+  const before = await fetchSnapshot(request, token)
+  const { status, standings } = before
   if (!standings.group || standings.standings.length === 0) {
-    test.skip(true, 'This account has no group this week; live board capture needs one.')
+    test.skip(true, 'This account has no group this week; live capture needs one.')
     return
   }
-  const topThree = standings.standings.slice(0, 3)
-  const selfRow = standings.standings.find((row) => row.is_me)
-  const selfIsInTopThree = topThree.some((row) => row.is_me)
-  const expectedAvatarRows = topThree.length + (selfRow && !selfIsInTopThree ? 1 : 0)
+
   const tierLabel = TIER_LABELS[status.tier] ?? status.tier
-  const viewportReports: Record<string, Record<string, unknown>> = {}
-  const artifacts: Record<string, string> = {}
+  const expectedRows = standings.standings.length
   const report: Record<string, unknown> = {
     generatedAt: new Date().toISOString(),
-    bases: { new: NEW_BASE, old: OLD_BASE || null },
+    base: NEW_BASE,
     expected: {
       user_id: status.user_id,
       display_name: status.display_name,
       tier: status.tier,
       tier_label: tierLabel,
+      icon_theme: status.icon_theme,
       today_xp: status.today_xp,
-      xp: status.xp,
+      week_xp: status.xp,
       rank: status.rank,
       group_size: status.group_size,
       streak: status.streak.current,
-      top_three: topThree.map((row) => ({
-        rank: row.rank,
-        name: row.display_name,
-        xp: row.xp,
-      })),
-      me: selfRow ? { rank: selfRow.rank, xp: selfRow.xp } : null,
+      rows: expectedRows,
     },
-    viewports: viewportReports,
-    artifacts,
+    viewports: {},
+    artifacts: {},
   }
+  const viewports: Record<string, unknown> = {}
 
   for (const viewport of [
     { width: 390, height: 844, name: '390' },
@@ -272,214 +379,194 @@ test('home shows the same real numbers as web/ at 390 and 1440', async ({
   ]) {
     const context = await makeContext(browser, viewport, token)
     const page = await context.newPage()
-    const consoleErrors: string[] = []
-    const pageErrors: string[] = []
-    page.on('console', (message) => {
-      if (message.type() === 'error') consoleErrors.push(message.text())
-    })
-    page.on('pageerror', (error) => pageErrors.push(error.message))
+    const errors = trackErrors(page)
+    const pageReport: Record<string, unknown> = {}
 
-    await page.goto(NEW_BASE, { waitUntil: 'networkidle' })
+    // ---------------------------------------------------------------- home
+    await page.goto(NEW_BASE, { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('heading', { name: tierLabel })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '今日 XP' })).toBeVisible()
+    await assertTierIcon(page, status.tier, status.icon_theme)
     await expect(
-      page.getByRole('heading', { name: '今日目标' }),
+      page.getByRole('progressbar', { name: '今日 XP 目标' }),
     ).toBeVisible()
+    await expect(
+      page.getByLabel(`本周名次 第 ${status.rank ?? '—'} 名`),
+    ).toBeVisible()
+    await expect(
+      page.getByText(format(status.xp), { exact: true }).first(),
+    ).toBeVisible()
+    pageReport.homeOverflow = await assertNoOverflow(page)
+    await assertIconOnlyNav(page)
+    await assertNoStreakCopy(page)
+    await assertTouchTargets(page)
 
-    const todayCard = page.locator('section[aria-labelledby="today-heading"]')
-    const rankCard = page.locator('section[aria-labelledby="rank-heading"]')
-    await expect(
-      todayCard.getByText(format(status.today_xp), { exact: true }),
-    ).toBeVisible()
-    await expect(
-      rankCard.getByLabel(`本周名次 第 ${status.rank ?? '—'} 名`),
-    ).toBeVisible()
-    await expect(rankCard.getByText(format(status.xp), { exact: true })).toBeVisible()
-    await expect(
-      page.getByLabel(`连续 ${status.streak.current} 天`),
-    ).toBeVisible()
-    for (const row of topThree) {
-      await expect(
-        page.getByText(row.display_name, { exact: true }).first(),
-      ).toBeVisible()
-    }
-    const self = page.locator('li[aria-label*="我的位置"]')
-    await expect(self).toBeVisible()
-
-    if (viewport.width === 390) {
-      const selfBox = await self.boundingBox()
-      const navBox = await page
-        .locator('nav[aria-label="主导航"]')
-        .last()
-        .boundingBox()
-      expect(selfBox).not.toBeNull()
-      expect(navBox).not.toBeNull()
-      if (selfBox && navBox) {
-        expect(selfBox.y + selfBox.height).toBeLessThanOrEqual(navBox.y + 1)
+    const homeBoard = page.locator(
+      'section[aria-labelledby="board-title"] ol[aria-label] li',
+    )
+    const homeRows = await homeBoard.count()
+    expect(homeRows).toBeGreaterThan(0)
+    const homeStreaks = await streakStyles(
+      page,
+      'section[aria-labelledby="board-title"] ol[aria-label] li',
+    )
+    for (const entry of homeStreaks) {
+      expect(entry).not.toBeNull()
+      expect(entry?.text).toMatch(/^\d+$/)
+      const [fr, fg, fb] = parseRgb(entry?.flame ?? '')
+      const [nr, ng, nb] = parseRgb(entry?.number ?? '')
+      if (entry?.checked) {
+        expect(fr !== fg || fg !== fb || fr !== fb).toBeTruthy()
+      } else {
+        expect(fr).toBe(fg)
+        expect(fg).toBe(fb)
+        expect(nr).toBe(ng)
+        expect(ng).toBe(nb)
       }
     }
-
-    const boardSelector = 'section[aria-labelledby="board-title"] li[aria-label]'
-    await expect(page.locator(boardSelector).first()).toBeVisible()
-    await page.waitForFunction((selector) => {
-      return Array.from(document.querySelectorAll<HTMLImageElement>(`${selector} img`))
-        .every((img) => img.complete)
-    }, boardSelector)
-    const avatarChecks = await page.evaluate<AvatarCheck[], string>((selector) => {
-      const rows = Array.from(document.querySelectorAll<HTMLElement>(selector))
-      return rows.map((row) => {
-        const avatar = row.querySelector<HTMLElement>('span[class*="avatar"]')
-        const img = avatar?.querySelector<HTMLImageElement>('img') ?? null
-        const fallback =
-          avatar?.querySelector<HTMLElement>('span[class*="fallback"]') ?? null
-        const label = row.getAttribute('aria-label') ?? ''
-        const fallbackStyle = fallback ? window.getComputedStyle(fallback) : null
-        const initial = fallback?.textContent?.trim() ?? ''
-        const fallbackVisible = Boolean(
-          initial &&
-            fallbackStyle &&
-            fallbackStyle.display !== 'none' &&
-            fallbackStyle.visibility !== 'hidden' &&
-            Number(fallbackStyle.opacity) > 0 &&
-            (fallback?.getBoundingClientRect().width ?? 0) > 0,
-        )
-        const imageLoaded = Boolean(
-          img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0,
-        )
-        return {
-          label,
-          initial,
-          hasImage: Boolean(img),
-          imageLoaded,
-          fallbackVisible,
-          noEmptyCircle: imageLoaded || fallbackVisible,
-        }
-      })
-    }, boardSelector)
-
-    expect(avatarChecks).toHaveLength(expectedAvatarRows)
-    expect(avatarChecks.every((check) => check.initial.length > 0)).toBeTruthy()
-    expect(avatarChecks.every((check) => check.fallbackVisible)).toBeTruthy()
-    expect(
-      avatarChecks.every((check) => !check.hasImage || check.imageLoaded),
-    ).toBeTruthy()
-    expect(avatarChecks.every((check) => check.noEmptyCircle)).toBeTruthy()
-    for (const row of [...topThree, ...(selfRow ? [selfRow] : [])]) {
-      const check = avatarChecks.find((entry) =>
-        entry.label.startsWith(`${row.display_name}，`),
-      )
-      expect(check, `avatar row for ${row.display_name}`).toBeDefined()
-      expect(check?.initial).toBe(Array.from(row.display_name)[0] ?? '?')
-    }
-
-    const checks = await inspectPage(page)
-    expect(checks.overflow).toBeLessThanOrEqual(1)
-    expect(checks.smallTargets).toEqual([])
-    expect(consoleErrors).toEqual([])
-    expect(pageErrors).toEqual([])
-
-    const bodyText = await page.locator('body').innerText()
-    const forbiddenTerms = ['主人', 'ghost', '模拟', '真人', 'ai']
-    const forbiddenFound = forbiddenTerms.filter((term) =>
-      bodyText.toLowerCase().includes(term),
+    await assertAvatarRows(
+      page,
+      'section[aria-labelledby="board-title"] ol[aria-label] li',
+      homeRows,
     )
-    expect(forbiddenFound).toEqual([])
-    expect((await page.title()).toLowerCase()).not.toContain('ghost')
 
-    const newShot = path.join(OUT_DIR, viewport.name, 'home.png')
-    fs.mkdirSync(path.dirname(newShot), { recursive: true })
-    await page.screenshot({ path: newShot, fullPage: false, animations: 'disabled' })
-    const avatarShot = path.join(
-      OUT_DIR,
-      `avatar-fallback-${viewport.name}.png`,
-    )
+    const homeShot = path.join(OUT_DIR, viewport.name, 'home.png')
+    fs.mkdirSync(path.dirname(homeShot), { recursive: true })
     await page.screenshot({
-      path: avatarShot,
+      path: homeShot,
       fullPage: false,
       animations: 'disabled',
     })
-
-    viewportReports[viewport.name] = {
-      new: {
-        overflow: checks.overflow,
-        small_targets: checks.smallTargets,
-        console_errors: consoleErrors,
-        page_errors: pageErrors,
-        forbidden_terms: forbiddenFound,
-        avatars: avatarChecks,
-      },
+    report.artifacts = {
+      ...(report.artifacts as Record<string, string>),
+      [`${viewport.name}/home.png`]: path.relative(REPO_ROOT, homeShot),
     }
-    artifacts[`${viewport.name}/home.png`] = path.relative(REPO_ROOT, newShot)
-    artifacts[`avatar-fallback-${viewport.name}.png`] = path.relative(
-      REPO_ROOT,
-      avatarShot,
+    pageReport.home = { rows: homeRows, streaks: homeStreaks }
+
+    // -------------------------------------------------------------- league
+    await page.goto(`${NEW_BASE}/league`, { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('heading', { name: tierLabel })).toBeVisible()
+    const list = page.getByRole('list', { name: '完整小组榜' })
+    await expect(list).toBeVisible()
+    const leagueRows = list.locator('li')
+    await expect(leagueRows).toHaveCount(expectedRows)
+    await assertTierIcon(page, status.tier, status.icon_theme)
+    await assertNoOverflow(page)
+    await assertIconOnlyNav(page)
+    await assertNoStreakCopy(page)
+    await assertTouchTargets(page)
+
+    const leagueText = await list.innerText()
+    for (const term of ['语言', '今日已完成', '今日未完成', '连续', '连胜']) {
+      expect(leagueText).not.toContain(term)
+    }
+    const meRow = list.locator('li[data-me="true"]')
+    await expect(meRow).toHaveCount(1)
+    await expect(meRow).toHaveAttribute(
+      'aria-label',
+      new RegExp(`${status.display_name}，第 ${status.rank} 名.*我的位置`),
+    )
+    const meHighlight = await meRow.evaluate(
+      (node) => window.getComputedStyle(node).backgroundImage,
+    )
+    expect(meHighlight).not.toBe('none')
+
+    const leagueStreaks = await streakStyles(
+      page,
+      'ol[aria-label="完整小组榜"] li',
+    )
+    expect(leagueStreaks).toHaveLength(expectedRows)
+    let checkedCount = 0
+    let uncheckedCount = 0
+    for (let index = 0; index < leagueStreaks.length; index += 1) {
+      const entry = leagueStreaks[index]!
+      const row = standings.standings[index]!
+      expect(entry).not.toBeNull()
+      expect(entry.text).toMatch(/^\d+$/)
+      expect(entry.text).toBe(String(row.streak))
+      expect(entry.checked).toBe(Boolean(row.checkin))
+      const [fr, fg, fb] = parseRgb(entry.flame)
+      const [nr, ng, nb] = parseRgb(entry.number)
+      if (entry.checked) {
+        checkedCount += 1
+        expect(fr !== fg || fg !== fb || fr !== fb).toBeTruthy()
+      } else {
+        uncheckedCount += 1
+        expect(fr).toBe(fg)
+        expect(fg).toBe(fb)
+        expect(nr).toBe(ng)
+        expect(ng).toBe(nb)
+      }
+    }
+    expect(checkedCount).toBeGreaterThan(0)
+    expect(uncheckedCount).toBeGreaterThan(0)
+    await assertAvatarRows(
+      page,
+      'ol[aria-label="完整小组榜"] li',
+      expectedRows,
     )
 
-    if (OLD_BASE) {
-      const oldContext = await makeContext(browser, viewport, token)
-      const oldPage = await oldContext.newPage()
-      const oldConsoleErrors: string[] = []
-      oldPage.on('console', (message) => {
-        if (message.type() === 'error') oldConsoleErrors.push(message.text())
-      })
-      await oldPage.goto(OLD_BASE, { waitUntil: 'networkidle' })
-      await expect(oldPage.locator('#app-shell')).toBeVisible()
-      await expect(oldPage.locator('#tier-badge')).toHaveText(tierLabel)
-      await expect(oldPage.locator('#today-seconds')).toHaveText(
-        format(status.today_xp),
-      )
-      await expect(oldPage.locator('#week-rank')).toHaveText(
-        String(status.rank ?? '—'),
-      )
-      await expect(oldPage.locator('#week-seconds')).toHaveText(
-        format(status.xp),
-      )
-      await expect(oldPage.locator('#streak-number')).toHaveText(
-        String(status.streak.current),
-      )
-      await expect(
-        oldPage.getByText(topThree[0]?.display_name ?? '', { exact: true }).first(),
-      ).toBeVisible()
-
-      const oldShot = path.join(OUT_DIR, viewport.name, 'old-web.png')
-      await oldPage.screenshot({
-        path: oldShot,
-        fullPage: false,
-        animations: 'disabled',
-      })
-      const compareShot = path.join(OUT_DIR, 'compare', `${viewport.name}.png`)
-      fs.mkdirSync(path.dirname(compareShot), { recursive: true })
-      await makeComparison(
-        browser,
-        oldShot,
-        newShot,
-        compareShot,
-        viewport.width,
-        viewport.height,
-        `${viewport.width}×${viewport.height}`,
-      )
-      viewportReports[viewport.name] = {
-        ...viewportReports[viewport.name],
-        old: { console_errors: oldConsoleErrors },
-      }
-      artifacts[`${viewport.name}/old-web.png`] = path.relative(
-        REPO_ROOT,
-        oldShot,
-      )
-      artifacts[`compare/${viewport.name}.png`] = path.relative(
-        REPO_ROOT,
-        compareShot,
-      )
-      await oldContext.close()
+    const leagueShot = path.join(OUT_DIR, viewport.name, 'league.png')
+    await page.screenshot({
+      path: leagueShot,
+      fullPage: false,
+      animations: 'disabled',
+    })
+    report.artifacts = {
+      ...(report.artifacts as Record<string, string>),
+      [`${viewport.name}/league.png`]: path.relative(REPO_ROOT, leagueShot),
+    }
+    pageReport.league = {
+      rows: expectedRows,
+      checked: checkedCount,
+      unchecked: uncheckedCount,
+      me: status.rank,
     }
 
+    // ------------------------------------------------------------------ me
+    await page.goto(`${NEW_BASE}/me`, { waitUntil: 'domcontentloaded' })
+    await expect(
+      page.getByRole('heading', { name: status.display_name }),
+    ).toBeVisible()
+    await assertTierIcon(page, status.tier, status.icon_theme)
+    await assertNoOverflow(page)
+    await assertIconOnlyNav(page)
+    await assertNoStreakCopy(page)
+    await assertTouchTargets(page)
+    await expect(
+      page.getByRole('progressbar', { name: '今日 XP 目标' }),
+    ).toBeVisible()
+    await expect(
+      page.getByText(format(status.xp), { exact: true }).first(),
+    ).toBeVisible()
+    const meStreaks = await streakStyles(page, 'main')
+    expect(meStreaks.filter(Boolean).length).toBeGreaterThan(0)
+    await assertAvatarRows(page, 'main section[aria-labelledby="me-name"]', 1)
+
+    const meShot = path.join(OUT_DIR, viewport.name, 'me.png')
+    await page.screenshot({
+      path: meShot,
+      fullPage: false,
+      animations: 'disabled',
+    })
+    report.artifacts = {
+      ...(report.artifacts as Record<string, string>),
+      [`${viewport.name}/me.png`]: path.relative(REPO_ROOT, meShot),
+    }
+    pageReport.me = { streaks: meStreaks.filter(Boolean) }
+
+    expect(errors.console).toEqual([])
+    expect(errors.page).toEqual([])
+    pageReport.consoleErrors = errors.console
+    pageReport.pageErrors = errors.page
+    viewports[viewport.name] = pageReport
     await context.close()
   }
 
-  const after = await fetchSnapshot(request, NEW_BASE, token)
-  expect(signature(after.status, after.standings)).toBe(
-    signature(status, standings),
-  )
-  report.after = signature(after.status, after.standings)
+  const after = await fetchSnapshot(request, token)
+  expect(signature(after)).toBe(signature(before))
+  report.after = signature(after)
+  report.viewports = viewports
   const reportPath = path.join(OUT_DIR, 'report.json')
   fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
   expect(fs.existsSync(reportPath)).toBeTruthy()

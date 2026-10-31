@@ -1,14 +1,10 @@
 import { Route, Routes } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { HomePage } from './pages/HomePage'
+import { LeaguePage } from './pages/LeaguePage'
 import { LoginPage } from './pages/LoginPage'
-import {
-  EmbersPage,
-  HistoryPage,
-  LeaguePage,
-  MePage,
-  NotFoundPage,
-} from './pages/Placeholders'
+import { MePage } from './pages/MePage'
+import { EmbersPage, HistoryPage, NotFoundPage } from './pages/Placeholders'
 import { useUiStore } from './store/useUiStore'
 
 export default function App() {

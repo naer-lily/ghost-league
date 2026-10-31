@@ -27,8 +27,8 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 9px;
-  min-width: 0;
+  justify-content: center;
+  width: 44px;
   min-height: 44px;
 }
 
@@ -42,29 +42,6 @@
   background: linear-gradient(145deg, #ce82ff, #7d3cc4);
   color: #fff;
   box-shadow: 0 3px 0 #4e2380;
-}
-
-.brandCopy {
-  display: grid;
-  min-width: 0;
-  line-height: 1.15;
-}
-
-.brandCopy strong {
-  font-size: 0.92rem;
-  font-weight: 900;
-  letter-spacing: 0.01em;
-}
-
-.brandCopy small {
-  max-width: 138px;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 0.63rem;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .topActions {
@@ -175,50 +152,51 @@
 }
 
 .bottomItem {
-  position: relative;
   display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 3px;
+  place-items: center;
   min-height: 56px;
   height: 100%;
   color: var(--muted-2);
-  font-size: 0.66rem;
-  font-weight: 900;
-  letter-spacing: 0.02em;
   transition: color 0.15s ease;
+}
+
+.bottomIconBlock {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s var(--ease-spring);
 }
 
 .bottomItem svg {
   transition: transform 0.15s var(--ease-spring);
 }
 
-.bottomItem:hover {
-  color: var(--muted);
+.bottomItem:hover .bottomIconBlock {
+  background: rgba(255, 255, 255, 0.05);
 }
 
-.bottomItem:active svg {
-  transform: scale(0.9);
+.bottomItem:active .bottomIconBlock {
+  transform: scale(0.92);
 }
 
 .bottomActive {
-  color: var(--green);
+  color: var(--nav-color);
 }
 
-.bottomActive::before {
-  content: "";
-  position: absolute;
-  top: 4px;
-  left: 50%;
-  width: 22px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--green);
-  transform: translateX(-50%);
+.bottomActive .bottomIconBlock {
+  background: var(--nav-soft);
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--nav-color) 48%, transparent),
+    0 0 16px color-mix(in srgb, var(--nav-color) 18%, transparent);
 }
 
 .bottomActive svg {
-  filter: drop-shadow(0 0 7px rgba(88, 204, 2, 0.35));
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--nav-color) 44%, transparent));
 }
 
 .app[data-icon-theme="material"] .bottomItem svg,
@@ -270,44 +248,48 @@
   }
 
   .railItem {
-    position: relative;
     display: grid;
-    align-content: center;
-    justify-items: center;
-    gap: 2px;
-    width: 72px;
-    min-height: 62px;
-    border-radius: 16px;
+    place-items: center;
+    width: 66px;
+    min-height: 60px;
+    border-radius: 17px;
     color: var(--muted);
-    font-size: 0.62rem;
-    font-weight: 900;
     transition:
       background-color 0.15s ease,
       color 0.15s ease;
   }
 
-  .railItem:hover {
+  .railIconBlock {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    border-radius: 14px;
+    transition:
+      background-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+
+  .railItem:hover .railIconBlock {
     background: rgba(255, 255, 255, 0.05);
-    color: var(--text);
   }
 
   .railActive {
-    background: var(--green-soft);
-    color: var(--green);
+    color: var(--nav-color);
   }
 
-  .railActive::before {
-    content: "";
-    position: absolute;
-    top: 16px;
-    bottom: 16px;
-    left: 2px;
-    width: 3px;
-    border-radius: 2px;
-    background: var(--green);
+  .railActive .railIconBlock {
+    background: var(--nav-soft);
+    box-shadow:
+      inset 0 0 0 2px color-mix(in srgb, var(--nav-color) 48%, transparent),
+      0 0 16px color-mix(in srgb, var(--nav-color) 18%, transparent);
   }
 
   .bottomNav {
+    display: none;
+  }
+
+  .brand {
     display: none;
   }
 

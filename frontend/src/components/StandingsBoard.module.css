@@ -10,10 +10,28 @@
 
 .head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+}
+
+.title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.headIcon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .head h2 {
@@ -66,13 +84,13 @@
 
 .row {
   display: grid;
-  grid-template-columns: 27px 34px minmax(0, 1fr) auto;
+  grid-template-columns: 27px 36px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  min-height: 46px;
+  min-height: 50px;
   padding: 5px 8px;
   border: 1px solid transparent;
-  border-radius: 13px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.018);
 }
 
@@ -128,7 +146,7 @@
   min-width: 0;
   font-size: 0.84rem;
   font-weight: 900;
-  line-height: 1.25;
+  line-height: 1.2;
 }
 
 .name > span:first-child {
@@ -148,14 +166,9 @@
   line-height: 1.4;
 }
 
-.meta {
-  margin-top: 1px;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 0.62rem;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.streakLine {
+  display: inline-flex;
+  margin-top: 2px;
 }
 
 .xp {
@@ -194,13 +207,6 @@
   background: var(--border);
 }
 
-.selfNote {
-  margin-top: 10px;
-  color: var(--muted);
-  font-size: 0.72rem;
-  text-align: center;
-}
-
 .empty {
   display: grid;
   justify-items: center;
@@ -222,12 +228,6 @@
 .emptyTitle {
   font-size: 0.98rem;
   font-weight: 900;
-}
-
-.emptyBody {
-  max-width: 30ch;
-  color: var(--muted);
-  font-size: 0.78rem;
 }
 
 .empty .button {
@@ -265,7 +265,7 @@
   .row {
     grid-template-columns: 30px 38px minmax(0, 1fr) auto;
     gap: 10px;
-    min-height: 55px;
+    min-height: 56px;
     padding: 7px 10px;
   }
 
@@ -277,10 +277,6 @@
 
   .name {
     font-size: 0.9rem;
-  }
-
-  .meta {
-    font-size: 0.68rem;
   }
 
   .xp {

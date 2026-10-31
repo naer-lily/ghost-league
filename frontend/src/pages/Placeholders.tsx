@@ -1,16 +1,5 @@
-import { Compass, Flame, History, Trophy, User } from 'lucide-react'
+import { Compass, Flame, History } from 'lucide-react'
 import { PlaceholderPage } from './PlaceholderPage'
-
-export function LeaguePage() {
-  return (
-    <PlaceholderPage
-      eyebrow="小组"
-      title="小组榜"
-      description="完整小组榜、升降级区和成员资料会在下一步接入。"
-      icon={Trophy}
-    />
-  )
-}
 
 export function EmbersPage() {
   return (
@@ -30,17 +19,6 @@ export function HistoryPage() {
       title="历史"
       description="每周结算、段位变化和历史名次会在后续迭代接入。"
       icon={History}
-    />
-  )
-}
-
-export function MePage() {
-  return (
-    <PlaceholderPage
-      eyebrow="我的"
-      title="个人页"
-      description="资料、装备和收藏会在后续迭代接入。"
-      icon={User}
     />
   )
 }

@@ -1,0 +1,48 @@
+.badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  color: var(--streak-number);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.badge[data-checked="false"] {
+  filter: grayscale(1);
+}
+
+.flame {
+  flex: none;
+  color: var(--streak-flame);
+  filter: drop-shadow(0 0 5px rgba(255, 157, 31, 0.34));
+}
+
+.badge[data-checked="false"] .flame {
+  filter: none;
+}
+
+.value {
+  color: var(--streak-number);
+  font-weight: 900;
+}
+
+.sm {
+  gap: 2px;
+  font-size: 0.72rem;
+}
+
+.md {
+  font-size: 0.98rem;
+}
+
+.lg {
+  gap: 5px;
+  font-size: 1.32rem;
+}
+
+.sm .flame {
+  width: 15px;
+  height: 15px;
+}

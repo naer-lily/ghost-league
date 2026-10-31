@@ -1,8 +1,8 @@
 # 前端下一版 · React + TypeScript
 
-这是本仓库前端的第一个新栈迭代。旧 `web/` 原样保留，仍是当前生产入口；
-`frontend/` 只建立新地基和真实首页，构建产物输出到仓库根目录的 `web-next/`，由现有
-静态服务单独提供，不覆盖 `web/`，也不新增生产端口。
+这是本仓库前端的第二个新栈迭代。旧 `web/` 原样保留，仍是当前生产入口；
+`frontend/` 现在包含真实首页、完整小组榜和个人页，构建产物输出到仓库根目录的
+`web-next/`，由现有静态服务单独提供，不覆盖 `web/`，也不新增生产端口。
 
 ## 技术栈
 
@@ -25,9 +25,9 @@
 frontend/
   src/
     api/          # fetch 封装、Bearer 注入、API 类型、TanStack Query hook
-    components/   # 应用外壳、导航、榜单、设置、Toast、头像、进度环
-    lib/          # API → 页面视图映射、数字/时间格式、错误文案、音效
-    pages/        # 真实首页、登录、其余路由占位
+    components/   # 应用外壳、纯图标导航、榜单、TierIcon、StreakBadge、进度环
+    lib/          # API → 页面视图映射、段位资源路径、数字/时间格式、错误文案、音效
+    pages/        # 真实首页 / 小组榜 / 个人页、登录、余烬与历史占位
     store/        # Zustand UI 状态；复用旧 token
     styles/       # token + 全局基础样式
     test/         # Vitest setup 与 fixtures
@@ -75,8 +75,16 @@ npm run test:e2e      # Playwright（需要真实 token 与旧页面地址）
   - `GET /v1/me/profile`
   - `GET /v1/me/status`
   - `GET /v1/league/standings`
-- 首页展示真实：段位、今日 XP / 目标、本周名次、本周累计、连胜、小组前 3、自己的行、
-  组内人数、结算倒计时、余烬余额。
+- 首页展示真实：段位图标、玩家、今日 XP / 目标、本周名次、本周累计、小组前 3、
+  自己的行、组内人数、结算倒计时、余烬余额。
+- `/league` 用同一份快照渲染完整小组榜（全部行，不只前三），当前用户高亮；每行名字
+  下只放 `StreakBadge`，右侧是 XP。
+- `/me` 用同一份快照展示头像、名字、段位图标、连胜、本周 XP、排名、余烬和今日 XP 环。
+- 段位图标复用旧 `web/assets/tiers/` 的 10 个资源：`TierIcon` 按
+  `profile.icon_theme` 选择 `classic` / `material`，未知主题回退 `classic`，加载失败
+  回退另一套主题；路径通过 `import.meta.env.BASE_URL` 拼接。
+- `StreakBadge` 只显示火焰 + 整数：今天已打卡时火焰为暖橙色，未打卡时火焰和数字都是
+  纯灰度；没有可见的“连胜 / 连续 / 已打卡”文字，`aria-label` 只服务读屏。
 - 接口失败显示错误态和“重试”，不显示假数字；无小组时显示明确空态。首屏统计来自同一
   次 `Promise.all` 快照，避免三块数据来自不同时间点。
 - 设置里的声音是本地真实音效开关；外观会调用现有 `PATCH /v1/me/profile` 的
@@ -84,13 +92,14 @@ npm run test:e2e      # Playwright（需要真实 token 与旧页面地址）
 
 ## 响应式与可访问性
 
-- `< 960px`：顶部栏 + 底部 5 Tab。
-- `≥ 960px`：左侧 88px rail。
-- `≥ 1200px`：rail + 560px 主列 + 300px 右侧窄栏。
+- `< 960px`：顶部栏 + 底部 5 个纯图标 Tab。
+- `≥ 960px`：左侧 88px 纯图标 rail。
+- `≥ 1200px`：rail + 560px 主列 + 300px 右侧窄栏，最多三列。
+- 底部和侧边导航不显示可见文字，只保留图标、`aria-label` 和 Radix Tooltip；选中项有
+  对应颜色的底块。
 - 保留 skip link、`:focus-visible`、44px 最小触达、`prefers-reduced-motion`。
-- Radix Tooltip / Dialog 提供键盘与焦点管理；所有图标按钮有 `aria-label`。
-- 路由：`/` 首页；`/league`、`/embers`、`/history`、`/me` 是可导航占位页，不展示
-  占位数字。
+- 路由：`/` 首页；`/league` 完整小组榜；`/me` 个人页；`/embers`、`/history` 仍是
+  可导航占位页，不展示占位数字。
 
 ## 测试与本地证据
 
@@ -98,15 +107,18 @@ npm run test:e2e      # Playwright（需要真实 token 与旧页面地址）
 
 - API 映射：段位、今日 XP、本周 XP、名次、连胜、前 3、自己的行、结算倒计时。
 - Bearer 注入、错误解析、网络失败、token 读写。
+- `TierIcon` 10 个段位的 classic / material `src`、未知主题/段位回退、`onError` 换主题。
+- `StreakBadge` 已打卡 / 未打卡的灰度与彩色状态、可见文本不含“天/连胜/连续/已打卡”。
 - 首页真实数据、空态、错误态、点击重试后恢复。
-- 不显示假数据的空态断言。
+- `/league` 完整行数等于 API、当前用户高亮、行内无语言/状态拼接文本。
+- `/me` 段位图标、streak 组件和统计块。
+- 底部导航可见文本为空，仅保留 `aria-label` / Tooltip。
 
 运行真实数据截图与旧/新对比：
 
 ```bash
 cd frontend
 GHOST_LEAGUE_TOKEN_FILE=/path/to/token \
-E2E_OLD_BASE_URL=https://your-host.example:8445 \
 GHOST_LEAGUE_API_PROXY=http://127.0.0.1:8095 \
 npm run test:e2e
 ```
@@ -114,35 +126,41 @@ npm run test:e2e
 也可以把 token 放进 `GHOST_LEAGUE_TOKEN`。默认使用 `/usr/bin/google-chrome`；其他环境
 用 `CHROME_PATH=/path/to/chrome` 指定。Playwright 会：
 
-- 在 390×844 与 1440×900 打开新首页并截图；
-- 用同一 token 打开旧 `web/`，断言段位、今日 XP、本周 XP、名次、连胜、前三名与新页一致；
-- 检查横向 overflow、console/page error、可见交互元素 ≥44px、产品禁用词；
-- 生成旧/新同屏对比图与 `report.json`。
+- 在 390×844 与 1440×900 打开真实数据的首页、完整小组榜和个人页并截图；
+- 校验段位 PNG 真的加载（不是通用图标）、底部/侧边导航无可见文字；
+- 校验小组榜行数等于 API、每行名字下是火焰 + 整数、未打卡行两处颜色 R=G=B、
+  已打卡行火焰带颜色、当前用户高亮；
+- 校验横向 overflow、console/page error、可见交互元素 ≥44px、头像无空白圆；
+- 写入 `report.json`，并在抓取前后比对 API 签名，证明展示没有写 live 数据。
 
 截图与报告（本地证据，`artifacts/` 已在 `.gitignore` 中，含真实榜单信息，不提交）：
 
 ```text
-artifacts/frontend-iteration-1/390/home.png
-artifacts/frontend-iteration-1/1440/home.png
-artifacts/frontend-iteration-1/390/old-web.png
-artifacts/frontend-iteration-1/1440/old-web.png
-artifacts/frontend-iteration-1/compare/390.png
-artifacts/frontend-iteration-1/compare/1440.png
-artifacts/frontend-iteration-1/report.json
+artifacts/frontend-iteration-2/390/home.png
+artifacts/frontend-iteration-2/390/league.png
+artifacts/frontend-iteration-2/390/me.png
+artifacts/frontend-iteration-2/1440/home.png
+artifacts/frontend-iteration-2/1440/league.png
+artifacts/frontend-iteration-2/1440/me.png
+artifacts/frontend-iteration-2/report.json
 ```
 
-最近一次本地验证：
+最近一次本地验证（2026-10-31）：
 
-- `npm run build` 通过，产物在 `web-next/`。
-- `npm run typecheck` 通过。
-- `npm run test`：3 个测试文件，18 个测试全部通过。
-- Playwright：390/1440 均无横向 overflow、无 console error、无 page error、无 <44px
-  可见触达元素；旧/新两侧数字在同一抓取窗口内一致。
-- `git diff -- web/` 为空；旧 PWA 文件一行未改。
+```bash
+npm ci                                  # 229 packages
+npm run build                           # tsc --noEmit + vite build 通过
+npm run test                            # 9 个测试文件，30 个测试通过
+GHOST_LEAGUE_TOKEN_FILE=/path/to/token \
+  npx playwright test e2e/home.spec.ts  # 1 passed
+```
+
+Playwright 两个视口均无横向 overflow、无 console/page error、无小于 44px 的可见触达
+元素；完整榜单 15 行（8 行已打卡、7 行未打卡），当前用户第 10 名高亮。`artifacts/`
+不提交；旧 `web/`、`ghost_league/` 后端和 live 数据均未修改。
 
 ## 后续小步
 
-1. 小组榜完整页、成员资料与升降级区。
-2. 余烬、历史、个人页读取现有接口。
-3. 在写操作单独评审后再接打卡、补签、关注、分享。
-4. 生产入口切换单独安排，届时仅改变静态服务挂载点，不改 API。
+1. 余烬、历史页读取现有接口。
+2. 在写操作单独评审后再接打卡、补签、关注、分享。
+3. 生产入口切换单独安排，届时仅改变静态服务挂载点，不改 API。
