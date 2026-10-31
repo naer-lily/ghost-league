@@ -1,346 +1,39 @@
 .page {
   width: 100%;
-  max-width: 920px;
+  max-width: 640px;
   margin: 0 auto;
 }
 
-.column {
-  min-width: 0;
-}
-
-/* ------------------------------------------------------------------ hero */
-.hero {
+.today {
   position: relative;
-  overflow: hidden;
-  padding: 12px;
-  border: 2px solid var(--border);
-  border-color: color-mix(in srgb, var(--tier-color) 38%, var(--border));
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at 100% 0%, var(--tier-soft), transparent 58%),
-    linear-gradient(145deg, #24343c 0%, #1a282f 100%);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.025),
-    var(--shadow-card);
+  display: grid;
+  place-items: center;
+  padding: 6px 0 22px;
 }
 
-.heroGlow {
+.today::before {
+  content: "";
   position: absolute;
-  top: -100px;
-  right: -60px;
-  width: 230px;
-  height: 230px;
+  width: 250px;
+  height: 250px;
   border-radius: 50%;
   background: radial-gradient(circle, var(--tier-soft), transparent 68%);
+  opacity: 0.85;
   pointer-events: none;
 }
 
-.heroTop {
+.today > * {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.tierBlock {
-  min-width: 0;
-}
-
-.signal {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--tier-color);
-  box-shadow: 0 0 9px var(--tier-color);
-}
-
-.tierName {
-  margin-top: 3px;
-  color: var(--tier-color);
-  font-size: 1.9rem;
-  font-weight: 900;
-  letter-spacing: -0.02em;
-  line-height: 1;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
-}
-
-.groupLine {
-  margin-top: 5px;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.identity {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 8px;
-  padding: 7px 9px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 18px;
-  background: rgba(13, 23, 28, 0.34);
-}
-
-.identityCopy {
-  flex: 1;
-  min-width: 0;
-}
-
-.name {
-  overflow: hidden;
-  font-size: 1.04rem;
-  font-weight: 900;
-  letter-spacing: -0.01em;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.identityMeta {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 0.66rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-}
-
-.heroStreak {
-  padding: 7px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  background: rgba(13, 23, 28, 0.5);
-}
-
-/* ----------------------------------------------------------------- stats */
-.statsGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.statCard {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding: 10px;
-  border: 2px solid var(--border);
-  border-radius: 22px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 42%),
-    var(--surface);
-  box-shadow: var(--shadow-card);
-}
-
-.statHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.statTitle {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-}
-
-.statIcon,
-.rankIcon {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
-}
-
-.statIcon {
-  background: var(--green-soft);
-  color: var(--green);
-}
-
-.rankIcon {
-  background: rgba(255, 200, 0, 0.13);
-  color: var(--yellow);
-}
-
-.statHead h2 {
-  font-size: 0.9rem;
-  font-weight: 900;
-  letter-spacing: -0.01em;
-}
-
-.caption {
-  color: var(--muted);
-  font-size: 0.6rem;
-  font-weight: 900;
-  letter-spacing: 0.1em;
-}
-
-.doneChip,
-.liveChip {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-}
-
-.doneChip {
-  border-color: rgba(88, 204, 2, 0.3);
-  background: var(--green-soft);
-  color: var(--green);
-}
-
-.liveChip {
-  border-color: rgba(28, 176, 246, 0.3);
-  background: var(--blue-soft);
-  color: var(--blue);
-}
-
-.todayBody {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-  margin-top: 6px;
-}
-
-.rankLine {
-  display: flex;
-  align-items: baseline;
-  gap: 1px;
-  margin-top: 6px;
-}
-
-.hash {
-  color: var(--muted-2);
-  font-size: 0.96rem;
-  font-weight: 900;
-}
-
-.rankNumber {
-  color: var(--yellow);
-  font-size: 2rem;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.04em;
-  line-height: 1;
-}
-
-.rankEmpty {
-  color: var(--muted-2);
-  font-size: 2rem;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.rankOf {
-  color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 900;
-}
-
-.weekXp {
-  display: flex;
-  align-items: baseline;
-  gap: 2px;
-  margin-top: 4px;
-  font-size: 1.18rem;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-
-.weekXp small {
-  color: var(--muted);
-  font-size: 0.56rem;
-  font-weight: 900;
-}
-
-.miniBar {
-  height: 8px;
-  margin-top: 5px;
-  overflow: hidden;
-  border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.miniBar span {
-  display: block;
-  height: 100%;
-  min-width: 2px;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--green-deep), var(--green-bright));
-  box-shadow: 0 0 8px rgba(88, 204, 2, 0.32);
-  transition: width 0.5s var(--ease-spring);
-}
-
-.rankHelper {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-top: 5px;
-  color: var(--green);
-  font-size: 0.66rem;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
+  z-index: 1;
 }
 
 @media (min-width: 720px) {
-  .hero {
-    padding: 18px;
+  .today {
+    padding: 10px 0 30px;
   }
 
-  .tierName {
-    font-size: 2rem;
-  }
-
-  .statsGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-    margin-top: 12px;
-  }
-
-  .statCard {
-    padding: 16px;
-  }
-}
-
-@media (min-width: 960px) {
-  .page {
-    max-width: 720px;
-  }
-}
-
-@media (min-width: 1200px) {
-  .page {
-    display: grid;
-    grid-template-columns: minmax(0, var(--content-max)) var(--aside-w);
-    gap: var(--page-gap);
-    align-items: start;
-    max-width: calc(var(--content-max) + var(--aside-w) + var(--page-gap));
-  }
-
-  .hero {
-    padding: 20px;
-  }
-
-  .statCard {
-    padding: 17px;
+  .today::before {
+    width: 300px;
+    height: 300px;
   }
 }

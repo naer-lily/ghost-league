@@ -1,134 +1,36 @@
 .page {
   width: 100%;
-  max-width: 760px;
+  max-width: 620px;
   margin: 0 auto;
-}
-
-.profile {
-  position: relative;
-  overflow: hidden;
-  padding: 16px;
-  border: 2px solid var(--border);
-  border-color: color-mix(in srgb, var(--tier-color) 38%, var(--border));
-  border-radius: 26px;
-  background:
-    radial-gradient(circle at 100% 0%, var(--tier-soft), transparent 58%),
-    linear-gradient(145deg, #24343c 0%, #1a282f 100%);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.025),
-    var(--shadow-card);
-}
-
-.glow {
-  position: absolute;
-  top: -90px;
-  right: -50px;
-  width: 220px;
-  height: 220px;
-  border-radius: 50%;
-  background: radial-gradient(circle, var(--tier-soft), transparent 68%);
-  pointer-events: none;
-}
-
-.identity {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 13px;
-}
-
-.identityCopy {
-  min-width: 0;
-}
-
-.name {
-  overflow: hidden;
-  font-size: 1.5rem;
-  font-weight: 900;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.groupLine {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 0.7rem;
-  font-weight: 800;
-}
-
-.tierLine {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 14px;
-  padding: 8px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 18px;
-  background: rgba(13, 23, 28, 0.34);
-}
-
-.tierName {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--tier-color);
-  font-size: 1rem;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.streak {
-  padding: 6px 9px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 13px;
-  background: rgba(13, 23, 28, 0.5);
 }
 
 .stats {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  margin-top: 10px;
+  padding: 16px 0 18px;
+  border-bottom: 1px solid var(--border);
 }
 
-.statCard {
+.stat {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  align-items: flex-start;
-  padding: 10px;
-  border: 2px solid var(--border);
-  border-radius: 18px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 44%),
-    var(--surface);
-  box-shadow: var(--shadow-card);
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  text-align: center;
 }
 
 .statIcon {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  background: var(--green-soft);
   color: var(--green);
 }
 
 .rankIcon {
-  background: rgba(255, 200, 0, 0.13);
   color: var(--yellow);
 }
 
 .emberIcon {
-  background: var(--orange-soft);
   color: var(--orange);
 }
 
@@ -136,158 +38,104 @@
   display: flex;
   align-items: baseline;
   gap: 2px;
-  margin-top: 7px;
-  font-size: 1.15rem;
+  color: var(--text);
+  font-size: 1.5rem;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
   line-height: 1;
 }
 
 .statValue small {
   color: var(--muted);
-  font-size: 0.55rem;
+  font-size: 0.58rem;
   font-weight: 900;
 }
 
-.statValue .empty {
+.empty {
   color: var(--muted-2);
 }
 
 .statLabel {
-  margin-top: 3px;
   color: var(--muted);
-  font-size: 0.62rem;
+  font-size: 0.66rem;
   font-weight: 800;
 }
 
-.goalCard {
-  margin-top: 10px;
-  padding: 14px;
-  border: 2px solid var(--border);
-  border-radius: 22px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 40%),
-    var(--surface);
-  box-shadow: var(--shadow-card);
+.goal {
+  display: grid;
+  place-items: center;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
 }
 
-.goalHead {
+.rankRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 9px;
+  min-height: 52px;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
 }
 
-.goalTitle {
+.rankRow > svg:first-child {
+  flex: none;
+  color: var(--yellow);
+}
+
+.rankRow > svg:last-child {
+  flex: none;
+  color: var(--muted-2);
+}
+
+.rankLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rankValue {
   display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-}
-
-.goalIcon {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
-  background: var(--green-soft);
-  color: var(--green);
-}
-
-.goalHead h2 {
-  font-size: 0.9rem;
-  font-weight: 900;
-  letter-spacing: -0.01em;
-}
-
-.doneChip,
-.liveChip {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-}
-
-.doneChip {
-  border-color: rgba(88, 204, 2, 0.3);
-  background: var(--green-soft);
-  color: var(--green);
-}
-
-.liveChip {
-  border-color: rgba(255, 150, 0, 0.3);
-  background: var(--orange-soft);
-  color: var(--orange);
-}
-
-.goalBody {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 18px;
-  margin-top: 10px;
-}
-
-.goalMeta {
-  min-width: 0;
-}
-
-.goalXp {
-  display: flex;
   align-items: baseline;
-  gap: 2px;
-  font-size: 1.5rem;
+  gap: 1px;
+  color: var(--text);
+  font-size: 1rem;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
-  line-height: 1;
 }
 
-.goalXp small {
-  color: var(--muted);
-  font-size: 0.6rem;
-  font-weight: 900;
-}
-
-.goalTarget {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 6px;
+.rankValue small {
   color: var(--muted);
   font-size: 0.66rem;
   font-weight: 900;
-  font-variant-numeric: tabular-nums;
+}
+
+.rankRow:hover .rankLabel {
+  color: var(--text);
 }
 
 @media (min-width: 720px) {
-  .profile {
-    padding: 20px;
-  }
-
-  .name {
-    font-size: 1.8rem;
-  }
-
   .stats {
-    gap: 12px;
-    margin-top: 12px;
-  }
-
-  .statCard {
-    padding: 13px;
+    padding: 20px 0 22px;
   }
 
   .statValue {
-    font-size: 1.35rem;
+    font-size: 1.8rem;
   }
 
-  .goalCard {
-    padding: 18px;
-    margin-top: 12px;
+  .statLabel {
+    font-size: 0.72rem;
+  }
+
+  .goal {
+    padding: 20px 0;
+  }
+
+  .rankRow {
+    font-size: 0.86rem;
   }
 }

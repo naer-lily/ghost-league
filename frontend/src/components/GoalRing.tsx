@@ -1,4 +1,5 @@
 import { Target } from 'lucide-react'
+import type { CSSProperties } from 'react'
 import { AnimatedNumber } from './AnimatedNumber'
 import { ProgressRing } from './ProgressRing'
 import styles from './GoalRing.module.css'
@@ -18,6 +19,10 @@ export function GoalRing({
   size = 106,
   stroke = 10,
 }: GoalRingProps) {
+  const style = {
+    '--goal-size': `${size}px`,
+  } as CSSProperties
+
   return (
     <ProgressRing
       value={value}
@@ -27,13 +32,15 @@ export function GoalRing({
       stroke={stroke}
       color={color}
     >
-      <span className={styles.number}>
-        <AnimatedNumber value={value} />
-        <small>XP</small>
-      </span>
-      <span className={styles.goal}>
-        <Target size={12} aria-hidden="true" />
-        <AnimatedNumber value={goal} />
+      <span className={styles.content} style={style}>
+        <span className={styles.number}>
+          <AnimatedNumber value={value} />
+          <small>XP</small>
+        </span>
+        <span className={styles.goal}>
+          <Target size={Math.max(10, Math.round(size * 0.075))} aria-hidden="true" />
+          <AnimatedNumber value={goal} />
+        </span>
       </span>
     </ProgressRing>
   )

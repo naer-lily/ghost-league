@@ -222,6 +222,7 @@ export interface HomeView {
   rankPercent: number
   nextRankXpGap: number | null
   nextRank: number | null
+  rows: StandingRow[]
   topThree: StandingRow[]
   selfRow: StandingRow | null
   selfInTopThree: boolean
@@ -287,6 +288,7 @@ export function buildHomeView(
       leaderXp > 0 ? Math.round(Math.min(1, status.xp / leaderXp) * 100) : 0,
     nextRankXpGap,
     nextRank,
+    rows: standings.standings,
     topThree,
     selfRow,
     selfInTopThree: topThree.some((row) => row.is_me),

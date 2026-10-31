@@ -1,4 +1,3 @@
-import { Crown } from 'lucide-react'
 import type { StandingRow } from '../api/types'
 import { formatNumber } from '../lib/home'
 import { Avatar } from './Avatar'
@@ -16,10 +15,13 @@ interface StandingRowViewProps {
   index: number
 }
 
+const MEDALS = ['gold', 'silver', 'bronze'] as const
+
 export function StandingRowView({ row, index }: StandingRowViewProps) {
   const rank = row.rank
-  const isMedal = rank >= 1 && rank <= 3
-  const medalLabel = ['金牌', '银牌', '铜牌'][rank - 1]
+  const medal = rank >= 1 && rank <= 3 ? MEDALS[rank - 1] : undefined
+  const medalLabel =
+    medal === 'gold' ? '金牌' : medal === 'silver' ? '银牌' : medal === 'bronze' ? '铜牌' : undefined
 
   return (
     <li
@@ -27,19 +29,17 @@ export function StandingRowView({ row, index }: StandingRowViewProps) {
         .filter(Boolean)
         .join(' ')}
       data-me={row.is_me ? 'true' : 'false'}
+      data-testid="standing-row"
       aria-label={`${row.display_name || '选手'}，第 ${rank} 名，${formatNumber(row.xp)} XP${row.is_me ? '，我的位置' : ''}`}
     >
       <span
-        className={[styles.rank, isMedal ? styles[`rank${rank}`] : '']
-          .filter(Boolean)
-          .join(' ')}
-        aria-label={isMedal ? medalLabel : undefined}
+        className={styles.rank}
+        data-testid="standing-rank"
+        data-rank={rank}
+        data-medal={medal}
+        aria-label={medalLabel}
       >
-        {rank === 1 ? (
-          <Crown size={16} aria-hidden="true" />
-        ) : (
-          <span aria-hidden="true">{rank}</span>
-        )}
+        {rank}
       </span>
       <Avatar
         src={row.avatar_url}
@@ -48,10 +48,7 @@ export function StandingRowView({ row, index }: StandingRowViewProps) {
         loading={index < 6 ? 'eager' : 'lazy'}
       />
       <div className={styles.member}>
-        <p className={styles.name}>
-          <span>{row.display_name || '未命名选手'}</span>
-          {row.is_me ? <span className={styles.meTag}>我</span> : null}
-        </p>
+        <p className={styles.name}>{row.display_name || '未命名选手'}</p>
         <span className={styles.streakLine}>
           <StreakBadge
             value={row.streak}
@@ -60,9 +57,8 @@ export function StandingRowView({ row, index }: StandingRowViewProps) {
           />
         </span>
       </div>
-      <p className={styles.xp}>
-        <span>{formatNumber(row.xp)}</span>
-        <small>XP</small>
+      <p className={styles.xp} data-testid="standing-xp">
+        {formatNumber(row.xp)}
       </p>
     </li>
   )

@@ -193,15 +193,6 @@ svg {
   text-transform: uppercase;
 }
 
-.card-surface {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 40%),
-    var(--surface);
-  border: 2px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

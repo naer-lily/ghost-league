@@ -46,13 +46,14 @@ describe('MePage', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders the profile, old tier icon, streak and compact stats', async () => {
+  it('renders one player row, a flat stat trio, a small ring and my rank row', async () => {
     vi.stubGlobal('fetch', mockSnapshot())
 
     renderMe()
 
-    expect(await screen.findByRole('heading', { name: '那尔' })).toBeInTheDocument()
-    expect(screen.getByTestId('tier-icon')).toBeInTheDocument()
+    const header = await screen.findByTestId('player-header')
+    expect(header.children).toHaveLength(4)
+    expect(screen.getAllByTestId('tier-icon')).toHaveLength(1)
     expect(
       screen.getByTestId('tier-icon').querySelector('img')?.getAttribute('src'),
     ).toBe('/assets/tiers/material/bronze.png')
@@ -64,12 +65,29 @@ describe('MePage', () => {
             badge.getAttribute('aria-label') === '连续 2 天，今天已打卡',
         ),
     ).toBe(true)
-    expect(screen.getByText('本周')).toBeInTheDocument()
-    expect(screen.getByText('排名')).toBeInTheDocument()
-    expect(screen.getByText('余烬')).toBeInTheDocument()
-    expect(
-      screen.getByRole('progressbar', { name: '今日 XP 目标' }),
-    ).toHaveAttribute('aria-valuenow', '100')
+
+    const week = screen.getByTestId('me-stat-week')
+    const rank = screen.getByTestId('me-stat-rank')
+    const embers = screen.getByTestId('me-stat-embers')
+    expect(week).toHaveTextContent('本周')
+    expect(week).toHaveTextContent('524')
+    expect(rank).toHaveTextContent('排名')
+    expect(rank).toHaveTextContent('10')
+    expect(embers).toHaveTextContent('余烬')
+    expect(embers).toHaveTextContent('0')
+
+    const ring = screen.getByRole('progressbar', { name: '今日 XP 目标' })
+    expect(ring).toHaveAttribute('aria-valuenow', '100')
+    expect(ring).toHaveStyle({ width: '68px', height: '68px' })
+
+    const rankRow = screen.getByRole('link', {
+      name: '我的榜单位置，第 10 名',
+    })
+    expect(rankRow).toHaveAttribute('href', '/league')
+    expect(rankRow).toHaveTextContent('我的榜单位置')
+    expect(rankRow).toHaveTextContent('10')
+
+    expect(document.querySelectorAll('[class*="card"]')).toHaveLength(0)
     expect(document.body.textContent ?? '').not.toMatch(/连胜|连续|已打卡/)
   })
 })

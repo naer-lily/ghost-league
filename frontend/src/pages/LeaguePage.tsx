@@ -1,14 +1,12 @@
-import { Timer, Users } from 'lucide-react'
-import type { CSSProperties } from 'react'
+import { Timer, Trophy, Users } from 'lucide-react'
 import { useHomeSnapshot } from '../api/queries'
 import { PageError, PageLoading } from '../components/PageState'
+import { PlayerHeader } from '../components/PlayerHeader'
 import { StandingList } from '../components/StandingList'
-import { TierIcon } from '../components/TierIcon'
 import {
   buildHomeView,
   describeApiError,
   formatSettlementShort,
-  tierStyleVars,
 } from '../lib/home'
 import styles from './LeaguePage.module.css'
 
@@ -31,45 +29,38 @@ export function LeaguePage() {
 
   const view = buildHomeView(home.data)
   const rows = home.data.standings.standings
-  const style = tierStyleVars(view.tier) as CSSProperties
 
   return (
     <div className={styles.page}>
-      <section
-        className={styles.header}
-        style={style}
-        aria-labelledby="league-tier"
-      >
-        <div className={styles.glow} aria-hidden="true" />
-        <TierIcon tier={view.tier.key} theme={view.iconTheme} size={88} />
-        <div className={styles.headerCopy}>
-          <p className="eyebrow">小组</p>
-          <h1 id="league-tier" className={styles.tierName}>
-            {view.tier.label}
-          </h1>
-          <p className={styles.groupLine}>{view.groupLabel}</p>
-        </div>
-        <p
+      <PlayerHeader view={view} />
+
+      <div className={styles.groupBar} data-flat="true">
+        <span className={styles.groupInfo}>
+          <Users size={15} aria-hidden="true" />
+          {rows.length || view.groupSize || 0}
+        </span>
+        <span
           className={styles.settle}
           aria-label={`结算倒计时：${view.settlementLabel}`}
         >
           <Timer size={15} aria-hidden="true" />
           {formatSettlementShort(home.data.status.next_settlement_at)}
-        </p>
-      </section>
+        </span>
+      </div>
 
-      <section className={styles.board} aria-labelledby="league-board">
+      <section
+        className={styles.board}
+        aria-labelledby="league-board"
+        data-flat="true"
+      >
         <div className={styles.boardHead}>
           <div className={styles.boardTitle}>
             <span className={styles.boardIcon} aria-hidden="true">
-              <Users size={18} />
+              <Trophy size={18} />
             </span>
-            <div>
-              <p className="eyebrow">本组</p>
-              <h2 id="league-board">小组榜</h2>
-            </div>
+            <h2 id="league-board">小组榜</h2>
           </div>
-          <span className={styles.count}>{rows.length}</span>
+          <span className={styles.unit}>XP</span>
         </div>
 
         {rows.length === 0 ? (

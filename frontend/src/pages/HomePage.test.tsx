@@ -57,7 +57,7 @@ describe('HomePage real data', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders the real tier icon, ring, rank, streak badges and top-three board', async () => {
+  it('renders one player row, a hero ring and a five-row flat board', async () => {
     const snapshot = makeSnapshot()
     snapshot.standings.standings[0]!.avatar_url = '/avatars/ch-xkein'
     vi.stubGlobal('fetch', mockSnapshot(snapshot))
@@ -65,32 +65,39 @@ describe('HomePage real data', () => {
     renderHome()
 
     expect(await screen.findByText('小组榜')).toBeInTheDocument()
-    expect(screen.getAllByText('青铜').length).toBeGreaterThan(0)
-    expect(screen.getByTestId('tier-icon')).toBeInTheDocument()
+    const header = screen.getByTestId('player-header')
+    expect(header.children).toHaveLength(4)
+    expect(header.children[0]).toBe(screen.getByTestId('player-avatar'))
+    expect(header.children[1]).toBe(screen.getByTestId('player-name'))
+    expect(header.children[2]).toBe(screen.getByTestId('player-tier'))
+    expect(header.children[3]).toHaveAttribute('data-testid', 'streak-badge')
+
+    expect(screen.getAllByTestId('tier-icon')).toHaveLength(1)
     expect(
       screen.getByTestId('tier-icon').querySelector('img')?.getAttribute('src'),
     ).toBe('/assets/tiers/material/bronze.png')
     expect(screen.getByText('129')).toBeInTheDocument()
     expect(screen.getByLabelText('本周名次 第 10 名')).toBeInTheDocument()
+    expect(screen.getByTestId('board-rank')).toHaveTextContent('10/15')
     expect(screen.getAllByText('524').length).toBeGreaterThan(0)
     expect(screen.getByText('8,019')).toBeInTheDocument()
     expect(screen.getByText('@Xkein')).toBeInTheDocument()
-    expect(screen.getByText('我的位置')).toBeInTheDocument()
-    expect(screen.getAllByText('那尔').length).toBeGreaterThan(0)
+    expect(screen.getByText('JiPai')).toBeInTheDocument()
+    expect(screen.queryByText('我的位置')).not.toBeInTheDocument()
+    expect(screen.getAllByText('那尔').length).toBe(1)
 
-    const leader = screen.getByRole('listitem', { name: /@Xkein，第 1 名/ })
-    expect(leader.querySelector('img')).not.toBeNull()
-    for (const [name, initial] of [
-      [/RogerRordo，第 2 名/, 'R'],
-      [/RedMcro，第 3 名/, 'R'],
-      [/那尔，第 10 名.*我的位置/, '那'],
-    ] as const) {
-      const row = screen.getByRole('listitem', { name })
-      expect(within(row).getByText(initial, { exact: true })).toBeInTheDocument()
-    }
+    const board = screen.getByRole('list', { name: '小组榜前五名' })
+    const rows = within(board).getAllByRole('listitem')
+    expect(rows).toHaveLength(5)
+    expect(rows[0]).toHaveAccessibleName(/@Xkein，第 1 名/)
+    expect(rows[4]).toHaveAccessibleName(/JiPai，第 5 名/)
+    expect(screen.getByRole('link', { name: '查看完整小组榜' })).toHaveAttribute(
+      'href',
+      '/league',
+    )
 
     const badges = screen.getAllByTestId('streak-badge')
-    expect(badges.length).toBeGreaterThanOrEqual(5)
+    expect(badges.length).toBe(6)
     for (const badge of badges) {
       expect(badge.textContent).toMatch(/^\d+$/)
     }
@@ -102,6 +109,12 @@ describe('HomePage real data', () => {
     expect(
       screen.getByRole('progressbar', { name: '今日 XP 目标' }),
     ).toHaveAttribute('aria-valuenow', '100')
+    expect(
+      screen.queryByRole('heading', { name: '今日 XP' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '排名' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('本周概览')).not.toBeInTheDocument()
+    expect(document.querySelectorAll('[class*="card"]')).toHaveLength(0)
     assertNoVisibleStreakCopy()
 
     const calls = vi.mocked(fetch).mock.calls.map(([input]) => String(input))
@@ -140,7 +153,7 @@ describe('HomePage real data', () => {
     renderHome()
 
     expect(await screen.findByText('本周还没有小组')).toBeInTheDocument()
-    expect(screen.getAllByText('待分入小组').length).toBeGreaterThan(0)
+    expect(screen.getByTestId('player-tier')).toHaveTextContent('待分入')
     expect(screen.getByLabelText('本周名次 第 — 名')).toBeInTheDocument()
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
     assertNoVisibleStreakCopy()
@@ -161,6 +174,7 @@ describe('HomePage real data', () => {
     renderHome()
 
     expect(await screen.findByText('数据没有加载出来')).toBeInTheDocument()
+    expect(document.querySelectorAll('[class*="card"]')).toHaveLength(0)
     expect(
       screen.getByText('登录已失效，请重新输入令牌。'),
     ).toBeInTheDocument()
@@ -183,5 +197,6 @@ describe('HomePage real data', () => {
 
     expect(screen.getByText('正在读取本周联赛…')).toBeInTheDocument()
     expect(screen.getByText('正在读取本周联赛…').closest('[aria-busy]')).not.toBeNull()
+    expect(document.querySelectorAll('[class*="card"]')).toHaveLength(0)
   })
 })

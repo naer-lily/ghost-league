@@ -12,7 +12,7 @@ const TOKEN_KEY = 'gl.token.v1'
 const NEW_BASE = process.env.E2E_NEW_BASE_URL ?? 'http://127.0.0.1:4174'
 const FRONTEND_DIR = process.cwd()
 const REPO_ROOT = path.resolve(FRONTEND_DIR, '..')
-const OUT_DIR = path.join(REPO_ROOT, 'artifacts', 'frontend-iteration-2')
+const OUT_DIR = path.join(REPO_ROOT, 'artifacts', 'frontend-iteration-3')
 
 const TIER_LABELS: Record<string, string> = {
   Bronze: '青铜',
@@ -237,9 +237,99 @@ async function assertTierIcon(
 
 async function assertNoStreakCopy(page: Page): Promise<void> {
   const text = await page.locator('body').innerText()
-  for (const term of ['连胜', '连续', '已打卡']) {
+  for (const term of ['连胜', '连续', '已打卡', '今日已完成', '今日未完成']) {
     expect(text).not.toContain(term)
   }
+}
+
+async function assertNoCards(page: Page): Promise<void> {
+  const cards = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('main [class*="card" i]'))
+      .map((node) => ({
+        tag: node.tagName.toLowerCase(),
+        className: node.className,
+        text: node.textContent?.trim().slice(0, 30) ?? '',
+      })),
+  )
+  expect(cards).toEqual([])
+
+  const shells = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('main [data-flat]'))
+      .map((node) => {
+        const style = window.getComputedStyle(node)
+        return {
+          tag: node.tagName.toLowerCase(),
+          className: node.className,
+          radius: Number.parseFloat(style.borderRadius) || 0,
+          shadow: style.boxShadow,
+          background: style.backgroundColor,
+        }
+      })
+      .filter(
+        (entry) =>
+          entry.radius > 0 ||
+          (entry.shadow !== 'none' && entry.shadow !== '') ||
+          (entry.background !== 'rgba(0, 0, 0, 0)' &&
+            entry.background !== 'transparent'),
+      ),
+  )
+  expect(shells).toEqual([])
+}
+
+interface HeaderGeometry {
+  display: string
+  flexWrap: string
+  alignItems: string
+  children: number
+  avatarWidth: number
+  tierWidth: number
+  centers: number[]
+  lefts: number[]
+}
+
+async function assertPlayerHeader(page: Page): Promise<HeaderGeometry> {
+  const header = page.getByTestId('player-header')
+  await expect(header).toHaveCount(1)
+  await expect(header).toBeVisible()
+
+  const geometry = await header.evaluate((node): HeaderGeometry => {
+    const style = window.getComputedStyle(node)
+    const parts = [
+      node.querySelector<HTMLElement>('[data-testid="player-avatar"]'),
+      node.querySelector<HTMLElement>('[data-testid="player-name"]'),
+      node.querySelector<HTMLElement>('[data-testid="player-tier"]'),
+      node.querySelector<HTMLElement>('[data-testid="streak-badge"]'),
+    ]
+    if (parts.some((part) => !part)) {
+      throw new Error('player header is missing an identity part')
+    }
+    const rects = parts.map((part) => part!.getBoundingClientRect())
+    const avatar = parts[0]!.getBoundingClientRect()
+    const tier = parts[2]!.getBoundingClientRect()
+    return {
+      display: style.display,
+      flexWrap: style.flexWrap,
+      alignItems: style.alignItems,
+      children: node.children.length,
+      avatarWidth: Math.round(avatar.width),
+      tierWidth: Math.round(tier.width),
+      centers: rects.map((rect) =>
+        Math.round((rect.top + rect.height / 2) * 10) / 10,
+      ),
+      lefts: rects.map((rect) => Math.round(rect.left * 10) / 10),
+    }
+  })
+
+  expect(geometry.display).toBe('flex')
+  expect(geometry.flexWrap).toBe('nowrap')
+  expect(geometry.alignItems).toBe('center')
+  expect(geometry.children).toBe(4)
+  expect(geometry.avatarWidth).toBe(64)
+  expect(geometry.tierWidth).toBeGreaterThanOrEqual(16)
+  expect(Math.max(...geometry.centers) - Math.min(...geometry.centers)).toBeLessThan(2)
+  expect(geometry.lefts).toEqual([...geometry.lefts].sort((a, b) => a - b))
+  expect(await header.locator('[data-testid="streak-badge"]').count()).toBe(1)
+  return geometry
 }
 
 async function assertAvatarRows(
@@ -256,7 +346,6 @@ async function assertAvatarRows(
   const checks = await page.evaluate<
     Array<{
       initial: string
-      label: string
       hasImage: boolean
       imageLoaded: boolean
       fallbackVisible: boolean
@@ -285,7 +374,6 @@ async function assertAvatarRows(
         )
         return {
           initial,
-          label: row.getAttribute('aria-label') ?? '',
           hasImage: Boolean(img),
           imageLoaded,
           fallbackVisible,
@@ -333,10 +421,37 @@ async function streakStyles(page: Page, rowSelector: string) {
   }, rowSelector)
 }
 
+async function assertStreakColors(
+  entries: Awaited<ReturnType<typeof streakStyles>>,
+  expectedStreak: (index: number) => number,
+): Promise<{ checked: number; unchecked: number }> {
+  let checked = 0
+  let unchecked = 0
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]
+    expect(entry).not.toBeNull()
+    expect(entry?.text).toMatch(/^\d+$/)
+    expect(entry?.text).toBe(String(expectedStreak(index)))
+    const [fr, fg, fb] = parseRgb(entry?.flame ?? '')
+    const [nr, ng, nb] = parseRgb(entry?.number ?? '')
+    if (entry?.checked) {
+      checked += 1
+      expect(fr !== fg || fg !== fb || fr !== fb).toBeTruthy()
+    } else {
+      unchecked += 1
+      expect(fr).toBe(fg)
+      expect(fg).toBe(fb)
+      expect(nr).toBe(ng)
+      expect(ng).toBe(nb)
+    }
+  }
+  return { checked, unchecked }
+}
+
 const token = readToken()
 test.skip(!token, 'Set GHOST_LEAGUE_TOKEN or GHOST_LEAGUE_TOKEN_FILE to run live-data capture.')
 
-test('home, league and me use real data at 390 and 1440', async ({
+test('flat home, league and me use real data at 390 and 1440', async ({
   browser,
   request,
 }) => {
@@ -352,6 +467,7 @@ test('home, league and me use real data at 390 and 1440', async ({
 
   const tierLabel = TIER_LABELS[status.tier] ?? status.tier
   const expectedRows = standings.standings.length
+  const homeRows = Math.min(5, expectedRows)
   const report: Record<string, unknown> = {
     generatedAt: new Date().toISOString(),
     base: NEW_BASE,
@@ -384,18 +500,32 @@ test('home, league and me use real data at 390 and 1440', async ({
 
     // ---------------------------------------------------------------- home
     await page.goto(NEW_BASE, { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: tierLabel })).toBeVisible()
-    await expect(page.getByRole('heading', { name: '今日 XP' })).toBeVisible()
+    await expect(
+      page.getByRole('heading', { name: status.display_name }),
+    ).toBeVisible()
+    await expect(page.getByRole('heading', { name: tierLabel })).toHaveCount(0)
+    const header = await assertPlayerHeader(page)
     await assertTierIcon(page, status.tier, status.icon_theme)
     await expect(
       page.getByRole('progressbar', { name: '今日 XP 目标' }),
     ).toBeVisible()
+    await expect(page.getByTestId('board-rank')).toHaveText(
+      `${status.rank ?? '—'}/${status.group_size || '—'}`,
+    )
     await expect(
       page.getByLabel(`本周名次 第 ${status.rank ?? '—'} 名`),
     ).toBeVisible()
     await expect(
       page.getByText(format(status.xp), { exact: true }).first(),
     ).toBeVisible()
+    await expect(
+      page.getByRole('link', { name: '查看完整小组榜' }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole('heading', { name: '排名' }),
+    ).toHaveCount(0)
+    await expect(page.locator('[aria-label="本周概览"]')).toHaveCount(0)
+    await assertNoCards(page)
     pageReport.homeOverflow = await assertNoOverflow(page)
     await assertIconOnlyNav(page)
     await assertNoStreakCopy(page)
@@ -404,31 +534,26 @@ test('home, league and me use real data at 390 and 1440', async ({
     const homeBoard = page.locator(
       'section[aria-labelledby="board-title"] ol[aria-label] li',
     )
-    const homeRows = await homeBoard.count()
-    expect(homeRows).toBeGreaterThan(0)
+    const renderedHomeRows = await homeBoard.count()
+    expect(renderedHomeRows).toBe(homeRows)
     const homeStreaks = await streakStyles(
       page,
       'section[aria-labelledby="board-title"] ol[aria-label] li',
     )
-    for (const entry of homeStreaks) {
-      expect(entry).not.toBeNull()
-      expect(entry?.text).toMatch(/^\d+$/)
-      const [fr, fg, fb] = parseRgb(entry?.flame ?? '')
-      const [nr, ng, nb] = parseRgb(entry?.number ?? '')
-      if (entry?.checked) {
-        expect(fr !== fg || fg !== fb || fr !== fb).toBeTruthy()
-      } else {
-        expect(fr).toBe(fg)
-        expect(fg).toBe(fb)
-        expect(nr).toBe(ng)
-        expect(ng).toBe(nb)
-      }
-    }
+    const homeColors = await assertStreakColors(
+      homeStreaks,
+      (index) => standings.standings[index]!.streak,
+    )
+    const headerStreaks = await streakStyles(page, '[data-testid="player-header"]')
+    expect(headerStreaks).toHaveLength(1)
+    expect(headerStreaks[0]?.checked).toBe(Boolean(status.checkin))
+    expect(headerStreaks[0]?.text).toBe(String(status.streak.current))
     await assertAvatarRows(
       page,
       'section[aria-labelledby="board-title"] ol[aria-label] li',
       homeRows,
     )
+    await assertAvatarRows(page, '[data-testid="player-header"]', 1)
 
     const homeShot = path.join(OUT_DIR, viewport.name, 'home.png')
     fs.mkdirSync(path.dirname(homeShot), { recursive: true })
@@ -441,16 +566,26 @@ test('home, league and me use real data at 390 and 1440', async ({
       ...(report.artifacts as Record<string, string>),
       [`${viewport.name}/home.png`]: path.relative(REPO_ROOT, homeShot),
     }
-    pageReport.home = { rows: homeRows, streaks: homeStreaks }
+    pageReport.home = {
+      rows: renderedHomeRows,
+      header,
+      streaks: homeStreaks,
+      ...homeColors,
+    }
 
     // -------------------------------------------------------------- league
     await page.goto(`${NEW_BASE}/league`, { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: tierLabel })).toBeVisible()
+    await expect(
+      page.getByRole('heading', { name: status.display_name }),
+    ).toBeVisible()
     const list = page.getByRole('list', { name: '完整小组榜' })
     await expect(list).toBeVisible()
     const leagueRows = list.locator('li')
     await expect(leagueRows).toHaveCount(expectedRows)
+    await assertPlayerHeader(page)
     await assertTierIcon(page, status.tier, status.icon_theme)
+    await expect(page.getByLabel(/结算倒计时/)).toBeVisible()
+    await assertNoCards(page)
     await assertNoOverflow(page)
     await assertIconOnlyNav(page)
     await assertNoStreakCopy(page)
@@ -460,46 +595,55 @@ test('home, league and me use real data at 390 and 1440', async ({
     for (const term of ['语言', '今日已完成', '今日未完成', '连续', '连胜']) {
       expect(leagueText).not.toContain(term)
     }
+    const rowTexts = await leagueRows.evaluateAll((nodes) =>
+      nodes.map((node) => node.textContent?.trim() ?? ''),
+    )
+    expect(rowTexts.every((text) => !text.includes('XP'))).toBeTruthy()
+    expect(await page.getByText('XP', { exact: true }).count()).toBe(1)
+
+    const medalColors = await leagueRows.evaluateAll((nodes) =>
+      nodes.slice(0, 3).map((node) => {
+        const rank = node.querySelector<HTMLElement>(
+          '[data-testid="standing-rank"]',
+        )
+        return rank ? window.getComputedStyle(rank).color : ''
+      }),
+    )
+    expect(medalColors).toEqual([
+      'rgb(255, 200, 0)',
+      'rgb(207, 216, 230)',
+      'rgb(208, 138, 90)',
+    ])
+
     const meRow = list.locator('li[data-me="true"]')
     await expect(meRow).toHaveCount(1)
     await expect(meRow).toHaveAttribute(
       'aria-label',
       new RegExp(`${status.display_name}，第 ${status.rank} 名.*我的位置`),
     )
-    const meHighlight = await meRow.evaluate(
-      (node) => window.getComputedStyle(node).backgroundImage,
-    )
-    expect(meHighlight).not.toBe('none')
+    const meStyle = await meRow.evaluate((node) => {
+      const style = window.getComputedStyle(node)
+      return {
+        backgroundImage: style.backgroundImage,
+        boxShadow: style.boxShadow,
+        borderRadius: style.borderRadius,
+      }
+    })
+    expect(meStyle.backgroundImage).not.toBe('none')
+    expect(meStyle.boxShadow).toContain('46, 230, 214')
+    expect(meStyle.borderRadius).toBe('0px')
 
     const leagueStreaks = await streakStyles(
       page,
       'ol[aria-label="完整小组榜"] li',
     )
     expect(leagueStreaks).toHaveLength(expectedRows)
-    let checkedCount = 0
-    let uncheckedCount = 0
-    for (let index = 0; index < leagueStreaks.length; index += 1) {
-      const entry = leagueStreaks[index]!
-      const row = standings.standings[index]!
-      expect(entry).not.toBeNull()
-      expect(entry.text).toMatch(/^\d+$/)
-      expect(entry.text).toBe(String(row.streak))
-      expect(entry.checked).toBe(Boolean(row.checkin))
-      const [fr, fg, fb] = parseRgb(entry.flame)
-      const [nr, ng, nb] = parseRgb(entry.number)
-      if (entry.checked) {
-        checkedCount += 1
-        expect(fr !== fg || fg !== fb || fr !== fb).toBeTruthy()
-      } else {
-        uncheckedCount += 1
-        expect(fr).toBe(fg)
-        expect(fg).toBe(fb)
-        expect(nr).toBe(ng)
-        expect(ng).toBe(nb)
-      }
-    }
-    expect(checkedCount).toBeGreaterThan(0)
-    expect(uncheckedCount).toBeGreaterThan(0)
+    const leagueColors = await assertStreakColors(
+      leagueStreaks,
+      (index) => standings.standings[index]!.streak,
+    )
+    expect(leagueColors.checked).toBeGreaterThan(0)
+    expect(leagueColors.unchecked).toBeGreaterThan(0)
     await assertAvatarRows(
       page,
       'ol[aria-label="完整小组榜"] li',
@@ -518,9 +662,10 @@ test('home, league and me use real data at 390 and 1440', async ({
     }
     pageReport.league = {
       rows: expectedRows,
-      checked: checkedCount,
-      unchecked: uncheckedCount,
       me: status.rank,
+      medalColors,
+      meStyle,
+      ...leagueColors,
     }
 
     // ------------------------------------------------------------------ me
@@ -528,7 +673,10 @@ test('home, league and me use real data at 390 and 1440', async ({
     await expect(
       page.getByRole('heading', { name: status.display_name }),
     ).toBeVisible()
+    await assertPlayerHeader(page)
     await assertTierIcon(page, status.tier, status.icon_theme)
+    await expect(page.getByTestId('tier-icon')).toHaveCount(1)
+    await assertNoCards(page)
     await assertNoOverflow(page)
     await assertIconOnlyNav(page)
     await assertNoStreakCopy(page)
@@ -539,9 +687,17 @@ test('home, league and me use real data at 390 and 1440', async ({
     await expect(
       page.getByText(format(status.xp), { exact: true }).first(),
     ).toBeVisible()
+    for (const label of ['本周', '排名', '余烬']) {
+      await expect(page.getByText(label, { exact: true })).toBeVisible()
+    }
+    await expect(
+      page.getByRole('link', {
+        name: `我的榜单位置，第 ${status.rank ?? '—'} 名`,
+      }),
+    ).toBeVisible()
     const meStreaks = await streakStyles(page, 'main')
-    expect(meStreaks.filter(Boolean).length).toBeGreaterThan(0)
-    await assertAvatarRows(page, 'main section[aria-labelledby="me-name"]', 1)
+    expect(meStreaks.filter(Boolean).length).toBe(1)
+    await assertAvatarRows(page, '[data-testid="player-header"]', 1)
 
     const meShot = path.join(OUT_DIR, viewport.name, 'me.png')
     await page.screenshot({
