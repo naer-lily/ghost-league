@@ -45,3 +45,6 @@ artifacts/
 data.backup-*/
 data/archive/
 *.bundle
+
+# Next frontend build output, published separately until the production cut-over.
+/web-next/

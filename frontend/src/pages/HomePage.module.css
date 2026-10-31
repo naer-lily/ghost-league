@@ -1,0 +1,577 @@
+.page {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+.column {
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------ hero */
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding: 13px;
+  border: 2px solid var(--border);
+  border-color: color-mix(in srgb, var(--tier-color) 38%, var(--border));
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 100% 0%, var(--tier-soft), transparent 56%),
+    linear-gradient(145deg, #24343c 0%, #1a282f 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.025),
+    var(--shadow-card);
+}
+
+.heroGlow {
+  position: absolute;
+  top: -90px;
+  right: -50px;
+  width: 210px;
+  height: 210px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--tier-soft), transparent 66%);
+  pointer-events: none;
+}
+
+.heroTop {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tierBlock {
+  min-width: 0;
+}
+
+.signal {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tier-color);
+  box-shadow: 0 0 9px var(--tier-color);
+}
+
+.tierName {
+  margin-top: 3px;
+  color: var(--tier-color);
+  font-size: 1.75rem;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+}
+
+.groupLine {
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gem {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 2px solid color-mix(in srgb, var(--tier-color) 45%, var(--border));
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 35% 25%, rgba(255, 255, 255, 0.18), transparent 46%),
+    var(--tier-soft);
+  color: var(--tier-color);
+  box-shadow:
+    inset 0 0 18px rgba(0, 0, 0, 0.12),
+    0 3px 0 rgba(0, 0, 0, 0.16);
+}
+
+.identity {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.identityCopy {
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  font-size: 1.02rem;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identityMeta {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.streak {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 150, 0, 0.28);
+  border-radius: 14px;
+  background: rgba(255, 150, 0, 0.1);
+  color: var(--orange);
+}
+
+.flame {
+  color: var(--orange);
+  filter: drop-shadow(0 0 6px rgba(255, 150, 0, 0.38));
+  animation: flicker 2.8s ease-in-out infinite;
+}
+
+@keyframes flicker {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  45% {
+    transform: translateY(-1px) scale(1.05);
+  }
+  70% {
+    transform: translateY(0) scale(0.98);
+  }
+}
+
+.streakNumber {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  color: var(--text);
+  font-size: 1.12rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.streakNumber small {
+  color: var(--orange);
+  font-size: 0.56rem;
+  font-weight: 900;
+}
+
+.streakLabel {
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-weight: 800;
+}
+
+.streakCopy {
+  position: relative;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ----------------------------------------------------------------- stats */
+.statsGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.statCard {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 10px;
+  border: 2px solid var(--border);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 42%),
+    var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.statHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.statHead h2 {
+  margin-top: 1px;
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+.doneChip,
+.liveChip {
+  flex: none;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: 0.58rem;
+  font-weight: 900;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.doneChip {
+  border-color: rgba(88, 204, 2, 0.3);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.liveChip {
+  border-color: rgba(28, 176, 246, 0.3);
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.rankIcon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--yellow);
+}
+
+.todayBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.ringNumber {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  color: var(--text);
+  font-size: 1.45rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.ringNumber small {
+  color: var(--muted);
+  font-size: 0.56rem;
+  font-weight: 900;
+}
+
+.ringGoal {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.56rem;
+  font-weight: 800;
+}
+
+.todayCopy {
+  min-width: 0;
+  text-align: center;
+}
+
+.statStrong {
+  font-size: 0.74rem;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.statMuted {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.rankLine {
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+  margin-top: 5px;
+}
+
+.hash {
+  color: var(--muted-2);
+  font-size: 0.92rem;
+  font-weight: 900;
+}
+
+.rankNumber {
+  color: var(--yellow);
+  font-size: 2rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.rankEmpty {
+  color: var(--muted-2);
+  font-size: 2rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.rankOf {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.rankCaption {
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 0.6rem;
+  font-weight: 700;
+}
+
+.weekXp {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  margin-top: 4px;
+  font-size: 1.15rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.weekXp small {
+  color: var(--muted);
+  font-size: 0.56rem;
+  font-weight: 900;
+}
+
+.miniBar {
+  height: 7px;
+  margin-top: 5px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.miniBar span {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--green-deep), var(--green-bright));
+  box-shadow: 0 0 8px rgba(88, 204, 2, 0.32);
+  transition: width 0.5s var(--ease-spring);
+}
+
+.rankHelper {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.footnote {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 7px;
+  color: var(--muted-2);
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.footnote svg {
+  flex: none;
+  color: var(--muted-2);
+}
+
+/* --------------------------------------------------------------- skeleton */
+.skeletonHero,
+.skeletonCard,
+.skeletonBoard {
+  border: 2px solid var(--border);
+  background: linear-gradient(
+    100deg,
+    var(--surface) 28%,
+    #2a3c45 48%,
+    var(--surface) 68%
+  );
+  background-size: 220% 100%;
+  animation: shimmer 1.5s linear infinite;
+}
+
+.skeletonHero {
+  height: 176px;
+  border-radius: 22px;
+}
+
+.skeletonCard {
+  height: 196px;
+  border-radius: 18px;
+}
+
+.skeletonBoard {
+  height: 286px;
+  margin-top: 9px;
+  border-radius: 20px;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -120% 0;
+  }
+}
+
+/* -------------------------------------------------------------- error state */
+.errorCard {
+  display: grid;
+  justify-items: center;
+  padding: 34px 20px 28px;
+  border: 2px solid rgba(255, 75, 75, 0.3);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 75, 75, 0.1), transparent 48%),
+    var(--surface);
+  box-shadow: var(--shadow-card);
+  text-align: center;
+}
+
+.errorIcon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 14px;
+  border-radius: 20px;
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.errorCard h1 {
+  margin-top: 3px;
+  font-size: 1.2rem;
+  font-weight: 900;
+}
+
+.errorCard > p:not(.eyebrow) {
+  max-width: 40ch;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.errorCard .errorHint {
+  color: var(--muted-2);
+  font-size: 0.72rem;
+}
+
+.errorCard .button {
+  margin-top: 16px;
+  min-height: 48px;
+}
+
+@media (min-width: 720px) {
+  .hero {
+    padding: 18px;
+  }
+
+  .tierName {
+    font-size: 2rem;
+  }
+
+  .statsGrid {
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  .statCard {
+    padding: 15px;
+  }
+
+  .todayBody {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    text-align: left;
+  }
+
+  .todayCopy {
+    text-align: left;
+  }
+
+  .statStrong {
+    font-size: 0.82rem;
+  }
+
+  .rankHelper {
+    font-size: 0.68rem;
+  }
+
+  .footnote {
+    font-size: 0.68rem;
+  }
+}
+
+@media (min-width: 960px) {
+  .page {
+    max-width: 680px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .page {
+    display: grid;
+    grid-template-columns: minmax(0, var(--content-max)) var(--aside-w);
+    gap: var(--page-gap);
+    align-items: start;
+    max-width: calc(var(--content-max) + var(--aside-w) + var(--page-gap));
+  }
+
+  .hero {
+    padding: 20px;
+  }
+
+  .statsGrid {
+    gap: 14px;
+  }
+
+  .statCard {
+    padding: 16px;
+  }
+
+  .todayBody {
+    gap: 14px;
+  }
+
+  .skeletonBoard {
+    margin-top: 12px;
+  }
+}

@@ -1,0 +1,87 @@
+.page {
+  width: min(680px, 100%);
+  margin: 0 auto;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 2px 16px;
+}
+
+.head h1 {
+  margin-top: 2px;
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 15px;
+  background: var(--surface-3);
+  color: var(--blue);
+}
+
+.card {
+  display: grid;
+  justify-items: center;
+  padding: 34px 22px 26px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(28, 176, 246, 0.08), transparent 45%),
+    var(--surface);
+  box-shadow: var(--shadow-card);
+  text-align: center;
+}
+
+.compass {
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  border-radius: 20px;
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.card h2 {
+  margin-top: 14px;
+  font-size: 1.08rem;
+  font-weight: 900;
+}
+
+.card p {
+  max-width: 42ch;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.card .note {
+  color: var(--muted-2);
+  font-size: 0.74rem;
+}
+
+.card a {
+  margin-top: 18px;
+  min-height: 44px;
+  padding: 10px 16px;
+  font-size: 0.84rem;
+}
+
+@media (min-width: 960px) {
+  .page {
+    width: min(720px, 100%);
+  }
+
+  .card {
+    padding: 44px 30px 32px;
+  }
+}

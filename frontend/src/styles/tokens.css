@@ -1,0 +1,55 @@
+/* Shared dark tokens ported from prototype/src/styles.css. */
+:root {
+  color-scheme: dark;
+
+  --bg: #131f24;
+  --bg-deep: #0d171c;
+  --surface: #202f36;
+  --surface-2: #1a282f;
+  --surface-3: #2b3d45;
+  --border: #37464f;
+  --border-strong: #4a5d67;
+  --text: #ffffff;
+  --muted: #8fa6b2;
+  --muted-2: #6d8792;
+
+  --green: #58cc02;
+  --green-bright: #61e002;
+  --green-deep: #4cae02;
+  --green-shadow: #3f8f02;
+  --green-soft: rgba(88, 204, 2, 0.14);
+  --blue: #1cb0f6;
+  --blue-shadow: #1899d6;
+  --blue-soft: rgba(28, 176, 246, 0.14);
+  --orange: #ff9600;
+  --orange-shadow: #d97a00;
+  --orange-soft: rgba(255, 150, 0, 0.16);
+  --yellow: #ffc800;
+  --yellow-shadow: #d9a900;
+  --purple: #ce82ff;
+  --red: #ff4b4b;
+  --red-shadow: #d63b3b;
+  --red-soft: rgba(255, 75, 75, 0.14);
+  --gold: #ffc800;
+  --silver: #cfd8e6;
+  --bronze: #d08a5a;
+
+  --radius-card: 20px;
+  --radius-tile: 16px;
+  --radius-button: 16px;
+  --radius-pill: 999px;
+
+  --font: "Nunito", "Feather", "Nunito Sans", ui-rounded, "PingFang SC",
+    "Noto Sans CJK SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+
+  --rail: 88px;
+  --topbar-h: 64px;
+  --bottom-nav: 68px;
+  --content-max: 560px;
+  --aside-w: 300px;
+  --page-gap: 20px;
+
+  --shadow-card: 0 2px 0 rgba(0, 0, 0, 0.16);
+  --shadow-float: 0 18px 60px rgba(0, 0, 0, 0.35);
+  --ease-spring: cubic-bezier(0.2, 1.2, 0.4, 1);
+}

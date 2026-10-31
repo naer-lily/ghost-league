@@ -1,0 +1,7 @@
+node_modules/
+.vite/
+test-results/
+playwright-report/
+blob-report/
+.env.local
+.env.*.local

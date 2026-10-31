@@ -1,0 +1,214 @@
+@import "./tokens.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--bg);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at 50% -12%, rgba(88, 204, 2, 0.09), transparent 44%),
+    radial-gradient(circle at 8% 8%, rgba(206, 130, 255, 0.055), transparent 34%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-weight: 600;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+h1,
+h2,
+h3,
+p,
+dl,
+dd,
+dt,
+figure {
+  margin: 0;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img,
+svg {
+  display: block;
+}
+
+::selection {
+  background: var(--green);
+  color: #082005;
+}
+
+:focus-visible {
+  outline: 3px solid var(--blue);
+  outline-offset: 3px;
+}
+
+.visually-hidden,
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.skip-link {
+  position: fixed;
+  left: 12px;
+  top: -84px;
+  z-index: 300;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--blue);
+  color: #062331;
+  font-weight: 900;
+  box-shadow: 0 4px 0 var(--blue-shadow);
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus {
+  top: 12px;
+}
+
+/* ---------------------------------------------------------------- buttons */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 48px;
+  padding: 12px 18px;
+  border-radius: var(--radius-button);
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  transition:
+    transform 0.08s ease,
+    filter 0.15s ease,
+    box-shadow 0.08s ease,
+    background-color 0.15s ease;
+}
+
+.button:not(:disabled):active {
+  transform: translateY(3px);
+}
+
+.button:disabled {
+  opacity: 0.55;
+}
+
+.button--primary {
+  background: var(--green);
+  color: #082005;
+  box-shadow: 0 4px 0 var(--green-shadow);
+}
+
+.button--primary:not(:disabled):hover {
+  background: var(--green-bright);
+}
+
+.button--primary:not(:disabled):active {
+  box-shadow: 0 1px 0 var(--green-shadow);
+}
+
+.button--secondary {
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: 0 4px 0 #1b292f;
+}
+
+.button--secondary:not(:disabled):hover {
+  background: #354b55;
+}
+
+.button--danger {
+  background: var(--red-soft);
+  color: #ff9d9d;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.18);
+}
+
+.button--full {
+  width: 100%;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.card-surface {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 40%),
+    var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

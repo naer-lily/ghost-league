@@ -1,0 +1,36 @@
+.region {
+  position: fixed;
+  right: 14px;
+  bottom: calc(var(--bottom-nav) + 18px + env(safe-area-inset-bottom));
+  left: 14px;
+  z-index: 260;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.toast {
+  max-width: min(420px, 100%);
+  padding: 11px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: rgba(13, 23, 28, 0.96);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-align: center;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(10px);
+}
+
+.error {
+  border-color: rgba(255, 75, 75, 0.55);
+  color: #ffb3b3;
+}
+
+@media (min-width: 960px) {
+  .region {
+    bottom: 24px;
+    left: calc(var(--rail) + 24px);
+  }
+}
