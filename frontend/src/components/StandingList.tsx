@@ -58,7 +58,8 @@ export function StandingRowView({ row, index }: StandingRowViewProps) {
         </span>
       </div>
       <p className={styles.xp} data-testid="standing-xp">
-        {formatNumber(row.xp)}
+        {formatNumber(row.xp)}{' '}
+        <small className={styles.xpUnit}>XP</small>
       </p>
     </li>
   )

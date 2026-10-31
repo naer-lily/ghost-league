@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, within } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
@@ -72,5 +72,15 @@ describe('AppShell navigation', () => {
       expect(link.textContent).toBe('')
       expect(link.getAttribute('aria-label')).toBeTruthy()
     }
+  })
+
+  it('shows the gem balance as an icon and number in the top bar', async () => {
+    renderShell()
+
+    const gems = await screen.findByLabelText('宝石 128')
+    expect(gems).toHaveAttribute('data-testid', 'gem-balance')
+    expect(gems).toHaveTextContent('128')
+    expect(gems.textContent).not.toMatch(/宝石/)
+    expect(gems.querySelector('svg')).not.toBeNull()
   })
 })

@@ -3,6 +3,7 @@ import type { UseQueryResult } from '@tanstack/react-query'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   Flame,
+  Gem,
   History,
   Home,
   RefreshCw,
@@ -19,6 +20,7 @@ import type { HomeSnapshot } from '../api/types'
 import {
   buildHomeView,
   describeApiError,
+  formatNumber,
 } from '../lib/home'
 import { playClick } from '../lib/sound'
 import { useUnauthorizedSignOut } from '../store/useSession'
@@ -130,6 +132,7 @@ function TopBar({
   const [refreshing, setRefreshing] = useState(false)
 
   const view = home.data ? buildHomeView(home.data) : null
+  const gems = view?.gems ?? 0
 
   async function handleRefresh() {
     if (refreshing) return
@@ -160,6 +163,14 @@ function TopBar({
         </Link>
 
         <div className={styles.topActions}>
+          <span
+            className={styles.gemBalance}
+            data-testid="gem-balance"
+            aria-label={`宝石 ${gems}`}
+          >
+            <Gem size={19} aria-hidden="true" />
+            <span className={styles.gemValue}>{formatNumber(gems)}</span>
+          </span>
           <IconAction
             label="刷新联赛数据"
             tooltip="刷新"

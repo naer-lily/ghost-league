@@ -230,6 +230,7 @@ export interface HomeView {
   settlementLabel: string
   embersBalance: number
   embersCap: number
+  gems: number
 }
 
 export function buildHomeView(
@@ -296,6 +297,7 @@ export function buildHomeView(
     settlementLabel: formatSettlement(status.next_settlement_at, now),
     embersBalance: Math.max(0, Math.trunc(status.embers.balance)),
     embersCap: Math.max(0, Math.trunc(status.embers.cap)),
+    gems: Math.max(0, Math.trunc(status.gems)),
   }
 }
 

@@ -12,7 +12,7 @@ const TOKEN_KEY = 'gl.token.v1'
 const NEW_BASE = process.env.E2E_NEW_BASE_URL ?? 'http://127.0.0.1:4174'
 const FRONTEND_DIR = process.cwd()
 const REPO_ROOT = path.resolve(FRONTEND_DIR, '..')
-const OUT_DIR = path.join(REPO_ROOT, 'artifacts', 'frontend-iteration-3')
+const OUT_DIR = path.join(REPO_ROOT, 'artifacts', 'frontend-iteration-4')
 
 const TIER_LABELS: Record<string, string> = {
   Bronze: '青铜',
@@ -59,6 +59,7 @@ interface StatusPayload {
   checkin: string | null
   streak: { current: number; longest: number }
   embers: { balance: number; cap: number }
+  gems: number
   group: { no: number; tier: string } | null
   next_settlement_at: string
 }
@@ -93,6 +94,7 @@ function signature(snapshot: Snapshot): string {
     xp: status.xp,
     rank: status.rank,
     streak: status.streak.current,
+    gems: status.gems,
     rows: standings.standings.map((row) => [
       row.rank,
       row.display_name,
@@ -240,6 +242,61 @@ async function assertNoStreakCopy(page: Page): Promise<void> {
   for (const term of ['连胜', '连续', '已打卡', '今日已完成', '今日未完成']) {
     expect(text).not.toContain(term)
   }
+}
+
+async function assertGemBalance(page: Page, gems: number): Promise<void> {
+  const viewport = page.viewportSize()
+  if (!viewport) throw new Error('missing viewport')
+  const balance = page.getByTestId('gem-balance')
+  await expect(balance).toBeVisible()
+  await expect(balance).toHaveAttribute('aria-label', `宝石 ${gems}`)
+  await expect(balance).toContainText(format(gems))
+  await expect(balance).not.toContainText('宝石')
+  await expect(balance.locator('svg')).toHaveCount(1)
+
+  const box = await balance.boundingBox()
+  expect(box).not.toBeNull()
+  expect(box!.x).toBeGreaterThanOrEqual(0)
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width + 1)
+
+  const iconBox = await balance.locator('svg').boundingBox()
+  expect(iconBox).not.toBeNull()
+  expect(Math.round(iconBox!.width)).toBe(19)
+  expect(Math.round(iconBox!.height)).toBe(19)
+}
+
+async function assertNunito(page: Page): Promise<void> {
+  const font = await page.evaluate(async () => {
+    const weights = [600, 700, 800, 900]
+    const loaded: number[] = []
+    for (const weight of weights) {
+      const faces = await document.fonts.load(`${weight} 16px Nunito`)
+      loaded.push(faces.length)
+    }
+    await document.fonts.ready
+    const nunitoFaces = Array.from(document.fonts)
+      .filter(
+        (face) => face.family.replace(/["']/g, '') === 'Nunito',
+      )
+      .map((face) => ({
+        weight: face.weight,
+        status: face.status,
+      }))
+    return {
+      family: window.getComputedStyle(document.body).fontFamily,
+      checks: weights.map((weight) =>
+        document.fonts.check(`${weight} 16px Nunito`),
+      ),
+      faces: nunitoFaces,
+      loaded,
+    }
+  })
+
+  expect(font.family).toContain('Nunito')
+  expect(font.checks.every(Boolean)).toBeTruthy()
+  expect(font.loaded.every((count) => count > 0)).toBeTruthy()
+  expect(font.faces.length).toBeGreaterThanOrEqual(4)
+  expect(font.faces.every((face) => face.status === 'loaded')).toBeTruthy()
 }
 
 async function assertNoCards(page: Page): Promise<void> {
@@ -482,6 +539,7 @@ test('flat home, league and me use real data at 390 and 1440', async ({
       rank: status.rank,
       group_size: status.group_size,
       streak: status.streak.current,
+      gems: status.gems,
       rows: expectedRows,
     },
     viewports: {},
@@ -506,6 +564,8 @@ test('flat home, league and me use real data at 390 and 1440', async ({
     await expect(page.getByRole('heading', { name: tierLabel })).toHaveCount(0)
     const header = await assertPlayerHeader(page)
     await assertTierIcon(page, status.tier, status.icon_theme)
+    await assertGemBalance(page, status.gems)
+    await assertNunito(page)
     await expect(
       page.getByRole('progressbar', { name: '今日 XP 目标' }),
     ).toBeVisible()
@@ -516,7 +576,7 @@ test('flat home, league and me use real data at 390 and 1440', async ({
       page.getByLabel(`本周名次 第 ${status.rank ?? '—'} 名`),
     ).toBeVisible()
     await expect(
-      page.getByText(format(status.xp), { exact: true }).first(),
+      page.getByText(`${format(status.xp)} XP`, { exact: true }).first(),
     ).toBeVisible()
     await expect(
       page.getByRole('link', { name: '查看完整小组榜' }),
@@ -584,6 +644,7 @@ test('flat home, league and me use real data at 390 and 1440', async ({
     await expect(leagueRows).toHaveCount(expectedRows)
     await assertPlayerHeader(page)
     await assertTierIcon(page, status.tier, status.icon_theme)
+    await assertGemBalance(page, status.gems)
     await expect(page.getByLabel(/结算倒计时/)).toBeVisible()
     await assertNoCards(page)
     await assertNoOverflow(page)
@@ -598,8 +659,18 @@ test('flat home, league and me use real data at 390 and 1440', async ({
     const rowTexts = await leagueRows.evaluateAll((nodes) =>
       nodes.map((node) => node.textContent?.trim() ?? ''),
     )
-    expect(rowTexts.every((text) => !text.includes('XP'))).toBeTruthy()
-    expect(await page.getByText('XP', { exact: true }).count()).toBe(1)
+    for (const [index, row] of standings.standings.entries()) {
+      expect(rowTexts[index]).toContain(`${format(row.xp)} XP`)
+    }
+    expect(await page.getByText('XP', { exact: true }).count()).toBe(
+      expectedRows,
+    )
+    const boardHead = page.getByRole('heading', { name: '小组榜' })
+    await expect(boardHead).toBeVisible()
+    const boardHeadText = await boardHead.evaluate(
+      (node) => node.parentElement?.parentElement?.textContent?.trim() ?? '',
+    )
+    expect(boardHeadText).toBe('小组榜')
 
     const medalColors = await leagueRows.evaluateAll((nodes) =>
       nodes.slice(0, 3).map((node) => {
@@ -675,6 +746,7 @@ test('flat home, league and me use real data at 390 and 1440', async ({
     ).toBeVisible()
     await assertPlayerHeader(page)
     await assertTierIcon(page, status.tier, status.icon_theme)
+    await assertGemBalance(page, status.gems)
     await expect(page.getByTestId('tier-icon')).toHaveCount(1)
     await assertNoCards(page)
     await assertNoOverflow(page)
@@ -684,9 +756,10 @@ test('flat home, league and me use real data at 390 and 1440', async ({
     await expect(
       page.getByRole('progressbar', { name: '今日 XP 目标' }),
     ).toBeVisible()
-    await expect(
-      page.getByText(format(status.xp), { exact: true }).first(),
-    ).toBeVisible()
+    const weekStat = page.getByTestId('me-stat-week')
+    await expect(weekStat).toContainText(`${format(status.xp)} XP`)
+    await expect(weekStat.locator('small')).toHaveCount(1)
+    expect(await page.getByText('XP', { exact: true }).count()).toBe(2)
     for (const label of ['本周', '排名', '余烬']) {
       await expect(page.getByText(label, { exact: true })).toBeVisible()
     }

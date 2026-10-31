@@ -59,6 +59,7 @@ export function makeStatus(overrides: Partial<Status> = {}): Status {
       last_checked_date: '2026-10-31',
     },
     embers: { balance: 0, cap: 3, earned_this_week: 0 },
+    gems: 128,
     equipped_title: '小丑',
     equipped_title_id: 'title_clown',
     frame: '余烬',

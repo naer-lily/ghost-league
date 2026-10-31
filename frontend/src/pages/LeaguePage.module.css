@@ -63,13 +63,6 @@
   letter-spacing: -0.01em;
 }
 
-.unit {
-  color: var(--muted-2);
-  font-size: 0.62rem;
-  font-weight: 900;
-  letter-spacing: 0.14em;
-}
-
 .empty {
   display: grid;
   justify-items: center;

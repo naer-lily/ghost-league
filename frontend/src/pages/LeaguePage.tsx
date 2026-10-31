@@ -60,7 +60,6 @@ export function LeaguePage() {
             </span>
             <h2 id="league-board">小组榜</h2>
           </div>
-          <span className={styles.unit}>XP</span>
         </div>
 
         {rows.length === 0 ? (

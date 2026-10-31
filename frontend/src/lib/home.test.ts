@@ -31,6 +31,7 @@ describe('home mapping', () => {
     expect(view.rank).toBe(10)
     expect(view.groupSize).toBe(15)
     expect(view.streak).toBe(2)
+    expect(view.gems).toBe(128)
     expect(view.topThree.map((row) => row.display_name)).toEqual([
       '@Xkein',
       'RogerRordo',

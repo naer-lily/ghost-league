@@ -41,8 +41,8 @@
   --radius-button: 16px;
   --radius-pill: 999px;
 
-  --font: "Nunito", "Feather", "Nunito Sans", ui-rounded, "PingFang SC",
-    "Noto Sans CJK SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font: "Nunito", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei",
+    "Noto Sans SC", ui-rounded, system-ui, sans-serif;
 
   --rail: 88px;
   --topbar-h: 64px;

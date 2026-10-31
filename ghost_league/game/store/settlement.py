@@ -119,6 +119,11 @@ class SettlementMixin:
             ember = conn.execute(
                 "SELECT * FROM ember_balance WHERE player_id = ?", (player_id,)
             ).fetchone()
+            lifetime = conn.execute(
+                "SELECT COALESCE(SUM(xp), 0) AS total FROM weekly_scores "
+                "WHERE player_id = ?",
+                (player_id,),
+            ).fetchone()
         standings = (
             self.standings(
                 week_date, group_id=int(group["id"]), now=local_now
@@ -138,6 +143,7 @@ class SettlementMixin:
             "rank": rank,
             "seconds": int(score["seconds"]) if score else 0,
             "xp": int(score["xp"]) if score else 0,
+            "lifetime_xp": int(lifetime["total"]) if lifetime else 0,
             "today_seconds": today_seconds,
             "today_xp": xp_for_seconds(today_seconds),
             "required_xp": CHECKIN_SECONDS // 6,

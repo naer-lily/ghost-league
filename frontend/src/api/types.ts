@@ -57,6 +57,7 @@ export interface Status {
   checkin: string | null
   streak: Streak
   embers: EmberSummary
+  gems: number
   equipped_title: string | null
   equipped_title_id: string | null
   frame: string | null

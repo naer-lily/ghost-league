@@ -151,11 +151,21 @@
 }
 
 .xp {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
   color: var(--text);
   font-size: 0.9rem;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.xpUnit {
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
 .more {
@@ -237,5 +247,9 @@
 
   .xp {
     font-size: 1rem;
+  }
+
+  .xpUnit {
+    font-size: 0.62rem;
   }
 }

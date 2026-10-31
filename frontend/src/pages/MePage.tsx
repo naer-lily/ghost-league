@@ -43,8 +43,7 @@ export function MePage() {
         <div className={styles.stat} data-testid="me-stat-week">
           <Zap className={styles.statIcon} size={18} aria-hidden="true" />
           <p className={styles.statValue}>
-            <AnimatedNumber value={view.weekXp} />
-            <small>XP</small>
+            <AnimatedNumber value={view.weekXp} /> <small>XP</small>
           </p>
           <p className={styles.statLabel}>本周</p>
         </div>

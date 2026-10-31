@@ -51,6 +51,29 @@
   gap: 0;
 }
 
+.gemBalance {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  padding: 0 6px;
+  color: var(--purple);
+  font-size: 0.8rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.gemBalance svg {
+  flex: none;
+  filter: drop-shadow(0 0 6px rgba(206, 130, 255, 0.35));
+}
+
+.gemValue {
+  color: var(--text);
+}
+
 .iconAction {
   display: grid;
   place-items: center;

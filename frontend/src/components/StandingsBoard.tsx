@@ -35,8 +35,7 @@ export function StandingsBoard({ view, onRefresh }: StandingsBoardProps) {
         </div>
         <div className={styles.meta}>
           <span className={styles.weekXp}>
-            <AnimatedNumber value={view.weekXp} />
-            <small>XP</small>
+            <AnimatedNumber value={view.weekXp} /> <small>XP</small>
           </span>
           <span
             className={styles.rankChip}

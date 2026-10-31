@@ -197,12 +197,57 @@ class StartupAndGroupTests(GameAPITestBase):
         self.assertIn("current", payload["streak"])
         self.assertEqual(payload["embers"]["balance"], 0)
         self.assertEqual(payload["embers"]["cap"], 3)
+        self.assertEqual(payload["gems"], 0)
         self.assertEqual(
             payload["next_settlement_at"], "2026-11-02T00:00:00+08:00"
         )
         for key in ("week_total_seconds", "required_seconds", "checked_in_today",
                     "current_streak"):
             self.assertNotIn(key, payload)
+
+    def test_gems_are_derived_from_lifetime_xp_for_accounts_and_channel_players(
+        self,
+    ) -> None:
+        with self.client() as client:
+            self.post_increment(client, event_id="gem-week", seconds=600)
+            status = client.get("/v1/me/status", headers=auth()).json()
+            self.assertEqual(status["xp"], 100)
+            self.assertEqual(status["gems"], 10)
+
+            # A past week still counts toward gems; the current week's XP
+            # alone must not reset the balance.
+            with sqlite3.connect(self.game_db_path) as connection:
+                connection.execute(
+                    "INSERT INTO weekly_scores "
+                    "(week_start, player_id, seconds, xp) VALUES (?, ?, ?, ?)",
+                    ("2026-10-19", "owner", 570, 95),
+                )
+            status = client.get("/v1/me/status", headers=auth()).json()
+            self.assertEqual(status["xp"], 100)
+            self.assertEqual(status["gems"], 19)
+
+            with sqlite3.connect(self.game_db_path) as connection:
+                channel_player = str(
+                    connection.execute(
+                        "SELECT player_id FROM channel_players LIMIT 1"
+                    ).fetchone()[0]
+                )
+                connection.execute(
+                    "INSERT OR IGNORE INTO weekly_scores "
+                    "(week_start, player_id, seconds, xp) VALUES (?, ?, 0, 0)",
+                    (WEEK_START, channel_player),
+                )
+                connection.execute(
+                    "UPDATE weekly_scores SET seconds = 1500, xp = 250 "
+                    "WHERE week_start = ? AND player_id = ?",
+                    (WEEK_START, channel_player),
+                )
+
+            channel_status = client.app.state.game_service.status_for_user(
+                channel_player
+            )
+            self.assertIsNotNone(channel_status)
+            self.assertEqual(channel_status["gems"], 25)
 
 
 class IncrementTests(GameAPITestBase):

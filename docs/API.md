@@ -612,6 +612,7 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
     "last_checked_date": "2026-10-25"
   },
   "embers": {"balance": 1, "cap": 3, "earned_this_week": 1},
+  "gems": 20,
   "equipped_title": "点火",
   "equipped_title_id": "title_ignition",
   "frame": "余烬",
@@ -624,6 +625,9 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 ```
 
 - 该接口只读当前 token 的账号，不提供全员状态。
+- `gems` 由该玩家 `weekly_scores` 的累计 `SUM(xp) // 10` 派生，每累计 10 XP 得 1 个
+  宝石；不按本周 XP 重置，也没有独立 ledger 表。`status_for_user`（badge/widget 快照）
+  返回同一派生值。
 - 轮询方可以比较 `updated_at`、`xp`、`rank` 和 `next_settlement_at`；重复 `event_id`
   不会推进 `updated_at`。
 - 没有 `version` 字段；当前也不实现推送。

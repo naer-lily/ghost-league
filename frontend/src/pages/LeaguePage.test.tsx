@@ -3,6 +3,7 @@ import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
+import { formatNumber } from '../lib/home'
 import { makeSnapshot } from '../test/fixtures'
 import { LeaguePage } from './LeaguePage'
 
@@ -46,7 +47,7 @@ describe('LeaguePage', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders every API row with bare ranks, medal colors and an unlabelled XP column', async () => {
+  it('renders every API row with bare ranks, medal colors and an XP suffix', async () => {
     const snapshot = makeSnapshot()
     vi.stubGlobal('fetch', mockSnapshot(snapshot))
 
@@ -85,14 +86,21 @@ describe('LeaguePage', () => {
     expect(within(me).getByTestId('streak-badge')).toBeInTheDocument()
     expect(within(me).getByTestId('standing-rank')).toHaveTextContent('10')
 
-    for (const row of rows) {
+    for (const [index, row] of rows.entries()) {
       expect(within(row).getByTestId('streak-badge')).toBeInTheDocument()
-      expect(within(row).queryByText('XP')).not.toBeInTheDocument()
+      expect(within(row).getByText('XP', { exact: true })).toBeInTheDocument()
+      expect(within(row).getByTestId('standing-xp')).toHaveTextContent(
+        `${formatNumber(snapshot.standings.standings[index]!.xp)} XP`,
+      )
       expect(row.textContent ?? '').not.toMatch(
-        /XP|语言|今日已完成|今日未完成|连续|连胜|已打卡/,
+        /语言|今日已完成|今日未完成|连续|连胜|已打卡/,
       )
     }
-    expect(screen.getAllByText('XP')).toHaveLength(1)
+    expect(screen.getAllByText('XP')).toHaveLength(rows.length)
+
+    const boardHead = screen.getByRole('heading', { name: '小组榜' })
+      .parentElement?.parentElement
+    expect(boardHead).not.toHaveTextContent('XP')
 
     expect(screen.getByLabelText(/结算倒计时/)).toBeInTheDocument()
     expect(screen.queryByText(/前三/)).not.toBeInTheDocument()
