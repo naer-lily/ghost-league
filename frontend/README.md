@@ -28,7 +28,7 @@
 frontend/
   src/
     api/          # fetch 封装、Bearer 注入、API 类型、TanStack Query hook
-    components/   # 应用外壳、纯图标导航、三合一 PlayerHeader、榜单、TierIcon、StreakBadge、进度环
+    components/   # 应用外壳、纯图标导航、三合一 PlayerHeader、榜单、TierIcon、StreakBadge、今日进度条、进度环
     lib/          # API → 页面视图映射、段位资源路径、数字/时间格式、错误文案、音效
     pages/        # 真实首页 / 小组榜 / 个人页、登录、余烬与历史占位
     store/        # Zustand UI 状态；复用旧 token
@@ -79,7 +79,7 @@ npm run test:e2e      # Playwright（需要真实 token 与旧页面地址）
   - `GET /v1/me/status`
   - `GET /v1/league/standings`
 - 首页展示真实：单行 `PlayerHeader`（头像 64px、名字、段位图标 + 段位/组号、连胜）、
-  180px 的今日 100 XP 主视觉圆环、小组榜前 5 行；名次 `11/15` 是榜单标题右侧的小标签，
+  六档横向「今日进度」条、小组榜前 5 行；名次 `11/15` 是榜单标题右侧的小标签，
   本周 XP 是同一标题行的无框数字（带小号 `XP` 后缀）。首页不再有“排名”卡、`PageAside`、
   “节奏/赛程/计分”三张卡。
 - `/league` 用同一份快照渲染完整小组榜（全部行，不只前三），`PlayerHeader` 下方只有
@@ -105,6 +105,27 @@ npm run test:e2e      # Playwright（需要真实 token 与旧页面地址）
 - 设置里的声音是本地真实音效开关；外观会调用现有 `PATCH /v1/me/profile` 的
   `icon_theme` 能力。本迭代没有实现打卡、补签、关注、分享等联赛写操作。
 
+## 首页今日进度条
+
+- 首页在 `PlayerHeader` 与 `StandingsBoard` 之间渲染 `TodayProgress`；个人页的小号
+  `GoalRing` 保持不变。
+- 六档目标固定为 **10 / 30 / 60 / 120 / 180 / 240 分钟**，对应 **100 / 300 / 600 /
+  1200 / 1800 / 2400 XP**（1 XP = 6 秒）。当前档位取第一个尚未达到的目标；已完成档位
+  按 `today_xp >= tier.xp` 判断。六档在等宽网格中展示，进度按「已完成档位数 + 当前档内
+  进度」折算，所以早期档位在视觉上不会被压缩。
+- 所有数字来自真实字段：`status.today_xp`、`status.today_seconds`（展示分钟为
+  `Math.floor(today_seconds / 60)`）和 `status.updated_at`。不读取或伪造 `last_xp_at`。
+- 条状视觉包含青绿/琥珀/橙金渐变（起点跟随 `--tier-color`）、白色扫光、发光进度头、
+  当前刻度脉冲和火焰呼吸；`prefers-reduced-motion` 下关闭扫光、脉冲和过渡，只保留静态
+  层级。进度条本身是 `role="progressbar"`、`aria-label="今日 XP 目标"`，并带
+  `aria-valuemin/max/now/valuetext`；六档标签是真实 DOM `li`，不是 canvas。
+- 火焰「刚刚更新」只在最近 10 分钟内显示，位置在「今日进度」标题右侧；没有更新时不渲染。
+- **数据限制**：现有 `/v1/me/status` 的 `updated_at` 由 `api.py` 在每次状态请求时写成当前
+  时间（`_iso(now)`），并不是独立的 XP 更新时间。前端按任务口径先用它与当前时间比较，
+  同时把时间戳冻结到「观察到 `today_xp` 增加」的那次快照，避免 30 秒轮询让火焰常驻；
+  页面打开/重新进入时仍只能用服务端请求时间做初始近似。彻底解决需要后端增加
+  `last_xp_at`，本迭代没有改后端契约。
+
 ## 响应式与可访问性
 
 - `< 960px`：顶部栏 + 底部 5 个纯图标 Tab。
@@ -126,7 +147,9 @@ npm run test:e2e      # Playwright（需要真实 token 与旧页面地址）
 - `StreakBadge` 已打卡 / 未打卡的灰度与彩色状态、可见文本不含“天/连胜/连续/已打卡”。
 - `PlayerHeader` 四个部分同属一个 `display:flex; flex-wrap:nowrap` 行，头像 64px、
   段位图标 20px，且没有卡片外壳。
-- 首页真实数据、5 行榜单、无 `RankCard` / `PageAside`、空态、错误态、点击重试后恢复。
+- 首页真实数据、六档今日进度条（等宽档位、当前档/已完成/未来档、XP/分钟/还差 XP、
+  `role="progressbar"` 与 `aria-valuetext`）、火焰 10 分钟窗口与跨轮询过期、5 行榜单、
+  无 `RankCard` / `PageAside`、空态、错误态、点击重试后恢复。
 - `/league` 完整行数等于 API、前三名 data-medal 与金银铜配色、每行同一行 `数字 XP` 后缀、
   页面无 `XP` 表头、当前用户行 `data-me`、行内无语言/状态拼接文本。
 - `/me` 单行头部、三列统计（本周 `524 XP` 同一行）、紧凑 XP 环、“我的榜单位置”行、
@@ -147,6 +170,10 @@ npm run test:e2e
 用 `CHROME_PATH=/path/to/chrome` 指定。Playwright 会：
 
 - 在 390×844 与 1440×900 打开真实数据的首页、完整小组榜和个人页并截图；
+- `e2e/today-progress.spec.ts` 额外在 390×844 与 1440×1000 截图真实首页，校验六档标签、
+  当前档位、`aria-valuemin/max/now/valuetext`、今日 XP/分钟、火焰与无横向 overflow；
+- 用 Playwright `page.route` 的确定性 fixture 覆盖「最近 2 分钟更新」与「20 分钟前更新」，
+  确认火焰出现/消失；再用 `prefers-reduced-motion: reduce` 确认进度条仍可读且无 CSS 动画；
 - 校验 Nunito 600/700/800/900 的 woff2 真的 `loaded`，`getComputedStyle` 的字体栈以
   `Nunito` 开头；
 - 校验顶栏 `data-testid="gem-balance"` 可见、图标 19px、数字与 `aria-label="宝石 N"` 一致，
@@ -170,22 +197,31 @@ artifacts/frontend-iteration-4/1440/home.png
 artifacts/frontend-iteration-4/1440/league.png
 artifacts/frontend-iteration-4/1440/me.png
 artifacts/frontend-iteration-4/report.json
+artifacts/prototype-today-progress-web-next/home-390.png
+artifacts/prototype-today-progress-web-next/home-1440.png
+artifacts/prototype-today-progress-web-next/report.json
+artifacts/prototype-today-progress-web-next/recent-stale-390.json
+artifacts/prototype-today-progress-web-next/recent-stale-1440.json
 ```
 
-最近一次本地验证（2026-10-31）：
+最近一次本地验证（2026-10-31，今日进度条迭代）：
 
 ```bash
-npm install @fontsource/nunito          # 1 package
-npm run build                           # tsc --noEmit + vite build 通过
-npm run test                            # 10 个测试文件，33 个测试通过
+npm run typecheck                       # tsc --noEmit 通过
+npm test                                # 12 个测试文件，46 个测试通过
+npm run build                           # tsc --noEmit + vite build 通过，产物写入 web-next/
 GHOST_LEAGUE_TOKEN_FILE=/path/to/token \
-  npx playwright test e2e/home.spec.ts  # 1 passed
+  npx playwright test e2e/today-progress.spec.ts  # 4 passed
+GHOST_LEAGUE_TOKEN_FILE=/path/to/token \
+  npx playwright test e2e/home.spec.ts            # 1 passed
 ```
 
-Playwright 两个视口均无横向 overflow、无 console/page error、无小于 44px 的可见触达
-元素；Nunito 四个字重均实际加载；完整榜单 15 行（8 行已打卡、7 行未打卡），当前用户
-第 11 名、52 宝石，首页 5 行，前三名颜色分别为金/银/铜，当前用户行有青色左条；
-`artifacts/` 不提交，旧 `web/` 与 live 数据均未修改。
+`today-progress.spec.ts` 的 live capture 在 390×844 与 1440×1000 两个视口均读到
+`today_xp=129`、`today_minutes=12`，当前档位为「第 2 档 · 30 分钟」，还差 171 XP；
+六档标签为 10/30/60/120/180/240 分钟，溢出为 0，console/page error 为空。确定性
+fixture 覆盖最近/非最近更新与 reduced-motion，均通过。截图与 JSON 见上面的
+`artifacts/prototype-today-progress-web-next/`；`artifacts/` 不提交，旧 `web/` 与 live
+数据均未修改。
 
 本轮后端改动：`player_status` 增加 `lifetime_xp`（`weekly_scores` 的 `SUM(xp)`），
 `/v1/me/status` 与 badge/widget 用的 `status_for_user` 都返回 `gems = lifetime_xp // 10`。

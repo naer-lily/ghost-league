@@ -57,7 +57,7 @@ describe('HomePage real data', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders one player row, a hero ring and a five-row flat board', async () => {
+  it('renders one player row, the six-tier progress bar and a five-row flat board', async () => {
     const snapshot = makeSnapshot()
     snapshot.standings.standings[0]!.avatar_url = '/avatars/ch-xkein'
     vi.stubGlobal('fetch', mockSnapshot(snapshot))
@@ -77,6 +77,24 @@ describe('HomePage real data', () => {
       screen.getByTestId('tier-icon').querySelector('img')?.getAttribute('src'),
     ).toBe('/assets/tiers/material/bronze.png')
     expect(screen.getByText('129')).toBeInTheDocument()
+    expect(screen.getByText('今日进度')).toBeInTheDocument()
+    expect(screen.getByText('今日 XP')).toBeInTheDocument()
+    expect(screen.getByText('今日分钟')).toBeInTheDocument()
+    expect(screen.getByText('12', { selector: 'span' })).toBeInTheDocument()
+    expect(screen.getByText('第 2 档 · 30 分钟')).toBeInTheDocument()
+    expect(screen.getByText('还差 171 XP')).toBeInTheDocument()
+    const tiers = screen.getAllByTestId('today-tier')
+    expect(tiers.map((tier) => tier.getAttribute('data-minutes'))).toEqual([
+      '10',
+      '30',
+      '60',
+      '120',
+      '180',
+      '240',
+    ])
+    expect(tiers[0]).toHaveAttribute('data-state', 'complete')
+    expect(tiers[1]).toHaveAttribute('data-state', 'current')
+    expect(tiers[5]).toHaveAttribute('data-state', 'future')
     expect(screen.getByLabelText('本周名次 第 10 名')).toBeInTheDocument()
     expect(screen.getByTestId('board-rank')).toHaveTextContent('10/15')
     expect(screen.getAllByText('524').length).toBeGreaterThan(0)
@@ -106,9 +124,15 @@ describe('HomePage real data', () => {
     )
     expect(heroBadge).toBeDefined()
 
-    expect(
-      screen.getByRole('progressbar', { name: '今日 XP 目标' }),
-    ).toHaveAttribute('aria-valuenow', '100')
+    const progressbar = screen.getByRole('progressbar', {
+      name: '今日 XP 目标',
+    })
+    expect(progressbar).toHaveAttribute('aria-valuemin', '0')
+    expect(progressbar).toHaveAttribute('aria-valuemax', '2400')
+    expect(progressbar).toHaveAttribute('aria-valuenow', '129')
+    expect(progressbar.getAttribute('aria-valuetext')).toBe(
+      '129 XP，第 2 档 30 分钟，还差 171 XP',
+    )
     expect(
       screen.queryByRole('heading', { name: '今日 XP' }),
     ).not.toBeInTheDocument()

@@ -6,34 +6,13 @@
 
 .today {
   position: relative;
-  display: grid;
-  place-items: center;
-  padding: 6px 0 22px;
-}
-
-.today::before {
-  content: "";
-  position: absolute;
-  width: 250px;
-  height: 250px;
-  border-radius: 50%;
-  background: radial-gradient(circle, var(--tier-soft), transparent 68%);
-  opacity: 0.85;
-  pointer-events: none;
-}
-
-.today > * {
-  position: relative;
-  z-index: 1;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 0 18px;
 }
 
 @media (min-width: 720px) {
   .today {
-    padding: 10px 0 30px;
-  }
-
-  .today::before {
-    width: 300px;
-    height: 300px;
+    padding: 8px 0 24px;
   }
 }

@@ -208,6 +208,9 @@ export interface HomeView {
   hasGroup: boolean
   emptyBoard: boolean
   todayXp: number
+  todaySeconds: number
+  todayMinutes: number
+  todayUpdatedAt: string
   goalXp: number
   todayRemaining: number
   todayRatio: number
@@ -241,6 +244,7 @@ export function buildHomeView(
   const tier = tierMeta(status.tier || profile.tier)
   const group = status.group ?? standings.group
   const todayXp = Math.max(0, Math.trunc(status.today_xp))
+  const todaySeconds = Math.max(0, Math.trunc(status.today_seconds))
   const goalXp = Math.max(1, Math.trunc(status.required_xp) || 100)
   const todayRatio = Math.min(1, todayXp / goalXp)
   const checkedIn = Boolean(status.checkin)
@@ -274,6 +278,9 @@ export function buildHomeView(
     hasGroup: Boolean(group),
     emptyBoard: !group || standings.standings.length === 0,
     todayXp,
+    todaySeconds,
+    todayMinutes: Math.floor(todaySeconds / 60),
+    todayUpdatedAt: status.updated_at,
     goalXp,
     todayRemaining,
     todayRatio,
