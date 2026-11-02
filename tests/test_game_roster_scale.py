@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 from ghost_league.game.roster import (
@@ -325,3 +326,39 @@ def test_old_league_db_without_last_seen_week_migrates_without_data_loss(tmp_pat
     reopened = GameStore(path, epoch_reason="migration")
     assert reopened.get_player("ai-old")["last_seen_week"] == WEEK_2
     assert reopened.get_opponent_week_plan("ai-old", WEEK_2) is not None
+
+
+def test_weekly_ai_order_is_stable_within_a_week_and_rotates_next_week(
+    tmp_path,
+) -> None:
+    store = make_store(tmp_path)
+    rows = make_rows(120)
+
+    def human_ai_order(week: str, at: str) -> tuple[str, ...]:
+        groups = ensure_all_groups(
+            store, week, now=datetime.fromisoformat(at)
+        )
+        human_group = next(
+            group
+            for group in groups
+            if any(member["player_id"] == "human-1" for member in group["members"])
+        )
+        return tuple(
+            sorted(
+                member["player_id"]
+                for member in human_group["members"]
+                if member["kind"] == "ai"
+            )
+        )
+
+    sync(store, WEEK_1, rows, at=AT_1)
+    add_human(store, "human-1", WEEK_1, AT_1)
+    week_one = human_ai_order(WEEK_1, AT_1)
+    assert week_one == human_ai_order(WEEK_1, AT_1)
+
+    sync(store, WEEK_2, rows, at=AT_2)
+    add_human(store, "human-1", WEEK_2, AT_2)
+    week_two = human_ai_order(WEEK_2, AT_2)
+
+    assert len(week_one) == len(week_two) == 13
+    assert week_one != week_two

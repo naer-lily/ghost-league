@@ -140,6 +140,7 @@ Ghost 只把 profile 当**展示层快照**：不参与计分、分组、难度�
 
 - Ghost 把本周 roster 中的 player 与本地真人合并去重，按 tier 归类；
 - 每组最多 15 人，先定组数 `ceil(N/15)`，再用 `balanced_group_sizes` 均分；
+- AI 在同一 tier 内按周哈希排序后填组，同周重复读取不变，跨周会换组，避免每周都是同一批对手；
 - 真人优先进入满组；不足 15 人时才允许 14/15 人混合小组；只有 1 人时标记 unplaced；
 - AI-only tier 也建组，不因没有真人而跳过；
 - 周结算在每个组内独立进行，配额为 `max(1, round_half_up(group_size * 0.2))`；

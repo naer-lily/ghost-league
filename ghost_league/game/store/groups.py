@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from datetime import date, datetime
 from typing import Any
@@ -15,6 +16,14 @@ from ..rules import (
     next_tier,
 )
 from .core import SOURCE_CHANNEL, _row_to_dict
+
+
+def _group_order_key(week_iso: str, tier: str, player_id: str) -> bytes:
+    """Stable per-week AI order so groups rotate without unseeded randomness."""
+
+    payload = f"ghost-league-groups-v1\x00{week_iso}\x00{tier}\x00{player_id}"
+    return hashlib.blake2b(payload.encode("utf-8"), digest_size=16).digest()
+
 
 class GroupsMixin:
     """Balanced grouping and group membership queries."""
@@ -188,7 +197,9 @@ class GroupsMixin:
         target size, which keeps their group full and avoids stranding them in
         a tail group.  ``spread_humans=True`` distributes them round-robin
         across the larger groups instead.  In both modes every group still
-        gets its pre-computed balanced size.
+        gets its pre-computed balanced size.  AI order is rotated by a stable
+        per-week hash, so the same tier does not put the same AI together in
+        consecutive weeks.
 
         Repeating the call reconciles memberships in place.  Unchanged groups
         keep their ids; a player is never left in more than one group for the
@@ -287,7 +298,12 @@ class GroupsMixin:
             desired_by_tier: dict[str, list[list[str]]] = {}
             for tier in TIERS:
                 tier_humans = sorted(humans_by_tier.get(tier, []))
-                tier_ai = sorted(ai_by_tier.get(tier, []))
+                tier_ai = sorted(
+                    ai_by_tier.get(tier, []),
+                    key=lambda player_id: _group_order_key(
+                        week_iso, tier, player_id
+                    ),
+                )
                 sizes = balanced_group_sizes(len(tier_humans) + len(tier_ai))
                 if not sizes:
                     desired_by_tier[tier] = []
