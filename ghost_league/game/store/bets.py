@@ -390,7 +390,7 @@ class BetsMixin:
         ``checkins.xp`` is the real daily XP snapshot, but its row keeps the
         first check-in timestamp while its XP is updated later.  For a late
         settlement we therefore reconstruct a verified day from the activity
-        events strictly before 10:30.  Repaired days are final and are used as
+        events strictly before 22:30.  Repaired days are final and are used as
         stored.
         """
 

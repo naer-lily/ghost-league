@@ -144,7 +144,7 @@ function PlacedBet({ bet }: PlacedBetProps) {
       </dl>
       {bet.kind === 'daily' ? (
         <p className={styles.placedCopy}>
-          目标 +{formatXp(bet.target_margin)} XP · 09:00 锁注 · 10:30 结算
+          目标 +{formatXp(bet.target_margin)} XP · 21:00 锁注 · 22:30 结算
         </p>
       ) : (
         <p className={styles.placedCopy}>
@@ -374,7 +374,7 @@ export function RivalBetDialog({
                 </div>
                 <p className={styles.deadline}>
                   <Clock3 size={14} aria-hidden="true" />
-                  09:00 锁注 · 10:30 结算
+                  21:00 锁注 · 22:30 结算
                 </p>
               </>
             ) : null}

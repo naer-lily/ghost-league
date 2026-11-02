@@ -22,8 +22,8 @@ from ghost_league.schedule import TZ
 WEEK = "2026-11-02"
 MONDAY = datetime(2026, 11, 2, 8, 0, 0, tzinfo=TZ)
 MONDAY_BEFORE_LOCK = datetime(2026, 11, 2, 8, 59, 59, tzinfo=TZ)
-MONDAY_LOCK = datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ)
-MONDAY_SETTLE = datetime(2026, 11, 2, 10, 30, 0, tzinfo=TZ)
+MONDAY_LOCK = datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ)
+MONDAY_SETTLE = datetime(2026, 11, 2, 22, 30, 0, tzinfo=TZ)
 TUESDAY = datetime(2026, 11, 3, 0, 0, 0, tzinfo=TZ)
 NEXT_MONDAY = datetime(2026, 11, 9, 0, 5, 0, tzinfo=TZ)
 
@@ -216,10 +216,10 @@ def test_bet_requires_rival_and_enough_diamonds(tmp_path: Path) -> None:
 
 def test_daily_bet_window_is_minute_precise() -> None:
     assert daily_bet_locks_at("2026-11-02") == datetime(
-        2026, 11, 2, 9, 0, 0, tzinfo=TZ
+        2026, 11, 2, 21, 0, 0, tzinfo=TZ
     )
     assert daily_bet_settles_at("2026-11-02") == datetime(
-        2026, 11, 2, 10, 30, 0, tzinfo=TZ
+        2026, 11, 2, 22, 30, 0, tzinfo=TZ
     )
 
 
@@ -259,7 +259,7 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
     assert store.get_diamond_balance("h3", now=MONDAY) == 1000
 
 
-def test_daily_settlement_waits_for_1030_and_uses_1030_xp(
+def test_daily_settlement_waits_for_2230_and_uses_2230_xp(
     tmp_path: Path,
 ) -> None:
     store = make_store(tmp_path)
@@ -269,21 +269,21 @@ def test_daily_settlement_waits_for_1030_and_uses_1030_xp(
         "h1",
         event_id="h1-early",
         seconds=1200,
-        occurred_at=datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ),
+        occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     add_activity(
         store,
         "h2",
         event_id="h2-early",
         seconds=600,
-        occurred_at=datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ),
+        occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     store.place_bet(
         "h1", "daily", None, 50, now=MONDAY, request_id="daily-win"
     )
 
     early = store.settle_daily_bets(
-        "2026-11-02", now=datetime(2026, 11, 2, 10, 29, 0, tzinfo=TZ)
+        "2026-11-02", now=datetime(2026, 11, 2, 22, 29, 0, tzinfo=TZ)
     )
     assert early["status"] == "skipped"
     assert store.bets_for("h1", now=MONDAY)["daily"]["status"] == "placed"
@@ -296,18 +296,18 @@ def test_daily_settlement_waits_for_1030_and_uses_1030_xp(
     assert store.get_diamond_balance("h1", now=MONDAY_SETTLE) == 1030
 
     again = store.settle_daily_bets(
-        "2026-11-02", now=datetime(2026, 11, 2, 10, 35, 0, tzinfo=TZ)
+        "2026-11-02", now=datetime(2026, 11, 2, 22, 35, 0, tzinfo=TZ)
     )
     assert again["settled"] == 0
     assert (
         store.get_diamond_balance(
-            "h1", now=datetime(2026, 11, 2, 10, 35, 0, tzinfo=TZ)
+            "h1", now=datetime(2026, 11, 2, 22, 35, 0, tzinfo=TZ)
         )
         == 1030
     )
 
 
-def test_daily_settlement_ignores_activity_after_1030(tmp_path: Path) -> None:
+def test_daily_settlement_ignores_activity_after_2230(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     make_rival_pair(store, "h1", "h2")
     add_activity(
@@ -315,38 +315,38 @@ def test_daily_settlement_ignores_activity_after_1030(tmp_path: Path) -> None:
         "h1",
         event_id="h1-before",
         seconds=1200,
-        occurred_at=datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ),
+        occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     add_activity(
         store,
         "h2",
         event_id="h2-before",
         seconds=600,
-        occurred_at=datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ),
+        occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     store.place_bet(
         "h1", "daily", None, 300, now=MONDAY, request_id="daily-cutoff"
     )
 
-    # A late burst would make the final day XP much higher, but the 10:30
+    # A late burst would make the final day XP much higher, but the 22:30
     # snapshot must not see it.
     add_activity(
         store,
         "h1",
         event_id="h1-late",
         seconds=3000,
-        occurred_at=datetime(2026, 11, 2, 11, 0, 0, tzinfo=TZ),
-        now=datetime(2026, 11, 2, 11, 0, 0, tzinfo=TZ),
+        occurred_at=datetime(2026, 11, 2, 23, 0, 0, tzinfo=TZ),
+        now=datetime(2026, 11, 2, 23, 0, 0, tzinfo=TZ),
     )
     settled = store.settle_daily_bets(
-        "2026-11-02", now=datetime(2026, 11, 2, 11, 30, 0, tzinfo=TZ)
+        "2026-11-02", now=datetime(2026, 11, 2, 23, 30, 0, tzinfo=TZ)
     )
     assert settled["results"][0]["status"] == "lost"
     assert settled["results"][0]["result_diff"] == 100
     assert settled["results"][0]["payout"] == 0
     assert (
         store.get_diamond_balance(
-            "h1", now=datetime(2026, 11, 2, 11, 30, 0, tzinfo=TZ)
+            "h1", now=datetime(2026, 11, 2, 23, 30, 0, tzinfo=TZ)
         )
         == 1000
     )
@@ -360,14 +360,14 @@ def test_daily_loss_and_weekly_draw_refund(tmp_path: Path) -> None:
         "daily",
         event_id="daily-early",
         seconds=600,
-        occurred_at=datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ),
+        occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     add_activity(
         store,
         "daily-rival",
         event_id="daily-rival-early",
         seconds=1200,
-        occurred_at=datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ),
+        occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     store.place_bet(
         "daily", "daily", None, 50, now=MONDAY, request_id="daily-loss"
@@ -483,14 +483,14 @@ def test_rival_auto_and_daily_bet_jobs(tmp_path: Path) -> None:
         "h1",
         event_id="job-h1",
         seconds=1200,
-        occurred_at=datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ),
+        occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     add_activity(
         daily_store,
         "h2",
         event_id="job-h2",
         seconds=600,
-        occurred_at=datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ),
+        occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     daily_store.place_bet(
         "h1", "daily", None, 50, now=MONDAY, request_id="job-daily"

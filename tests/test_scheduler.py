@@ -322,7 +322,7 @@ def test_wednesday_skips_expired_source_and_roster_but_keeps_settle(
     assert JOB_WEEKLY_SETTLE in names
 
 
-def test_0930_does_not_settle_todays_daily_bet_but_1031_does(
+def test_2130_does_not_settle_todays_daily_bet_but_2231_does(
     tmp_path: Path,
 ) -> None:
     store = make_store(tmp_path)
@@ -359,7 +359,7 @@ def test_0930_does_not_settle_todays_daily_bet_but_1031_does(
 
     asyncio.run(
         scheduler.run_once(
-            now=datetime(2026, 11, 2, 9, 30, tzinfo=TZ),
+            now=datetime(2026, 11, 2, 21, 30, tzinfo=TZ),
             catchup=True,
         )
     )
@@ -368,12 +368,12 @@ def test_0930_does_not_settle_todays_daily_bet_but_1031_does(
 
     asyncio.run(
         scheduler.run_once(
-            now=datetime(2026, 11, 2, 10, 31, tzinfo=TZ),
+            now=datetime(2026, 11, 2, 22, 31, tzinfo=TZ),
             catchup=True,
         )
     )
     settled = store.bets_for(
-        "h1", now=datetime(2026, 11, 2, 10, 31, tzinfo=TZ)
+        "h1", now=datetime(2026, 11, 2, 22, 31, tzinfo=TZ)
     )["daily"]
     assert settled is not None
     assert settled["status"] == "won"
@@ -420,7 +420,7 @@ def test_daily_catchup_only_scans_past_days_with_pending_bets(
     )
     asyncio.run(
         scheduler.run_once(
-            now=datetime(2026, 11, 2, 9, 30, tzinfo=TZ),
+            now=datetime(2026, 11, 2, 21, 30, tzinfo=TZ),
             catchup=True,
         )
     )
@@ -429,7 +429,7 @@ def test_daily_catchup_only_scans_past_days_with_pending_bets(
     )["daily"]
     assert settled is not None
     assert settled["status"] == "won"
-    # Today is not due at 09:30, so only the overdue day gets a run record.
+    # Today is not due at 21:30, so only the overdue day gets a run record.
     assert store.get_job_run(JOB_DAILY_BETS, "2026-11-02") is None
     assert store.get_job_run(JOB_DAILY_BETS, "2026-11-01") is not None
 

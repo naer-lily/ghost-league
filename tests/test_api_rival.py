@@ -132,8 +132,8 @@ class RivalStateAPITests(RivalAPITestBase):
             payload["bet_windows"],
             {
                 "weekly_locks_at": "2026-11-02T23:59:59+08:00",
-                "daily_locks_at": "2026-11-02T09:00:00+08:00",
-                "daily_settles_at": "2026-11-02T10:30:00+08:00",
+                "daily_locks_at": "2026-11-02T21:00:00+08:00",
+                "daily_settles_at": "2026-11-02T22:30:00+08:00",
             },
         )
         keys: set[str] = set()
@@ -401,10 +401,10 @@ class BetAPITests(RivalAPITestBase):
             insufficient_store.get_diamond_balance("owner", now=NOW), 10
         )
 
-    def test_daily_bet_locks_at_0900(self) -> None:
+    def test_daily_bet_locks_at_2100(self) -> None:
         client = self.client()
         self.select_first(client)
-        self.clock["now"] = datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ)
+        self.clock["now"] = datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ)
         response = client.post(
             "/v1/me/bets",
             headers=auth(),

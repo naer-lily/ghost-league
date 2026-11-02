@@ -16,8 +16,8 @@ const NOW = new Date('2026-11-02T20:00:00+08:00')
 function windows(overrides: Partial<BetWindows> = {}): BetWindows {
   return {
     weekly_locks_at: '2026-11-02T23:59:59+08:00',
-    daily_locks_at: '2026-11-03T09:00:00+08:00',
-    daily_settles_at: '2026-11-03T10:30:00+08:00',
+    daily_locks_at: '2026-11-03T21:00:00+08:00',
+    daily_settles_at: '2026-11-03T22:30:00+08:00',
     ...overrides,
   }
 }

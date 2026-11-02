@@ -509,7 +509,7 @@ function DuelView({
             >
               {dailyClosed ? '今天的注已截止' : formatCountdown(windows.daily_locks_at, now)}
             </strong>
-            <span className={styles.timeHint}>09:00 锁注 · 10:30 结算</span>
+            <span className={styles.timeHint}>21:00 锁注 · 22:30 结算</span>
           </div>
         </div>
 

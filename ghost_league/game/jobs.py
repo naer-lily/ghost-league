@@ -162,7 +162,7 @@ def run_daily_bets(
     day: date | str | None = None,
     at: datetime | str | None = None,
 ) -> dict[str, Any]:
-    """Settle one day's daily bets once its 10:30 cutoff has passed.
+    """Settle one day's daily bets once its 22:30 cutoff has passed.
 
     ``day`` defaults to the local date of ``at``.  The scheduler passes an
     explicit date when catching up a missed day.
@@ -213,7 +213,7 @@ def build_parser() -> argparse.ArgumentParser:
     rival_auto.add_argument("--db", default=str(DEFAULT_DB_PATH))
     rival_auto.add_argument("--at")
     daily_bets = sub.add_parser(
-        "daily-bets", help="settle one day's daily bets at 10:30"
+        "daily-bets", help="settle one day's daily bets at 22:30"
     )
     daily_bets.add_argument("--db", default=str(DEFAULT_DB_PATH))
     daily_bets.add_argument(

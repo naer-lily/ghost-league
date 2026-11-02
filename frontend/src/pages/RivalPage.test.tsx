@@ -462,7 +462,7 @@ describe('RivalPage', () => {
     )
   })
 
-  it('disables the daily bet after 09:00 and shows the real closed copy', async () => {
+  it('disables the daily bet after 21:00 and shows the real closed copy', async () => {
     const user = userEvent.setup()
     const closed = makeState({
       bet_windows: {

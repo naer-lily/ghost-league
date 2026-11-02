@@ -21,11 +21,11 @@ WEEK_SELECT_OPEN_OFFSET: Final = timedelta(minutes=5)
 WEEK_LOCK_OFFSET: Final = timedelta(days=1)
 AUTO_SELECT_OFFSET: Final = timedelta(days=1)
 
-# Weekly bets share the Monday window.  Daily bets lock at 09:00 and settle at
-# 10:30 local time so the result only uses the morning check-in window.
+# Weekly bets share the Monday window.  Daily bets lock at 21:00 and settle at
+# 22:30 local time so the result uses the evening check-in window.
 WEEKLY_BET_LOCK_OFFSET: Final = timedelta(days=1)
-DAILY_BET_LOCK_TIME: Final = time(9, 0)
-DAILY_BET_SETTLE_TIME: Final = time(10, 30)
+DAILY_BET_LOCK_TIME: Final = time(21, 0)
+DAILY_BET_SETTLE_TIME: Final = time(22, 30)
 
 WEEKLY_STAKES: Final[tuple[int, ...]] = (20, 40, 60)
 WEEKLY_ODDS: Final = 2.0
@@ -51,7 +51,7 @@ DAILY_TARGET_PAYOUTS: Final[dict[int, int]] = {
 PROJECTION_POWER_SCALE: Final = 2000
 PROJECTION_WEEK_STEP: Final = 100
 PROJECTION_DAY_STEP: Final = 10
-# Extrapolate to the 10:30 daily settlement cutoff, expressed in hours.
+# Extrapolate to the 22:30 daily settlement cutoff, expressed in hours.
 PROJECTION_DAY_WINDOW_HOURS: Final = (
     DAILY_BET_SETTLE_TIME.hour + DAILY_BET_SETTLE_TIME.minute / 60
 )
@@ -243,9 +243,9 @@ def projected_week_xp(
 
 
 def projected_today_xp(today_xp: int, now: datetime) -> int:
-    """Extrapolate today's XP to the 10:30 cutoff, rounded to tens.
+    """Extrapolate today's XP to the 22:30 cutoff, rounded to tens.
 
-    The elapsed fraction is measured against the 10.5-hour window and clamped
+    The elapsed fraction is measured against the 22.5-hour window and clamped
     to at least 20% so a very early single event does not explode the estimate.
     """
 
