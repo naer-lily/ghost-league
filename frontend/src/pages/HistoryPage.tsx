@@ -88,7 +88,7 @@ export function HistoryPage() {
   if (history.isPending) {
     return (
       <div className={styles.page}>
-        <HistoryHead onRefresh={() => void history.refetch()} refreshing />
+        <HistoryHead />
         <HistoryLoading />
       </div>
     )
@@ -97,7 +97,7 @@ export function HistoryPage() {
   if (history.isError) {
     return (
       <div className={styles.page}>
-        <HistoryHead onRefresh={() => void history.refetch()} refreshing />
+        <HistoryHead />
         <section className={styles.state} role="alert">
           <span className={styles.stateIcon} aria-hidden="true">
             <History size={26} />
@@ -126,7 +126,7 @@ export function HistoryPage() {
   return (
     <PullToRefresh onRefresh={refresh}>
       <div className={styles.page}>
-        <HistoryHead onRefresh={() => void refresh()} refreshing={false} />
+        <HistoryHead />
 
         <div
           className={styles.filters}
@@ -194,13 +194,7 @@ export function HistoryPage() {
   )
 }
 
-function HistoryHead({
-  onRefresh,
-  refreshing,
-}: {
-  onRefresh: () => void
-  refreshing: boolean
-}) {
+function HistoryHead() {
   return (
     <header className={styles.head}>
       <div className={styles.headText}>
@@ -210,15 +204,6 @@ function HistoryHead({
           打卡、下注、宿敌、星星和周结算，按时间倒序排列。
         </p>
       </div>
-      <button
-        type="button"
-        className={styles.refresh}
-        onClick={onRefresh}
-        disabled={refreshing}
-        aria-label="刷新历史记录"
-      >
-        <RotateCcw size={18} aria-hidden="true" />
-      </button>
     </header>
   )
 }
