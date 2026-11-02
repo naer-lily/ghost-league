@@ -432,6 +432,11 @@
   border-radius: 11px;
 }
 
+.otherIcon {
+  background: rgba(206, 130, 255, 0.14);
+  color: var(--purple);
+}
+
 .emberIcon {
   background: var(--orange-soft);
   color: var(--orange);
@@ -517,6 +522,76 @@
   .starGrid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+}
+
+/* ------------------------------------------------------------------ shop */
+.shopSection {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.shopCategories {
+  display: grid;
+  gap: 12px;
+}
+
+.shopCategory {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-tile);
+  background: rgba(13, 23, 28, 0.35);
+}
+
+.categoryHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 10px;
+  min-width: 0;
+}
+
+.categoryIcon {
+  display: grid;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--surface-3);
+  color: var(--muted);
+}
+
+.categoryText {
+  flex: 1;
+  min-width: 0;
+}
+
+.categoryText h3 {
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.categoryText p {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.collectionActions {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.collectionActions > .button {
+  min-height: 40px;
+  padding: 8px 13px;
+  font-size: 0.74rem;
 }
 
 /* --------------------------------------------------------------- tabs */

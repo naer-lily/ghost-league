@@ -8,7 +8,7 @@ import {
   Star,
   Timer,
 } from 'lucide-react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { useState } from 'react'
 import {
   createRequestId,
@@ -16,10 +16,12 @@ import {
   useHomeSnapshot,
   usePurchaseShopItem,
   useShopCatalog,
+  useUpdateLoadout,
 } from '../api/queries'
 import type {
   CollectionItem,
   CollectionTitle,
+  LoadoutField,
   ShopItem,
   Star as StarModel,
 } from '../api/types'
@@ -59,6 +61,64 @@ const TABS: ReadonlyArray<{
   { id: 'other', label: '其他', icon: Package },
 ]
 
+const SLOT_FIELDS: Record<string, LoadoutField> = {
+  frame: 'frame_id',
+  backdrop: 'backdrop_id',
+  badge_accent: 'badge_accent_id',
+}
+
+type ShopCategoryId = 'stars' | 'embers' | 'cap' | 'other'
+
+interface ShopCategory {
+  id: ShopCategoryId
+  label: string
+  description: string
+  icon: typeof Star
+  items: ShopItem[]
+}
+
+function groupShopItems(items: ShopItem[]): ShopCategory[] {
+  const categories: ShopCategory[] = [
+    {
+      id: 'stars',
+      label: '星星',
+      description: '抽取随机星体，每次抽取的结果都在抽取后揭晓。',
+      icon: Star,
+      items: items.filter(
+        (item) => item.kind === 'star' || item.kind === 'seasonal_star',
+      ),
+    },
+    {
+      id: 'embers',
+      label: '余烬',
+      description: '补签等操作需要的消耗品。',
+      icon: Flame,
+      items: items.filter((item) => item.kind === 'ember'),
+    },
+    {
+      id: 'cap',
+      label: '仓库上限',
+      description: '提升仓库能保存的钻石上限。',
+      icon: Package,
+      items: items.filter((item) => item.kind === 'cap'),
+    },
+    {
+      id: 'other',
+      label: '其他商品',
+      description: '商店里的其他通用物品。',
+      icon: Package,
+      items: items.filter(
+        (item) =>
+          item.kind !== 'star' &&
+          item.kind !== 'seasonal_star' &&
+          item.kind !== 'ember' &&
+          item.kind !== 'cap',
+      ),
+    },
+  ]
+  return categories.filter((category) => category.items.length > 0)
+}
+
 interface DrawEntryProps {
   item: ShopItem
   diamonds: number
@@ -93,7 +153,7 @@ function DrawEntry({
   return (
     <article
       className={styles.drawCard}
-      data-testid={`shop-item-${item.kind}`}
+      data-testid={`shop-item-${item.id}`}
       data-available={item.available ? 'true' : 'false'}
     >
       <div className={styles.drawHead}>
@@ -167,6 +227,108 @@ function DrawEntry({
   )
 }
 
+interface ProductCardProps {
+  item: ShopItem
+  diamonds: number
+  emberBalance: number
+  emberCap: number
+  diamondCap: number
+  diamondCapLevel: number
+  pending: boolean
+  pendingItemId: string | undefined
+  onBuy: (item: ShopItem) => void
+}
+
+function ProductCard({
+  item,
+  diamonds,
+  emberBalance,
+  emberCap,
+  diamondCap,
+  diamondCapLevel,
+  pending,
+  pendingItemId,
+  onBuy,
+}: ProductCardProps) {
+  const shortfall = Math.max(0, item.price_diamonds - diamonds)
+  const unavailable = !item.available
+  const isPending = pending && pendingItemId === item.id
+  const cooldown = formatRemaining(item.cooldown_until)
+  const capReady =
+    item.kind !== 'cap' ||
+    (item.required_cap_level ?? diamondCapLevel) === diamondCapLevel
+  const Icon = item.kind === 'ember' ? Flame : Package
+  const iconClass =
+    item.kind === 'ember'
+      ? styles.emberIcon
+      : item.kind === 'cap'
+        ? styles.capIcon
+        : styles.otherIcon
+
+  let label = '购买'
+  if (item.kind === 'ember') label = '兑换余烬'
+  else if (item.kind === 'cap') label = '升级仓库'
+  if (isPending) label = '购买中…'
+  else if (!capReady) label = '等级不匹配'
+  else if (unavailable) label = '暂不可用'
+  else if (cooldown) label = '冷却中'
+
+  const stats =
+    item.kind === 'ember'
+      ? `当前余烬 ${formatNumber(emberBalance)} / ${formatNumber(emberCap)}`
+      : item.kind === 'cap'
+        ? `当前仓库 ${diamondCapLevel} 级 · 上限 ${formatNumber(diamondCap)}`
+        : `已拥有 ${formatNumber(item.owned_quantity)}`
+
+  return (
+    <article
+      className={styles.drawCard}
+      data-testid={`shop-item-${item.id}`}
+      data-available={item.available ? 'true' : 'false'}
+    >
+      <div className={styles.drawHead}>
+        <span
+          className={`${styles.drawIcon} ${iconClass}`}
+          aria-hidden="true"
+        >
+          <Icon size={20} />
+        </span>
+        <div className={styles.drawTitle}>
+          <h3>{item.name}</h3>
+        </div>
+        <span className={styles.price}>
+          <Diamond size={15} aria-hidden="true" />
+          {formatNumber(item.price_diamonds)}
+        </span>
+      </div>
+
+      <p className={styles.description}>{item.description}</p>
+
+      <div className={styles.chips}>
+        <span>{stats}</span>
+        {cooldown ? (
+          <span className={styles.cooldownChip}>
+            <Timer size={13} aria-hidden="true" />
+            {cooldown}
+          </span>
+        ) : null}
+      </div>
+
+      <button
+        type="button"
+        className="button button--primary button--full"
+        disabled={pending || unavailable || !capReady || shortfall > 0}
+        onClick={() => onBuy(item)}
+      >
+        {label}
+      </button>
+      {shortfall > 0 && !unavailable ? (
+        <p className={styles.shortfall}>还差 {formatNumber(shortfall)} 钻石</p>
+      ) : null}
+    </article>
+  )
+}
+
 function EmptyState({
   icon: Icon,
   title,
@@ -198,7 +360,7 @@ function CollectionState({
   error: Error | null
   retrying: boolean
   onRetry: () => void
-  children: React.ReactNode
+  children: ReactNode
 }) {
   if (pending) {
     return (
@@ -233,15 +395,21 @@ function CollectionState({
 }
 
 function CollectionRow({
+  id,
   name,
   description,
   meta,
   equipped,
+  pending,
+  onToggle,
 }: {
+  id: string
   name: string
   description: string
   meta: string
   equipped: boolean
+  pending: boolean
+  onToggle?: (() => void) | undefined
 }) {
   return (
     <li className={styles.collectionRow} data-equipped={equipped ? 'true' : undefined}>
@@ -250,40 +418,21 @@ function CollectionRow({
         <p>{description || '暂无描述'}</p>
         <small>{meta}</small>
       </div>
-      {equipped ? <span className={styles.equippedTag}>已装备</span> : null}
+      <div className={styles.collectionActions}>
+        {equipped ? <span className={styles.equippedTag}>已装备</span> : null}
+        {onToggle ? (
+          <button
+            type="button"
+            className="button button--secondary"
+            data-testid={`collection-action-${id}`}
+            disabled={pending}
+            onClick={onToggle}
+          >
+            {equipped ? '卸下' : '装备'}
+          </button>
+        ) : null}
+      </div>
     </li>
-  )
-}
-
-function FrameList({ items }: { items: CollectionItem[] }) {
-  return (
-    <ul className={styles.collectionList} aria-label="边框列表">
-      {items.map((item) => (
-        <CollectionRow
-          key={item.id}
-          name={item.name}
-          description={item.description}
-          meta={`获得于 ${formatAcquiredAt(item.awarded_at)}`}
-          equipped={item.equipped}
-        />
-      ))}
-    </ul>
-  )
-}
-
-function TitleList({ titles }: { titles: CollectionTitle[] }) {
-  return (
-    <ul className={styles.collectionList} aria-label="称号列表">
-      {titles.map((title) => (
-        <CollectionRow
-          key={title.id}
-          name={title.name}
-          description={title.description}
-          meta={`获得于 ${formatAcquiredAt(title.awarded_at)}`}
-          equipped={title.equipped}
-        />
-      ))}
-    </ul>
   )
 }
 
@@ -291,6 +440,7 @@ export function InventoryPage() {
   const home = useHomeSnapshot()
   const shop = useShopCatalog()
   const purchase = usePurchaseShopItem()
+  const updateLoadout = useUpdateLoadout()
   const notify = useUiStore((state) => state.notify)
   const [tab, setTab] = useState<InventoryTab>('stars')
   const collection = useCollection(tab !== 'stars')
@@ -339,29 +489,16 @@ export function InventoryPage() {
   }
 
   const items = shop.data ?? []
-  const drawItems = items.filter(
-    (item) => item.kind === 'star' || item.kind === 'seasonal_star',
-  )
-  const emberItem = items.find((item) => item.kind === 'ember')
-  const capItem = items.find((item) => item.kind === 'cap')
+  const shopCategories = groupShopItems(items)
   const pendingItemId = purchase.isPending
     ? purchase.variables?.itemId
     : undefined
   const stars = view.stars
   const emberBalance =
-    view.inventory.ember ?? emberItem?.owned_quantity ?? view.embersBalance
+    view.inventory.ember ??
+    items.find((item) => item.kind === 'ember')?.owned_quantity ??
+    view.embersBalance
   const emberCap = home.data.status.embers.cap
-  const emberCooldown = formatRemaining(emberItem?.cooldown_until ?? null)
-  const capReady =
-    capItem !== undefined &&
-    (capItem.required_cap_level ?? view.diamondCapLevel) ===
-      view.diamondCapLevel
-  const emberShortfall = emberItem
-    ? Math.max(0, emberItem.price_diamonds - view.diamonds)
-    : 0
-  const capShortfall = capItem
-    ? Math.max(0, capItem.price_diamonds - view.diamonds)
-    : 0
   const collectionItems = collection.data?.items ?? []
   const frames = collectionItems.filter((item) => item.slot === 'frame')
   const otherItems = collectionItems.filter((item) => item.slot !== 'frame')
@@ -389,7 +526,7 @@ export function InventoryPage() {
           if (result.star) {
             setDetailStar(null)
             setRevealStar(result.star)
-            notify('物品栏里多了一颗星。')
+            notify('物品里多了一颗星。')
           } else {
             setDrawError('这次没有拿到星星，请稍后再试。')
           }
@@ -399,7 +536,7 @@ export function InventoryPage() {
     )
   }
 
-  function handleSupply(item: ShopItem) {
+  function handlePurchase(item: ShopItem) {
     if (purchase.isPending) return
     setSupplyError(null)
     setDrawError(null)
@@ -407,9 +544,30 @@ export function InventoryPage() {
       { itemId: item.id, requestId: createRequestId() },
       {
         onSuccess: () => {
-          notify(item.kind === 'cap' ? '仓库已升级。' : '补给已兑换。')
+          notify(
+            item.kind === 'cap'
+              ? '仓库已升级。'
+              : item.kind === 'ember'
+                ? '补给已兑换。'
+                : '已购买。',
+          )
         },
         onError: (error) => setSupplyError(describeShopError(error)),
+      },
+    )
+  }
+
+  function handleToggle(
+    field: LoadoutField,
+    id: string,
+    name: string,
+    equipped: boolean,
+  ) {
+    if (updateLoadout.isPending) return
+    updateLoadout.mutate(
+      { field, value: equipped ? null : id, name },
+      {
+        onError: (error) => notify(describeApiError(error), 'error'),
       },
     )
   }
@@ -420,10 +578,10 @@ export function InventoryPage() {
 
       <section className={styles.hero} aria-labelledby="inventory-title">
         <div className={styles.heroText}>
-          <p className="eyebrow">收藏</p>
-          <h1 id="inventory-title">物品栏</h1>
+          <p className="eyebrow">物品 / 商店</p>
+          <h1 id="inventory-title">物品</h1>
           <p className={styles.heroCopy}>
-            星星、边框、称号和消耗品都收在这里；星星只是其中一类。
+            星星、边框、称号和其他物品都在这里；商店里的星星、余烬和仓库上限也只是商品类别。
           </p>
         </div>
         <div className={styles.wallet} data-testid="inventory-wallet">
@@ -471,46 +629,11 @@ export function InventoryPage() {
 
       {tab === 'stars' ? (
         <div className={styles.tabPanel} role="tabpanel" aria-label="星星">
-          <section className={styles.section} aria-labelledby="inventory-draw-title">
-            <div className={styles.sectionHead}>
-              <div>
-                <h2 id="inventory-draw-title">抽取星星</h2>
-                <p>每次抽取随机得到一颗星，结果在抽取后揭晓。</p>
-              </div>
-            </div>
-            {drawError ? (
-              <p className={styles.error} role="alert" data-testid="shop-draw-error">
-                {drawError}
-              </p>
-            ) : null}
-            {drawItems.length === 0 ? (
-              <EmptyState
-                icon={Star}
-                title="暂无可抽取的星星"
-                copy="商店暂时没有上架星星抽取。"
-              />
-            ) : (
-              <div className={styles.drawGrid}>
-                {drawItems.map((item) => (
-                  <DrawEntry
-                    key={item.id}
-                    item={item}
-                    diamonds={view.diamonds}
-                    seasonalOwned={seasonalOwned(item)}
-                    pending={purchase.isPending}
-                    pendingItemId={pendingItemId}
-                    onDraw={handleDraw}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-
           <section className={styles.section} aria-labelledby="inventory-stars-title">
             <div className={styles.sectionHead}>
               <div>
                 <h2 id="inventory-stars-title">我的星星</h2>
-                <p>已拥有的星星都在这里。</p>
+                <p>已拥有的星星都在这里；星星只是物品栏的一类。</p>
               </div>
               {stars.length > 0 ? (
                 <span className={styles.count}>{stars.length} 颗</span>
@@ -520,7 +643,7 @@ export function InventoryPage() {
               <EmptyState
                 icon={Star}
                 title="还没有星星"
-                copy="去上面抽一颗，抽到的星会放进物品栏。"
+                copy="去商店抽一颗，抽到的星会放进物品里。"
               />
             ) : (
               <div className={styles.starGrid} data-testid="star-library">
@@ -564,7 +687,7 @@ export function InventoryPage() {
             <div className={styles.sectionHead}>
               <div>
                 <h2 id="inventory-frames-title">边框</h2>
-                <p>通过里程碑获得的头像边框。</p>
+                <p>通过里程碑获得的头像边框，可以随时更换或卸下。</p>
               </div>
               {frames.length > 0 ? (
                 <span className={styles.count}>{frames.length} 个</span>
@@ -583,7 +706,33 @@ export function InventoryPage() {
                   copy="完成里程碑后，边框会出现在这里。"
                 />
               ) : (
-                <FrameList items={frames} />
+                <ul className={styles.collectionList} aria-label="边框列表">
+                  {frames.map((item) => {
+                    const field = SLOT_FIELDS[item.slot]
+                    return (
+                      <CollectionRow
+                        key={item.id}
+                        id={item.id}
+                        name={item.name}
+                        description={item.description}
+                        meta={`获得于 ${formatAcquiredAt(item.awarded_at)}`}
+                        equipped={item.equipped}
+                        pending={updateLoadout.isPending}
+                        onToggle={
+                          field
+                            ? () =>
+                                handleToggle(
+                                  field,
+                                  item.id,
+                                  item.name,
+                                  item.equipped,
+                                )
+                            : undefined
+                        }
+                      />
+                    )
+                  })}
+                </ul>
               )}
             </CollectionState>
           </section>
@@ -596,7 +745,7 @@ export function InventoryPage() {
             <div className={styles.sectionHead}>
               <div>
                 <h2 id="inventory-titles-title">称号</h2>
-                <p>比赛和里程碑解锁的称号。</p>
+                <p>比赛和里程碑解锁的称号，可以随时更换或卸下。</p>
               </div>
               {collection.data && collection.data.titles.length > 0 ? (
                 <span className={styles.count}>
@@ -617,7 +766,27 @@ export function InventoryPage() {
                   copy="参加联赛、保持连胜后，称号会自动解锁。"
                 />
               ) : (
-                <TitleList titles={collection.data?.titles ?? []} />
+                <ul className={styles.collectionList} aria-label="称号列表">
+                  {(collection.data?.titles ?? []).map((title: CollectionTitle) => (
+                    <CollectionRow
+                      key={title.id}
+                      id={title.id}
+                      name={title.name}
+                      description={title.description}
+                      meta={`获得于 ${formatAcquiredAt(title.awarded_at)}`}
+                      equipped={title.equipped}
+                      pending={updateLoadout.isPending}
+                      onToggle={() =>
+                        handleToggle(
+                          'title_id',
+                          title.id,
+                          title.name,
+                          title.equipped,
+                        )
+                      }
+                    />
+                  ))}
+                </ul>
               )}
             </CollectionState>
           </section>
@@ -630,7 +799,7 @@ export function InventoryPage() {
             <div className={styles.sectionHead}>
               <div>
                 <h2 id="inventory-other-title">其他物品</h2>
-                <p>背景、徽章底色和消耗品。</p>
+                <p>背景、徽章底色和消耗品；有装备槽的物品可以装备或卸下。</p>
               </div>
             </div>
             <CollectionState
@@ -647,18 +816,35 @@ export function InventoryPage() {
                 />
               ) : (
                 <ul className={styles.collectionList} aria-label="其他物品列表">
-                  {otherItems.map((item) => (
-                    <CollectionRow
-                      key={item.id}
-                      name={item.name}
-                      description={item.description}
-                      meta={`获得于 ${formatAcquiredAt(item.awarded_at)}`}
-                      equipped={item.equipped}
-                    />
-                  ))}
+                  {otherItems.map((item: CollectionItem) => {
+                    const field = SLOT_FIELDS[item.slot]
+                    return (
+                      <CollectionRow
+                        key={item.id}
+                        id={item.id}
+                        name={item.name}
+                        description={item.description}
+                        meta={`获得于 ${formatAcquiredAt(item.awarded_at)}`}
+                        equipped={item.equipped}
+                        pending={updateLoadout.isPending}
+                        onToggle={
+                          field
+                            ? () =>
+                                handleToggle(
+                                  field,
+                                  item.id,
+                                  item.name,
+                                  item.equipped,
+                                )
+                            : undefined
+                        }
+                      />
+                    )
+                  })}
                   {consumables.map(([key, quantity]) => (
                     <CollectionRow
                       key={key}
+                      id={key}
                       name={
                         key === 'ember'
                           ? '余烬'
@@ -671,137 +857,116 @@ export function InventoryPage() {
                       }
                       meta={`持有 ${formatNumber(quantity)}`}
                       equipped={false}
+                      pending={false}
                     />
                   ))}
                 </ul>
               )}
             </CollectionState>
           </section>
-
-          <section className={styles.section} aria-labelledby="inventory-supply-title">
-            <div className={styles.sectionHead}>
-              <div>
-                <h2 id="inventory-supply-title">补给</h2>
-                <p>余烬和仓库上限，用钻石兑换。</p>
-              </div>
-            </div>
-            {supplyError ? (
-              <p
-                className={styles.error}
-                role="alert"
-                data-testid="shop-supply-error"
-              >
-                {supplyError}
-              </p>
-            ) : null}
-            <div className={styles.supplyGrid}>
-              {emberItem ? (
-                <article className={styles.supplyCard} data-testid="shop-item-ember">
-                  <div className={styles.supplyHead}>
-                    <span
-                      className={`${styles.supplyIcon} ${styles.emberIcon}`}
-                      aria-hidden="true"
-                    >
-                      <Flame size={19} />
-                    </span>
-                    <div>
-                      <h3>{emberItem.name}</h3>
-                      <p>{emberItem.description}</p>
-                    </div>
-                  </div>
-                  <div className={styles.supplyStats}>
-                    <span>
-                      当前余烬 {formatNumber(emberBalance)} /{' '}
-                      {formatNumber(emberCap)}
-                    </span>
-                    <span>
-                      <Diamond size={14} aria-hidden="true" />
-                      {formatNumber(emberItem.price_diamonds)}
-                    </span>
-                    {emberCooldown ? (
-                      <span className={styles.cooldownChip}>
-                        <Timer size={13} aria-hidden="true" />
-                        剩余 {emberCooldown}
-                      </span>
-                    ) : null}
-                  </div>
-                  <button
-                    type="button"
-                    className="button button--secondary button--full"
-                    disabled={
-                      purchase.isPending ||
-                      !emberItem.available ||
-                      emberShortfall > 0
-                    }
-                    onClick={() => handleSupply(emberItem)}
-                  >
-                    {purchase.isPending && pendingItemId === emberItem.id
-                      ? '兑换中…'
-                      : emberCooldown
-                        ? '冷却中'
-                        : '兑换余烬'}
-                  </button>
-                  {emberShortfall > 0 ? (
-                    <p className={styles.shortfall}>
-                      还差 {formatNumber(emberShortfall)} 钻石
-                    </p>
-                  ) : null}
-                </article>
-              ) : null}
-
-              {capItem ? (
-                <article className={styles.supplyCard} data-testid="shop-item-cap">
-                  <div className={styles.supplyHead}>
-                    <span
-                      className={`${styles.supplyIcon} ${styles.capIcon}`}
-                      aria-hidden="true"
-                    >
-                      <Package size={19} />
-                    </span>
-                    <div>
-                      <h3>{capItem.name}</h3>
-                      <p>{capItem.description}</p>
-                    </div>
-                  </div>
-                  <div className={styles.supplyStats}>
-                    <span>
-                      当前仓库 {view.diamondCapLevel} 级 · 上限{' '}
-                      {formatNumber(view.diamondCap)}
-                    </span>
-                    <span>
-                      <Diamond size={14} aria-hidden="true" />
-                      {formatNumber(capItem.price_diamonds)}
-                    </span>
-                    {!capReady ? (
-                      <span className={styles.cooldownChip}>等级不匹配</span>
-                    ) : null}
-                  </div>
-                  <button
-                    type="button"
-                    className="button button--secondary button--full"
-                    disabled={
-                      purchase.isPending ||
-                      !capItem.available ||
-                      !capReady ||
-                      capShortfall > 0
-                    }
-                    onClick={() => handleSupply(capItem)}
-                  >
-                    {purchase.isPending && pendingItemId === capItem.id
-                      ? '升级中…'
-                      : '升级仓库'}
-                  </button>
-                  {capShortfall > 0 ? (
-                    <p className={styles.shortfall}>
-                      还差 {formatNumber(capShortfall)} 钻石
-                    </p>
-                  ) : null}
-                </article>
-              ) : null}
-            </div>
-          </section>
         </div>
       ) : null}
+
+      <section
+        className={styles.shopSection}
+        aria-labelledby="inventory-shop-title"
+        data-testid="inventory-shop"
+      >
+        <div className={styles.sectionHead}>
+          <div>
+            <h2 id="inventory-shop-title">商店</h2>
+            <p>星星、余烬、仓库上限和其他商品，都是商店里的商品类别。</p>
+          </div>
+          {shopCategories.length > 0 ? (
+            <span className={styles.count}>{items.length} 件商品</span>
+          ) : null}
+        </div>
+
+        {drawError ? (
+          <p role="alert" className={styles.error} data-testid="shop-draw-error">
+            {drawError}
+          </p>
+        ) : null}
+        {supplyError ? (
+          <p role="alert" className={styles.error} data-testid="shop-purchase-error">
+            {supplyError}
+          </p>
+        ) : null}
+
+        {shopCategories.length === 0 ? (
+          <EmptyState
+            icon={Package}
+            title="商店暂时没有商品"
+            copy="有新品上架后会显示在这里。"
+          />
+        ) : (
+          <div className={styles.shopCategories}>
+            {shopCategories.map((category) => {
+              const Icon = category.icon
+              return (
+                <section
+                  key={category.id}
+                  className={styles.shopCategory}
+                  aria-labelledby={`shop-category-${category.id}-title`}
+                  data-testid={`shop-category-${category.id}`}
+                >
+                  <div className={styles.categoryHead}>
+                    <span
+                      className={[
+                        styles.categoryIcon,
+                        category.id === 'embers' ? styles.emberIcon : '',
+                        category.id === 'cap' ? styles.capIcon : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                      aria-hidden="true"
+                    >
+                      <Icon size={18} />
+                    </span>
+                    <div className={styles.categoryText}>
+                      <h3 id={`shop-category-${category.id}-title`}>
+                        {category.label}
+                      </h3>
+                      <p>{category.description}</p>
+                    </div>
+                    <span className={styles.count}>
+                      {category.items.length} 件
+                    </span>
+                  </div>
+                  <div className={styles.drawGrid}>
+                    {category.id === 'stars'
+                      ? category.items.map((item) => (
+                          <DrawEntry
+                            key={item.id}
+                            item={item}
+                            diamonds={view.diamonds}
+                            seasonalOwned={seasonalOwned(item)}
+                            pending={purchase.isPending}
+                            pendingItemId={pendingItemId}
+                            onDraw={handleDraw}
+                          />
+                        ))
+                      : category.items.map((item) => (
+                          <ProductCard
+                            key={item.id}
+                            item={item}
+                            diamonds={view.diamonds}
+                            emberBalance={emberBalance}
+                            emberCap={emberCap}
+                            diamondCap={view.diamondCap}
+                            diamondCapLevel={view.diamondCapLevel}
+                            pending={purchase.isPending}
+                            pendingItemId={pendingItemId}
+                            onBuy={handlePurchase}
+                          />
+                        ))}
+                  </div>
+                </section>
+              )
+            })}
+          </div>
+        )}
+      </section>
 
       <StarDialog
         reveal={revealStar}

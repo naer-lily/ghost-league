@@ -14,6 +14,8 @@ import type {
   HistoryFeed,
   HomeSnapshot,
   LeagueFeed,
+  Loadout,
+  LoadoutField,
   PlaceBetResult,
   Profile,
   RivalCandidateList,
@@ -24,6 +26,7 @@ import type {
   Status,
   UserSummary,
 } from './types'
+import { useUiStore } from '../store/useUiStore'
 
 export const homeQueryKey: QueryKey = ['home', 'snapshot']
 export const shopQueryKey: QueryKey = ['shop', 'catalog']
@@ -129,6 +132,34 @@ export function usePurchaseShopItem() {
         queryClient.invalidateQueries({ queryKey: shopQueryKey }),
         queryClient.invalidateQueries({ queryKey: collectionQueryKey }),
       ])
+    },
+  })
+}
+
+export interface UpdateLoadoutVariables {
+  field: LoadoutField
+  value: string | null
+  name?: string
+}
+
+export function useUpdateLoadout() {
+  const queryClient = useQueryClient()
+  const notify = useUiStore((state) => state.notify)
+  return useMutation<Loadout, Error, UpdateLoadoutVariables>({
+    mutationFn: ({ field, value }: UpdateLoadoutVariables) =>
+      apiFetch<Loadout>('/v1/me/loadout', {
+        method: 'PATCH',
+        body: { [field]: value },
+      }),
+    onSuccess: async (_loadout, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: homeQueryKey }),
+        queryClient.invalidateQueries({ queryKey: collectionQueryKey }),
+      ])
+      const name = variables.name ?? '物品'
+      notify(
+        variables.value === null ? `${name}已卸下。` : `${name}已装备。`,
+      )
     },
   })
 }

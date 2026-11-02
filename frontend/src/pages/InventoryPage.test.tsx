@@ -6,11 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
 import type {
   Collection,
+  Loadout,
   ShopItem,
   StarPurchaseResult,
   Status,
 } from '../api/types'
 import { makeSnapshot, makeStar, makeStatus } from '../test/fixtures'
+import { useUiStore } from '../store/useUiStore'
 import { InventoryPage } from './InventoryPage'
 
 const RATES = {
@@ -95,6 +97,18 @@ function makeCatalog(): ShopItem[] {
       available: true,
       required_cap_level: 0,
     },
+    {
+      id: 'repair_kit',
+      name: '补签券',
+      description: '补回漏掉的一天。',
+      price_diamonds: 120,
+      currency: 'diamonds',
+      kind: 'inventory',
+      owned_quantity: 0,
+      cooldown_seconds: 0,
+      cooldown_until: null,
+      available: true,
+    },
   ]
 }
 
@@ -110,6 +124,14 @@ function makeCollection(overrides: Partial<Collection> = {}): Collection {
         season_id: null,
         equipped: true,
       },
+      {
+        id: 'title_ignition',
+        name: '点火',
+        description: '首次完成 100 XP 打卡。',
+        awarded_at: '2026-10-30T09:00:00+08:00',
+        season_id: null,
+        equipped: false,
+      },
     ],
     items: [
       {
@@ -122,11 +144,38 @@ function makeCollection(overrides: Partial<Collection> = {}): Collection {
         equipped: true,
       },
       {
+        id: 'frame_clown',
+        name: '小丑帽',
+        slot: 'frame',
+        description: '断掉连胜后获得。',
+        awarded_at: '2026-10-30T10:00:00+08:00',
+        season_id: null,
+        equipped: false,
+      },
+      {
         id: 'backdrop_night',
         name: '夜空',
         slot: 'backdrop',
         description: '深色背景。',
         awarded_at: '2026-10-29T09:00:00+08:00',
+        season_id: null,
+        equipped: false,
+      },
+      {
+        id: 'badge_champion',
+        name: '冠军环',
+        slot: 'badge_accent',
+        description: '冠军徽章底色。',
+        awarded_at: '2026-10-28T09:00:00+08:00',
+        season_id: null,
+        equipped: false,
+      },
+      {
+        id: 'sticker_mystery',
+        name: '神秘贴纸',
+        slot: 'sticker',
+        description: '没有装备槽的收藏品。',
+        awarded_at: '2026-10-27T09:00:00+08:00',
         season_id: null,
         equipped: false,
       },
@@ -185,6 +234,60 @@ interface MockOptions {
   catalog?: ShopItem[]
   collection?: Collection
   purchase?: () => Response
+  loadout?: (body: Record<string, string | null>) => Response
+}
+
+const SLOT_BY_FIELD: Record<string, string> = {
+  frame_id: 'frame',
+  backdrop_id: 'backdrop',
+  badge_accent_id: 'badge_accent',
+}
+
+function loadoutFor(collection: Collection): Loadout {
+  const title = collection.titles.find((entry) => entry.equipped)
+  const frame = collection.items.find(
+    (entry) => entry.slot === 'frame' && entry.equipped,
+  )
+  const backdrop = collection.items.find(
+    (entry) => entry.slot === 'backdrop' && entry.equipped,
+  )
+  const badge = collection.items.find(
+    (entry) => entry.slot === 'badge_accent' && entry.equipped,
+  )
+  return {
+    player_id: collection.player_id,
+    title_id: title?.id ?? null,
+    title: title?.name ?? null,
+    frame_id: frame?.id ?? null,
+    frame: frame?.name ?? null,
+    backdrop_id: backdrop?.id ?? null,
+    backdrop: backdrop?.name ?? null,
+    badge_accent_id: badge?.id ?? null,
+    badge_accent: badge?.name ?? null,
+    updated_at: collection.equipped.updated_at,
+  }
+}
+
+function applyLoadout(
+  collection: Collection,
+  body: Record<string, string | null>,
+): void {
+  for (const [field, value] of Object.entries(body)) {
+    if (field === 'title_id') {
+      collection.equipped.title_id = value
+      for (const title of collection.titles) {
+        title.equipped = title.id === value
+      }
+      continue
+    }
+    const slot = SLOT_BY_FIELD[field]
+    if (!slot) continue
+    collection.equipped[field as 'frame_id' | 'backdrop_id' | 'badge_accent_id'] =
+      value
+    for (const item of collection.items) {
+      if (item.slot === slot) item.equipped = item.id === value
+    }
+  }
 }
 
 function mockApi(options: MockOptions = {}) {
@@ -195,12 +298,23 @@ function mockApi(options: MockOptions = {}) {
     ...options.status,
   })
   const catalog = options.catalog ?? makeCatalog()
-  const collection = options.collection ?? makeCollection()
+  const collection = JSON.parse(
+    JSON.stringify(options.collection ?? makeCollection()),
+  ) as Collection
   const fetchMock = vi.fn(
-    async (input: RequestInfo | URL, _init?: RequestInit) => {
+    async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url.endsWith('/v1/shop/purchase')) {
         return options.purchase ? options.purchase() : jsonResponse(purchaseResult())
+      }
+      if (url.includes('/v1/me/loadout')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<
+          string,
+          string | null
+        >
+        if (options.loadout) return options.loadout(body)
+        applyLoadout(collection, body)
+        return jsonResponse(loadoutFor(collection))
       }
       if (url.includes('/v1/shop')) return jsonResponse(catalog)
       if (url.includes('/v1/me/collection')) return jsonResponse(collection)
@@ -238,21 +352,31 @@ function renderInventory() {
   )
 }
 
+function loadoutBodies(fetchMock: ReturnType<typeof mockApi>) {
+  return fetchMock.mock.calls
+    .filter(([input]) => String(input).includes('/v1/me/loadout'))
+    .map(
+      ([, init]) =>
+        JSON.parse(String(init?.body ?? '{}')) as Record<string, string | null>,
+    )
+}
+
 describe('InventoryPage', () => {
   beforeEach(() => {
     window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    useUiStore.setState({ toast: null })
   })
 
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it('renders the inventory title, four categories and stars under the stars tab', async () => {
+  it('keeps stars as one inventory category and groups the shop into product categories', async () => {
     mockApi()
     renderInventory()
 
     expect(
-      await screen.findByRole('heading', { name: '物品栏' }),
+      await screen.findByRole('heading', { name: '物品' }),
     ).toBeInTheDocument()
     expect(document.body.textContent ?? '').not.toMatch(/星库|星图/)
     expect(screen.getByTestId('inventory-tab-stars')).toHaveAttribute(
@@ -263,8 +387,34 @@ describe('InventoryPage', () => {
       expect(screen.getByTestId(`inventory-tab-${id}`)).toBeInTheDocument()
     }
 
+    const starLib = screen.getByTestId('star-library')
+    expect(starLib).toHaveTextContent('霜蓝')
+    expect(screen.queryByTestId('inventory-shop')).toBeInTheDocument()
+
+    const shop = screen.getByTestId('inventory-shop')
+    expect(within(shop).getByRole('heading', { name: '商店' })).toBeInTheDocument()
+    const starsCategory = within(shop).getByTestId('shop-category-stars')
+    expect(within(starsCategory).getByTestId('shop-item-star')).toBeInTheDocument()
+    expect(
+      within(starsCategory).getByTestId('shop-item-seasonal_star'),
+    ).toBeInTheDocument()
+    expect(
+      within(within(shop).getByTestId('shop-category-embers')).getByTestId(
+        'shop-item-ember',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(within(shop).getByTestId('shop-category-cap')).getByTestId(
+        'shop-item-diamond_cap_1',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(within(shop).getByTestId('shop-category-other')).getByTestId(
+        'shop-item-repair_kit',
+      ),
+    ).toBeInTheDocument()
+
     const starItem = screen.getByTestId('shop-item-star')
-    expect(starItem).toHaveTextContent('星星')
     expect(starItem).toHaveTextContent('抽取一颗')
     expect(starItem).toHaveTextContent('13 种星体')
     expect(within(starItem).getAllByTestId('star-rate')).toHaveLength(5)
@@ -273,7 +423,6 @@ describe('InventoryPage', () => {
     expect(seasonalItem).toHaveTextContent('2026-11 限定')
     expect(seasonalItem).toHaveTextContent('抽取季节星')
 
-    expect(screen.getByTestId('star-library')).toHaveTextContent('霜蓝')
     expect(document.body.textContent ?? '').not.toMatch(
       /common|uncommon|legendary|gacha/,
     )
@@ -282,7 +431,7 @@ describe('InventoryPage', () => {
   it('shows frames and titles from the real collection with equipped state', async () => {
     mockApi()
     renderInventory()
-    await screen.findByRole('heading', { name: '物品栏' })
+    await screen.findByRole('heading', { name: '物品' })
 
     await userEvent.click(screen.getByTestId('inventory-tab-frames'))
     const frames = await screen.findByRole('list', { name: '边框列表' })
@@ -296,19 +445,20 @@ describe('InventoryPage', () => {
     expect(within(titles).getByText('已装备')).toBeInTheDocument()
   })
 
-  it('shows other items and the real supply section under other', async () => {
+  it('shows other items and the real shop products under their categories', async () => {
     mockApi({ status: { inventory: { star: 1, seasonal_star: 0, ember: 2 } } })
     renderInventory()
-    await screen.findByRole('heading', { name: '物品栏' })
+    await screen.findByRole('heading', { name: '物品' })
 
     await userEvent.click(screen.getByTestId('inventory-tab-other'))
     const list = await screen.findByRole('list', { name: '其他物品列表' })
     expect(within(list).getByText('夜空')).toBeInTheDocument()
+    expect(within(list).getByText('冠军环')).toBeInTheDocument()
     expect(within(list).getByText('余烬')).toBeInTheDocument()
     expect(screen.getByTestId('shop-item-ember')).toHaveTextContent(
       '当前余烬 2 / 3',
     )
-    expect(screen.getByTestId('shop-item-cap')).toHaveTextContent(
+    expect(screen.getByTestId('shop-item-diamond_cap_1')).toHaveTextContent(
       '当前仓库 0 级',
     )
   })
@@ -319,7 +469,7 @@ describe('InventoryPage', () => {
       collection: makeCollection({ titles: [], items: [] }),
     })
     renderInventory()
-    await screen.findByRole('heading', { name: '物品栏' })
+    await screen.findByRole('heading', { name: '物品' })
 
     expect(screen.getByText('还没有星星')).toBeInTheDocument()
     await userEvent.click(screen.getByTestId('inventory-tab-frames'))
@@ -401,6 +551,143 @@ describe('InventoryPage', () => {
       '钻石不足',
     )
     expect(screen.queryByTestId('star-reveal')).not.toBeInTheDocument()
+  })
+
+  it('equips a frame and switches frames without sending other slots', async () => {
+    const fetchMock = mockApi()
+    renderInventory()
+    await screen.findByRole('heading', { name: '物品' })
+
+    await userEvent.click(screen.getByTestId('inventory-tab-frames'))
+    const frames = await screen.findByRole('list', { name: '边框列表' })
+    const callsTo = (suffix: string) =>
+      fetchMock.mock.calls.filter(([input]) => String(input).includes(suffix))
+        .length
+    const statusCalls = callsTo('/v1/me/status')
+    const collectionCalls = callsTo('/v1/me/collection')
+
+    await userEvent.click(
+      within(frames).getByTestId('collection-action-frame_clown'),
+    )
+    await waitFor(() =>
+      expect(loadoutBodies(fetchMock)).toEqual([{ frame_id: 'frame_clown' }]),
+    )
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe('小丑帽已装备。'),
+    )
+    await waitFor(() =>
+      expect(
+        within(frames).getByTestId('collection-action-frame_clown'),
+      ).toHaveTextContent('卸下'),
+    )
+    await waitFor(() => {
+      expect(callsTo('/v1/me/status')).toBeGreaterThan(statusCalls)
+      expect(callsTo('/v1/me/collection')).toBeGreaterThan(collectionCalls)
+    })
+
+    await userEvent.click(
+      within(frames).getByTestId('collection-action-frame_ember'),
+    )
+    await waitFor(() =>
+      expect(loadoutBodies(fetchMock)).toEqual([
+        { frame_id: 'frame_clown' },
+        { frame_id: 'frame_ember' },
+      ]),
+    )
+  })
+
+  it('equips a title through title_id', async () => {
+    const fetchMock = mockApi()
+    renderInventory()
+    await screen.findByRole('heading', { name: '物品' })
+
+    await userEvent.click(screen.getByTestId('inventory-tab-titles'))
+    const titles = await screen.findByRole('list', { name: '称号列表' })
+    await userEvent.click(
+      within(titles).getByTestId('collection-action-title_ignition'),
+    )
+
+    await waitFor(() =>
+      expect(loadoutBodies(fetchMock)).toEqual([{ title_id: 'title_ignition' }]),
+    )
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe('点火已装备。'),
+    )
+  })
+
+  it('equips backdrop and badge accent items through their slots', async () => {
+    const fetchMock = mockApi()
+    renderInventory()
+    await screen.findByRole('heading', { name: '物品' })
+
+    await userEvent.click(screen.getByTestId('inventory-tab-other'))
+    const list = await screen.findByRole('list', { name: '其他物品列表' })
+
+    await userEvent.click(
+      within(list).getByTestId('collection-action-backdrop_night'),
+    )
+    await waitFor(() =>
+      expect(loadoutBodies(fetchMock)).toEqual([
+        { backdrop_id: 'backdrop_night' },
+      ]),
+    )
+    await waitFor(() =>
+      expect(
+        within(list).getByTestId('collection-action-backdrop_night'),
+      ).toHaveTextContent('卸下'),
+    )
+
+    await userEvent.click(
+      within(list).getByTestId('collection-action-badge_champion'),
+    )
+    await waitFor(() =>
+      expect(loadoutBodies(fetchMock)).toEqual([
+        { backdrop_id: 'backdrop_night' },
+        { badge_accent_id: 'badge_champion' },
+      ]),
+    )
+  })
+
+  it('unequips an equipped item with null', async () => {
+    const fetchMock = mockApi()
+    renderInventory()
+    await screen.findByRole('heading', { name: '物品' })
+
+    await userEvent.click(screen.getByTestId('inventory-tab-frames'))
+    const frames = await screen.findByRole('list', { name: '边框列表' })
+    expect(
+      within(frames).getByTestId('collection-action-frame_ember'),
+    ).toHaveTextContent('卸下')
+
+    await userEvent.click(
+      within(frames).getByTestId('collection-action-frame_ember'),
+    )
+
+    await waitFor(() =>
+      expect(loadoutBodies(fetchMock)).toEqual([{ frame_id: null }]),
+    )
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe('余烬已卸下。'),
+    )
+    await waitFor(() =>
+      expect(
+        within(frames).getByTestId('collection-action-frame_ember'),
+      ).toHaveTextContent('装备'),
+    )
+  })
+
+  it('does not render an equip button for an item without a loadout slot', async () => {
+    mockApi()
+    renderInventory()
+    await screen.findByRole('heading', { name: '物品' })
+
+    await userEvent.click(screen.getByTestId('inventory-tab-other'))
+    const list = await screen.findByRole('list', { name: '其他物品列表' })
+    const row = within(list).getByText('神秘贴纸').closest('li')
+    expect(row).not.toBeNull()
+    expect(within(row as HTMLElement).queryByRole('button')).toBeNull()
+    expect(within(row as HTMLElement).getByText('没有装备槽的收藏品。'))
+      .toBeInTheDocument()
   })
 
   it('opens star details and closes them with Escape', async () => {

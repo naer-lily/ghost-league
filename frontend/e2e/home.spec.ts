@@ -291,7 +291,10 @@ for (const viewport of VIEWPORTS) {
 
     // Inventory categories.
     await page.goto(`${BASE}/inventory`)
-    await expect(page.getByRole('heading', { name: '物品栏' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '物品' })).toBeVisible()
+    await expect(page.getByTestId('inventory-shop')).toBeVisible()
+    await expect(page.getByTestId('shop-category-stars')).toBeVisible()
+    await expect(page.getByTestId('shop-category-embers')).toBeVisible()
     for (const id of ['stars', 'frames', 'titles', 'other']) {
       await page.getByTestId(`inventory-tab-${id}`).click()
       await expect(page.getByTestId(`inventory-tab-${id}`)).toHaveAttribute(

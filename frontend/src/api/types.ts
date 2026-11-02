@@ -362,6 +362,25 @@ export interface CollectionEquipped {
   updated_at: string | null
 }
 
+export type LoadoutField =
+  | 'title_id'
+  | 'frame_id'
+  | 'backdrop_id'
+  | 'badge_accent_id'
+
+export interface Loadout {
+  player_id: string
+  title_id: string | null
+  title: string | null
+  frame_id: string | null
+  frame: string | null
+  backdrop_id: string | null
+  backdrop: string | null
+  badge_accent_id: string | null
+  badge_accent: string | null
+  updated_at: string | null
+}
+
 export interface Collection {
   player_id: string
   titles: CollectionTitle[]
