@@ -324,7 +324,7 @@ describe('LeaguePage tabs', () => {
     expect(within(sheet).queryByText('720')).not.toBeInTheDocument()
   })
 
-  it('shows only followed people in the friends board, ranked by XP', async () => {
+  it('shows followed people plus me in the friends board, ranked by XP', async () => {
     vi.stubGlobal(
       'fetch',
       mockApi([
@@ -339,16 +339,31 @@ describe('LeaguePage tabs', () => {
 
     const list = await screen.findByRole('list', { name: '好友榜' })
     const rows = within(list).getAllByRole('listitem')
-    expect(rows).toHaveLength(2)
+    expect(rows).toHaveLength(3)
     expect(rows[0]).toHaveAccessibleName(/小满，第 1 名/)
     expect(rows[1]).toHaveAccessibleName(/阿岚，第 2 名/)
-    expect(screen.queryByText('那尔', { selector: 'p' })).not.toBeInTheDocument()
+    expect(rows[2]).toHaveAccessibleName(/那尔，第 3 名.*我的位置/)
+    expect(rows[2]).toHaveAttribute('data-me', 'true')
     expect(within(rows[0]!).queryByTestId('standing-power')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '好友榜' })).toBeVisible()
   })
 
-  it('shows an honest empty state when there are no follows', async () => {
+  it('keeps me on the friends board when I follow nobody', async () => {
     vi.stubGlobal('fetch', mockApi([friend('naer-lily', '那尔', 524)]))
+
+    renderLeague()
+    await userEvent.click(await screen.findByTestId('board-tab-friends'))
+
+    const list = await screen.findByRole('list', { name: '好友榜' })
+    const rows = within(list).getAllByRole('listitem')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toHaveAccessibleName(/那尔，第 1 名.*我的位置/)
+    expect(rows[0]).toHaveAttribute('data-me', 'true')
+    expect(screen.queryByTestId('friends-empty')).not.toBeInTheDocument()
+  })
+
+  it('shows an honest empty state when the server returns no members', async () => {
+    vi.stubGlobal('fetch', mockApi([]))
 
     renderLeague()
     await userEvent.click(await screen.findByTestId('board-tab-friends'))

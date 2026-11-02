@@ -33,7 +33,6 @@ const TABS: ReadonlyArray<{ id: BoardTab; label: string; icon: LucideIcon }> = [
 
 function friendRows(members: FriendSummary[], myId: string): StandingRow[] {
   return members
-    .filter((member) => member.user_id !== myId)
     .sort((left, right) => {
       if (right.xp !== left.xp) return right.xp - left.xp
       return left.user_id.localeCompare(right.user_id)
@@ -43,7 +42,7 @@ function friendRows(members: FriendSummary[], myId: string): StandingRow[] {
       user_id: member.user_id,
       display_name: member.display_name,
       avatar_url: member.avatar_url,
-      is_me: false,
+      is_me: member.user_id === myId,
       xp: member.xp,
       power: null,
       checkin: member.checkin,

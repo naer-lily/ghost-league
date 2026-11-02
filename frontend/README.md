@@ -84,8 +84,9 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
     周注/日注切换，复用同一套 `RivalDuelCard` / `RivalCandidatePicker` 组件。
 - 小组/好友榜：
   - 小组：`GET /v1/league/standings`
-  - 好友：`GET /v1/me/friends/standings`，前端过滤掉自己，只显示已关注的人；
-    没有关注时显示空状态，不伪造行。
+  - 好友：`GET /v1/me/friends/standings`，保留本人和已关注的人，按 XP 排序；
+    本人带“我的位置”标记。没有关注时只显示本人，接口返回空列表时显示空状态，
+    不伪造行。
   - 组注：`GET /v1/me/bets` 的 `bets.groups`（或 `groups` / `bet_options.group.markets`）
     按服务端返回的可用盘口渲染 `top3` / `promote` / `no_demote` 三个独立卡片；Bronze
     不出现“押不降段”，Diamond 不出现“押升段”。只在「小组」tab 显示；没有小组或没有
@@ -126,7 +127,8 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
   `free_stake + paid_stake`，总返为 `round(stake × 服务端赔率)`。自付 0 合法，默认只
   使用免费 20；周注截止周一 `23:59:59`，日注 `21:00` 锁注、`22:30` 结算。
 - **小组/好友榜**：顶部只有结算倒计时，不显示小组人数。`小组 / 好友 / 动态` 分段切换。
-  好友榜按关注关系读真实数据，排除自己，按 XP 排名，没有关注时给空状态。小组榜使用后端
+  好友榜按关注关系读真实数据，包含本人并标“我的位置”，按 XP 排名；没有关注时仍显示本人，
+  接口返回空列表时才给空状态。小组榜使用后端
   `promotion_quota` / `demotion_quota` 和每行 `promoted` / `demoted`，只给前 N 行标“晋升”、
   后 N 行标“下降”，按实际组人数计算；好友榜、动态和资料卡不显示这些标识。小组榜下方
   `GroupBetCard` 并排显示服务端允许的“押前三 / 押升段 / 押不降段”，各自赔率、已下注状态和
