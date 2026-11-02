@@ -187,6 +187,47 @@ class DuplicateIdempotencyKey(GameError):
     pass
 
 
+class ShopError(GameError):
+    """A shop or wallet request failed a business rule."""
+
+    code = "shop_error"
+
+
+class UnknownShopItem(ShopError):
+    code = "unknown_item"
+
+
+class ShopNotAllowed(ShopError):
+    code = "not_allowed"
+
+
+class ShopQuantityRejected(ShopError):
+    code = "invalid_quantity"
+
+    def __init__(self, code: str, detail: str):
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
+class InsufficientDiamonds(ShopError):
+    code = "insufficient_diamonds"
+
+    def __init__(self, balance: int):
+        super().__init__("not enough diamonds")
+        self.balance = balance
+        self.detail = "not enough diamonds"
+
+
+class ShopCooldown(ShopError):
+    code = "cooldown"
+
+    def __init__(self, cooldown_until: str):
+        super().__init__(f"item is on cooldown until {cooldown_until}")
+        self.cooldown_until = cooldown_until
+        self.detail = f"item is on cooldown until {cooldown_until}"
+
+
 class RepairRejected(GameError):
     """A repair request failed a business rule.
 

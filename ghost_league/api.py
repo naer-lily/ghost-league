@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Response, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,7 +40,12 @@ from .game.rules import (
     ChannelRosterMissing,
     DuplicateIdempotencyKey,
     GameError,
+    InsufficientDiamonds,
     RepairRejected,
+    ShopCooldown,
+    ShopNotAllowed,
+    ShopQuantityRejected,
+    UnknownShopItem,
     WeekLocked,
     earned_embers_for_week,
     xp_for_seconds,
@@ -117,6 +122,14 @@ class RepairRequest(BaseModel):
 
     date: date
     idempotency_key: str = Field(min_length=1, max_length=200)
+
+
+class ShopPurchaseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: str = Field(min_length=1, max_length=64)
+    quantity: int = Field(default=1, strict=True, ge=1)
+    request_id: str = Field(min_length=1, max_length=200)
 
 
 class LoadoutPatchRequest(BaseModel):
@@ -530,6 +543,15 @@ class GameService:
             "earned_this_week": min(earned, earned_embers_for_week(week_seconds)),
         }
 
+    def _inventory_summary(self, player_id: str) -> dict[str, int]:
+        """Project inventory plus the ember balance without copying embers."""
+
+        assert self.store is not None
+        inventory = self.store.get_inventory(player_id)
+        ember = self.store.get_ember_balance(player_id)
+        inventory["ember"] = int(ember["balance"]) if ember else 0
+        return inventory
+
     def _avatar_public_url(self, account: dict[str, Any] | None) -> str | None:
         if account is None or not account.get("avatar_url"):
             return None
@@ -613,6 +635,8 @@ class GameService:
             },
             "embers": self._ember_summary(user_id, week, week_seconds),
             "gems": int(snapshot.get("lifetime_xp") or 0) // 10,
+            "diamonds": self.store.get_diamond_balance(user_id),
+            "inventory": self._inventory_summary(user_id),
             "equipped_title": loadout["title"],
             "equipped_title_id": loadout["title_id"],
             "frame": loadout["frame"],
@@ -695,6 +719,8 @@ class GameService:
             },
             "embers": self._ember_summary(user_id, week, week_seconds),
             "gems": int(snapshot.get("lifetime_xp") or 0) // 10,
+            "diamonds": self.store.get_diamond_balance(user_id),
+            "inventory": self._inventory_summary(user_id),
             "equipped_title": loadout["title"],
             "equipped_title_id": loadout["title_id"],
             "frame": loadout["frame"],
@@ -1067,6 +1093,31 @@ class GameService:
                 str(row["updated_at"]) if row is not None else _iso(now)
             ),
         }
+
+    def shop_for(self, account: dict[str, Any]) -> list[dict[str, Any]]:
+        self._prepare_read(account)
+        assert self.store is not None
+        return self.store.shop_catalog(
+            str(account["user_id"]), now=self.now()
+        )
+
+    def purchase_shop_item(
+        self,
+        account: dict[str, Any],
+        *,
+        item_id: str,
+        quantity: int,
+        request_id: str,
+    ) -> dict[str, Any]:
+        self._prepare_read(account)
+        assert self.store is not None
+        return self.store.purchase_shop_item(
+            str(account["user_id"]),
+            item_id,
+            quantity,
+            request_id,
+            now=self.now(),
+        )
 
     def checkins_for(
         self, account: dict[str, Any], week_start: date | None = None
@@ -1602,6 +1653,57 @@ def create_app(
             return HTTPException(status_code=409, detail=str(exc))
         return HTTPException(status_code=422, detail=str(exc))
 
+    def shop_error_response(exc: Exception) -> Response:
+        """Mirror actionable shop fields both at top level and in ``detail``."""
+
+        if isinstance(exc, UnknownShopItem):
+            raise HTTPException(status_code=404, detail="unknown shop item")
+        if isinstance(exc, ShopNotAllowed):
+            raise HTTPException(
+                status_code=403,
+                detail={"code": exc.code, "message": str(exc)},
+            )
+        if isinstance(exc, ShopCooldown):
+            detail = {
+                "code": exc.code,
+                "message": exc.detail,
+                "cooldown_until": exc.cooldown_until,
+            }
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": detail,
+                    "code": exc.code,
+                    "message": exc.detail,
+                    "cooldown_until": exc.cooldown_until,
+                },
+            )
+        if isinstance(exc, InsufficientDiamonds):
+            detail = {
+                "code": exc.code,
+                "message": exc.detail,
+                "balance": exc.balance,
+            }
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": detail,
+                    "code": exc.code,
+                    "message": exc.detail,
+                    "balance": exc.balance,
+                    "diamonds": exc.balance,
+                },
+            )
+        if isinstance(exc, ShopQuantityRejected):
+            detail = {"code": exc.code, "message": exc.detail}
+            return JSONResponse(
+                status_code=422,
+                content={"detail": detail, **detail},
+            )
+        if isinstance(exc, DuplicateIdempotencyKey):
+            raise HTTPException(status_code=409, detail=str(exc))
+        raise exc
+
     @app.get("/health", response_model=HealthResponse)
     def health() -> dict[str, Any]:
         service.initialize()
@@ -1860,6 +1962,32 @@ def create_app(
             raise HTTPException(status_code=404, detail="feed event not found") from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/v1/shop")
+    def shop(account: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+        return service.shop_for(account)
+
+    @app.post("/v1/shop/purchase", response_model=None)
+    def purchase_shop_item(
+        request: ShopPurchaseRequest,
+        account: dict[str, Any] = Depends(auth),
+    ) -> dict[str, Any] | Response:
+        try:
+            return service.purchase_shop_item(
+                account,
+                item_id=request.item_id,
+                quantity=request.quantity,
+                request_id=request.request_id,
+            )
+        except (
+            DuplicateIdempotencyKey,
+            InsufficientDiamonds,
+            ShopCooldown,
+            ShopNotAllowed,
+            ShopQuantityRejected,
+            UnknownShopItem,
+        ) as exc:
+            return shop_error_response(exc)
 
     @app.get("/v1/me/embers")
     def embers(account: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

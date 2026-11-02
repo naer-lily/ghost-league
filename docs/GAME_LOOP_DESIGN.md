@@ -22,7 +22,7 @@
 
 - 每天回来的理由：**今天还差多少 XP 才能打卡、AI 对手今天做了什么、我现在第几名、昨天能不能补签。**
 - 每周在意的理由：**本周 tier 内的晋级/降级名额、周一早上看到上周名次、称号和新小组。**
-- 不做赛季通行证、不做可购买货币、不做 52 周预生成。所有 AI 对手只在当前周、当前小组内生成；过去只保留真实结算过的周。
+- 不做赛季通行证、不做付费货币、不做 52 周预生成。当前新增后端钻石商店（`star` / `ember`），钻石初始 0、不自动发放，正式来源后续接；所有 AI 对手只在当前周、当前小组内生成；过去只保留真实结算过的周。
 - 修复资源叫 **余烬（Ember）**，只用于补签，不能买外观、不能交易、不能换数值。
 - AI 的原始锚点只用 WakaTime 的**公开周总量**；对手是 AI 角色，不是那个 WakaTime 用户，UI 始终标明“AI 对手”。
 
@@ -514,7 +514,9 @@ def advance_opponent(opponent, now):
 
 - 奖励是**额外解锁和展示**，不是把已有自由拿走再还。
 - 不提供付费变强，不卖数值；物品/称号只影响展示。
-- 不引入可购买货币；余烬只修打卡，不能买外观。
+- 不引入付费货币/付费变强；当前后端钻石商店的星星只影响收藏，余烬仍只修打卡；
+  钻石初始 0，正式来源后续接宿敌/活动奖励，不直接售卖。前端展示由外部程序读取
+  `/v1/me/status`。
 - 不做随机抽奖/开箱；解锁条件确定、可预期。
 - 不用“断连胜扣东西”制造损失厌恶；错过就是错过，补签是可选修复。
 
@@ -547,7 +549,8 @@ def advance_opponent(opponent, now):
 
 - 没有属性加成、没有 XP 加成、没有排名加成。
 - 收藏页显示“已解锁/未解锁”和触发条件；未解锁不显示隐藏概率。
-- 不能购买、不能交易、不能赠送；没有商店。
+- 不能交易、不能赠送；外观不能购买。当前新增后端钻石商店（`star` / `ember`），
+  前端展示由外部程序读取 `/v1/me/status`；本阶段不做前端页面。
 - 装备变更即时生效，不消耗资源。
 
 ### 6.4 AI 也有称号
@@ -571,7 +574,9 @@ def advance_opponent(opponent, now):
 
 ### 6.6 不做的奖励
 
-- 不做金币、钻石、点券、抽卡、商店、通行证、付费轨。
+- 不做金币、点券、抽卡、通行证、付费轨。当前新增后端钻石商店（`star` / `ember`）：
+  星星 300 钻石、余烬 800 钻石且 72 小时冷却；钻石初始为 0、不自动发放，正式来源
+  后续接宿敌/活动奖励。前端展示由外部程序读取 `/v1/me/status`。
 - 不做“连续 30 天送大量资源”的滚雪球。
 - 战力值是派生展示字段（最近四周 XP 百分位，0–2000），不参与排名、分组、升降级或结算；不做称号属性、装备强化。
 - 不做“掉段惩罚性扣除已获得外观”。
@@ -673,6 +678,16 @@ player_titles(player_id, title_id, awarded_at, season_id NULL,
 player_items(player_id, item_id, awarded_at, season_id NULL,
              UNIQUE(player_id, item_id))
 loadouts(player_id, title_id, frame_id, backdrop_id, badge_accent_id, updated_at)
+inventory_items(player_id, item_id, quantity, updated_at, PRIMARY KEY(player_id, item_id))
+shop_items(id, name, description, price_diamonds, grant_kind, grant_item_id,
+           grant_quantity, cooldown_seconds, active, sort, created_at, updated_at)
+shop_purchase_cooldowns(player_id, item_id, last_purchased_at,
+                        PRIMARY KEY(player_id, item_id))
+shop_purchase_requests(player_id, request_id, item_id, quantity, result_json,
+                       created_at, PRIMARY KEY(player_id, request_id))
+diamond_balance(player_id, balance, updated_at)
+diamond_ledger(id, player_id, delta, balance_after, reason, ref_type, ref_id,
+               idempotency_key UNIQUE, created_at)
 ```
 
 **关键约束**
@@ -681,6 +696,10 @@ loadouts(player_id, title_id, frame_id, backdrop_id, badge_accent_id, updated_at
 - `opponent_day_state` 以 `(opponent_id, date)` 唯一；懒结算幂等。
 - `checkins` 以 `(player_id, date)` 唯一；补签不能覆盖自然打卡。
 - `ember_ledger.idempotency_key` 唯一；余额只在账本事务里改。
+- `diamond_ledger.idempotency_key` 唯一；`diamond_balance` 只在同一事务里随账本更新。
+  `shop_purchase_requests` 以 `(player_id, request_id)` 唯一，重复请求返回原结果。
+- `inventory_items` 只存 `grant_kind='inventory'` 的商品；`ember` 的数量仍只以
+  `ember_balance.balance` 为真相，不复制进行李栏。`shop_items` 种子幂等，旧库启动自动建表。
 - `group_members` 必须满足：每组 15 人（v1），AI 数 = 15 - 真人数；不允许中途移除 AI。
 - 周中新增真人进入**新组**（当前周、14 个 AI），不通过移除已有 AI 塞进旧组；旧组名单周内不变。
 - 组内排名按 seconds 降序，tie-break 用 `player_id` 升序，保证可复现。
@@ -800,7 +819,7 @@ data/api/avatars/                    # 头像：保留
 
 ## 8. 首个纵向切片
 
-如果只做一条能验证循环的最小链路，按顺序做 **7 件事**。每件都能独立验收，但不做完整赛季/商店/社交。
+如果只做一条能验证循环的最小链路，按顺序做 **7 件事**。每件都能独立验收，但不做完整赛季/社交；钻石商店已单独接后端。
 
 ### 8.1 切片清单
 
@@ -822,7 +841,7 @@ data/api/avatars/                    # 头像：保留
    - 不做重放；旧周的 XP/rank/升降级不可变，补签元数据只追加。
 6. **最小成长层**
    - 3 个称号 + 3 个物品；装备接口；首页/榜单/详情展示；AI 也按同一表获得一个称号。
-   - 不做商店/货币/赛季。
+   - 不做完整赛季/社交；商店与钻石已按单独任务接后端。
 7. **API/PWA 读面与文案**
    - status/standings/feed/history XP 化；补签入口；称号 chip；`badge.py` 称号行与装备边框。
    - 验收：UI 不出现 ghost/幽灵/synthetic/模拟/伪实时/分钟；也不出现 AI 可见标签。
@@ -865,7 +884,8 @@ curl -sS "http://127.0.0.1:8095/v1/me/status" \
 
 - 不写任何 `ghost_league/`、`web/`、`tests/`、`data/` 文件；不执行 reset；不部署；不 commit/push。
 - 不做多用户社交、关注扩展、支付、原生客户端、新外部数据源。
-- 不做 8 周赛季、通行证、商店、可购买货币、交易。
+- 不做 8 周赛季、通行证、交易；当前新增后端钻石商店（`star` / `ember`），钻石初始 0、
+  不自动发放，正式来源后续接入。
 - 不补造任何过去周；不在加入时预生成未来周。
 - 不改 WakaTime 抓取协议；只做入库前匿名化。
 
@@ -883,7 +903,7 @@ curl -sS "http://127.0.0.1:8095/v1/me/status" \
 | 旧 PWA 缓存打新 API | 白屏/字段缺失 | 升 `sw.js` 版本、强制更新提示、保留一版字段映射或明确 beta 破坏性升级 |
 | WakaTime 数据过期/不可用 | AI 没有锚点 | anchor pool 持久化、stale_weeks、无新数据不造；启动不依赖网络 |
 | 命名迁移面过大 | 引入回归 | 先改产品文案，再做机械 rename；保留一版 env/header alias |
-| 奖励变成“导演发糖” | 用户站到导演视角 | 称号只证明真实竞争事件；不做商店/货币；每日反馈优先于奖励动画 |
+| 奖励变成“导演发糖” | 用户站到导演视角 | 称号与商店物品只来自真实竞争/购买；钻石不凭空发放，正式来源后续接；每日反馈优先于奖励动画 |
 | 工作日/周末节奏不公平 | 用户觉得被算法针对 | 段位带 + 固定分位；不按用户在线时间调 AI |
 
 ### 9.2 需要拍板的 5 个问题（附推荐）

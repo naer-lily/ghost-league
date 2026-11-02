@@ -324,6 +324,66 @@ CREATE TABLE IF NOT EXISTS loadouts (
     badge_accent_id TEXT,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS inventory_items (
+    player_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (player_id, item_id)
+);
+
+CREATE TABLE IF NOT EXISTS shop_items (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    price_diamonds INTEGER NOT NULL CHECK (price_diamonds >= 0),
+    grant_kind TEXT NOT NULL CHECK (grant_kind IN ('inventory', 'ember')),
+    grant_item_id TEXT,
+    grant_quantity INTEGER NOT NULL DEFAULT 1 CHECK (grant_quantity > 0),
+    cooldown_seconds INTEGER NOT NULL DEFAULT 0 CHECK (cooldown_seconds >= 0),
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    sort INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS shop_purchase_cooldowns (
+    player_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    last_purchased_at TEXT NOT NULL,
+    PRIMARY KEY (player_id, item_id)
+);
+
+CREATE TABLE IF NOT EXISTS shop_purchase_requests (
+    player_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (player_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS diamond_balance (
+    player_id TEXT PRIMARY KEY,
+    balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS diamond_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id TEXT NOT NULL,
+    delta INTEGER NOT NULL,
+    balance_after INTEGER NOT NULL CHECK (balance_after >= 0),
+    reason TEXT NOT NULL,
+    ref_type TEXT,
+    ref_id TEXT,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_diamond_ledger_player
+    ON diamond_ledger (player_id, id);
 """
 
 _TABLE_NAMES = (
@@ -355,6 +415,12 @@ _TABLE_NAMES = (
     "player_titles",
     "player_items",
     "loadouts",
+    "inventory_items",
+    "shop_items",
+    "shop_purchase_cooldowns",
+    "shop_purchase_requests",
+    "diamond_balance",
+    "diamond_ledger",
 )
 
 
@@ -411,6 +477,7 @@ class CoreMixin:
                 else cal.now_local()
             )
             self._seed_catalog(conn)
+            self._seed_shop(conn, now=now)
             self._seed_progression_start(
                 conn,
                 now=now,
@@ -478,6 +545,67 @@ class CoreMixin:
                 "name = excluded.name, slot = excluded.slot, "
                 "description = excluded.description",
                 (row["id"], row["name"], row["slot"], row["description"]),
+            )
+
+    @staticmethod
+    def _seed_shop(conn: sqlite3.Connection, *, now: str) -> None:
+        """Install the two launch shop items without duplicating rows."""
+
+        rows = (
+            (
+                "star",
+                "星星",
+                "收藏用星星，可以重复购买。",
+                300,
+                "inventory",
+                "star",
+                1,
+                0,
+                10,
+            ),
+            (
+                "ember",
+                "余烬",
+                "立即获得 1 枚余烬；每 72 小时最多购买一次。",
+                800,
+                "ember",
+                "ember",
+                1,
+                259_200,
+                20,
+            ),
+        )
+        for (
+            item_id,
+            name,
+            description,
+            price,
+            grant_kind,
+            grant_item_id,
+            grant_quantity,
+            cooldown_seconds,
+            sort,
+        ) in rows:
+            conn.execute(
+                "INSERT INTO shop_items "
+                "(id, name, description, price_diamonds, grant_kind, "
+                "grant_item_id, grant_quantity, cooldown_seconds, active, sort, "
+                "created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?) "
+                "ON CONFLICT(id) DO NOTHING",
+                (
+                    item_id,
+                    name,
+                    description,
+                    price,
+                    grant_kind,
+                    grant_item_id,
+                    grant_quantity,
+                    cooldown_seconds,
+                    sort,
+                    now,
+                    now,
+                ),
             )
 
     def _seed_progression_start(

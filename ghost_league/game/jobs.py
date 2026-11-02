@@ -83,6 +83,37 @@ def run_power_refresh(
     return store.recompute_power(now=local_now)
 
 
+def run_grant_diamonds(
+    db_path: str | Path,
+    *,
+    player_id: str,
+    amount: int,
+    reason: str = "test",
+    idempotency_key: str | None = None,
+    at: datetime | str | None = None,
+) -> dict[str, Any]:
+    """Local/operator-only diamond grant; never exposed as an HTTP route."""
+
+    local_now = cal.parse_datetime(at) if at is not None else cal.now_local()
+    store = GameStore(Path(db_path))
+    result = store.credit_diamonds(
+        player_id,
+        amount,
+        reason,
+        ref_type="manual_grant",
+        ref_id=reason,
+        idempotency_key=idempotency_key,
+        now=local_now,
+    )
+    return {
+        "status": "credited",
+        "player_id": player_id,
+        "amount": amount,
+        "reason": reason,
+        **result,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m ghost_league.game.jobs",
@@ -97,6 +128,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     power.add_argument("--db", default=str(DEFAULT_DB_PATH))
     power.add_argument("--at")
+    grant = sub.add_parser(
+        "grant-diamonds",
+        help="local-only diamond credit for testing or future rewards",
+    )
+    grant.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    grant.add_argument("--player", dest="player_id", required=True)
+    grant.add_argument("--amount", type=int, required=True)
+    grant.add_argument("--reason", default="test")
+    grant.add_argument("--idempotency-key")
+    grant.add_argument("--at")
     return parser
 
 
@@ -107,6 +148,15 @@ def main(argv: list[str] | None = None) -> int:
         result = run_weekly_settlement(args.db, at=args.at)
     elif args.command == "power":
         result = run_power_refresh(args.db, at=args.at)
+    elif args.command == "grant-diamonds":
+        result = run_grant_diamonds(
+            args.db,
+            player_id=args.player_id,
+            amount=args.amount,
+            reason=args.reason,
+            idempotency_key=args.idempotency_key,
+            at=args.at,
+        )
     else:  # pragma: no cover - argparse rejects unknown subcommands
         parser.error(f"unknown command: {args.command}")
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))

@@ -55,6 +55,13 @@ from .progression import (
     ProgressionMixin,
 )
 from .settlement import ScoreRowLike, SettlementMixin
+from .shop import (
+    EMBER_ITEM_ID,
+    EMBER_PURCHASE_QUANTITY,
+    STAR_ITEM_ID,
+    STAR_MAX_QUANTITY,
+    ShopMixin,
+)
 
 
 class GameStore(
@@ -68,6 +75,7 @@ class GameStore(
     ProgressionMixin,
     SettlementMixin,
     PowerMixin,
+    ShopMixin,
 ):
     """Transactional access to one ``league.db`` file."""
 
@@ -78,6 +86,8 @@ __all__ = [
     "CATALOG_TITLES",
     "CHECKIN_SECONDS",
     "DEFAULT_DB_PATH",
+    "EMBER_ITEM_ID",
+    "EMBER_PURCHASE_QUANTITY",
     "GROUP_SIZE",
     "ITEM_BY_ID",
     "POWER_WEIGHTS",
@@ -87,6 +97,8 @@ __all__ = [
     "SOURCE_AI",
     "SOURCE_CHANNEL",
     "SOURCE_HUMAN",
+    "STAR_ITEM_ID",
+    "STAR_MAX_QUANTITY",
     "TIERS",
     "DuplicateIdempotencyKey",
     "GameError",

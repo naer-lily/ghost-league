@@ -35,6 +35,8 @@ Channel token。`/badge/...`、`/embed/...`、`/health` 和 `/avatars/...` 公�
 | GET | `/v1/league/feed` | 组内动态 |
 | POST | `/v1/league/feed/{event_id}/reactions` | 给动态加表情 |
 | GET | `/v1/me/embers` | 余烬余额与最近流水 |
+| GET | `/v1/shop` | 钻石商店有效商品 |
+| POST | `/v1/shop/purchase` | 用钻石购买商品 |
 | GET | `/v1/me/collection` | 已解锁称号/物品 |
 | PATCH | `/v1/me/loadout` | 更新已装备展示项 |
 | POST | `/v1/me/repair` | 补签 |
@@ -621,6 +623,8 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
   },
   "embers": {"balance": 1, "cap": 3, "earned_this_week": 1},
   "gems": 20,
+  "diamonds": 2700,
+  "inventory": {"star": 1, "ember": 1},
   "equipped_title": "点火",
   "equipped_title_id": "title_ignition",
   "frame": "余烬",
@@ -633,9 +637,17 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 ```
 
 - 该接口只读当前 token 的账号，不提供全员状态。
-- `gems` 由该玩家 `weekly_scores` 的累计 `SUM(xp) // 10` 派生，每累计 10 XP 得 1 个
-  宝石；不按本周 XP 重置，也没有独立 ledger 表。`status_for_user`（badge/widget 快照）
-  返回同一派生值。
+- `gems` 继续是原来的展示值，由该玩家 `weekly_scores` 的累计 `SUM(xp) // 10` 派生，
+  每累计 10 XP 得 1 个宝石；不按本周 XP 重置，也没有独立 ledger 表。`gems` 不是钻石，
+  不会因为商店消费而变化。
+- `diamonds` 是独立的钻石钱包余额。初始为 0，不自动发放；没有钱包记录时返回 0。
+  当前只有本地管理命令/未来奖励接入会充值，正式的宿敌、活动奖励后续再接。钻石只属于
+  真人，AI 没有钱包。`status_for_user`（badge/widget 快照）返回同样的 0/余额字段。
+- `inventory` 至少包含 `star` 与 `ember`。`inventory.star` 读取通用物品栏
+  `inventory_items`；`inventory.ember` 直接读取现有 `ember_balance.balance`，不复制到
+  `inventory_items`。没有记录的物品返回 0，不会省略字段。
+- 钻石和物品栏只在自己的 status（以及内部 `status_for_user` 快照）返回；榜单、公开资料、
+  `/v1/users/{id}` 和任何他人视角都不包含 `diamonds`/`inventory`。
 - `power` 是 0–2000 的派生展示战力。计算窗口为最近 4 个自然周（含当前未结束周），
   权重从新到旧为 `0.4 / 0.3 / 0.2 / 0.1`，只按该玩家实际有 `weekly_scores` 行的周
   重新归一化；每周百分位 `p = (less_count + equal_count / 2) / total_count`，
@@ -657,6 +669,99 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 curl -sS "https://your-host.example/v1/me/status" \
   -H "Authorization: Bearer $GHOST_LEAGUE_TOKEN"
 ```
+
+## 钻石与商店
+
+钻石是独立于 `gems` 的新货币。初始余额为 0，不自动发放；当前只有本地管理命令
+`python3 -m ghost_league.game.jobs grant-diamonds --player <id> --amount 3000 --reason test`
+用于测试或未来奖励接入，不提供公开的“给自己加钻石”HTTP 接口。钻石只属于真人，AI
+没有钱包、不能购买，也不会出现在他人视角。
+
+当前上架两个商品：
+
+| id | 名称 | 价格 | 发货 | 冷却 |
+| --- | --- | --- | --- | --- |
+| `star` | 星星 | 300 钻石/个 | 写入 `inventory_items`，可累积；单次最多 99 个 | 无 |
+| `ember` | 余烬 | 800 钻石/个 | 进入现有 `ember_balance`，不写 `inventory_items`；每次只能买 1 个 | 72 小时（259200 秒） |
+
+### `GET /v1/shop`
+
+Bearer 鉴权。只返回 `active=1` 的商品数组，按 `sort` 排序：
+
+```json
+[
+  {
+    "id": "star",
+    "name": "星星",
+    "description": "收藏用星星，可以重复购买。",
+    "price_diamonds": 300,
+    "currency": "diamonds",
+    "owned_quantity": 1,
+    "cooldown_seconds": 0,
+    "cooldown_until": null,
+    "available": true
+  },
+  {
+    "id": "ember",
+    "name": "余烬",
+    "description": "立即获得 1 枚余烬；每 72 小时最多购买一次。",
+    "price_diamonds": 800,
+    "currency": "diamonds",
+    "owned_quantity": 1,
+    "cooldown_seconds": 259200,
+    "cooldown_until": "2026-11-05T12:00:00+08:00",
+    "available": false
+  }
+]
+```
+
+- `owned_quantity`：`star` 读 `inventory_items`；`ember` 直接读现有 `ember_balance`。
+- `cooldown_until`：仍在冷却时是 ISO 时间，否则为 `null`。
+- `available`：当前不在冷却中；余额是否足够在购买时单独校验。
+
+### `POST /v1/shop/purchase`
+
+Bearer 鉴权。`request_id` 必填，用于幂等；同一个 `request_id` 重复提交只扣一次款并
+返回同一购买结果（`replayed=true`）。`quantity` 缺省为 1，必须是正整数；`star` 单次
+最多 99 个，`ember` 只能买 1 个。
+
+```json
+{
+  "item_id": "star",
+  "quantity": 1,
+  "request_id": "shop-20261102-001"
+}
+```
+
+```json
+{
+  "ok": true,
+  "item_id": "star",
+  "quantity": 1,
+  "diamonds": 2700,
+  "inventory": {"star": 1, "ember": 0},
+  "cooldown_until": null,
+  "replayed": false
+}
+```
+
+扣款、发货、冷却、流水和 request 记录在同一个 SQLite 事务内完成。任何一步失败都会
+回滚，不会只扣钱不发货。
+
+错误状态：
+
+- 未知商品：`404`。
+- 数量非法、`star > 99`、`ember != 1`：`422`，`detail.code` 为
+  `invalid_quantity` / `quantity_too_large` / `ember_quantity`。
+- 余额不足：`409`，响应顶层和 `detail` 都带当前 `balance`/`diamonds`，`detail.code`
+  为 `insufficient_diamonds`。
+- `ember` 冷却未到：`409`，响应顶层和 `detail` 都带 `cooldown_until`，
+  `detail.code` 为 `cooldown`；冷却到期后可再次购买。
+- 同一 `request_id` 用于不同商品/数量：`409`。
+
+`star` 没有冷却，可连续购买多个。`ember` 购买成功会同时写负数
+`diamond_ledger` 和正数 `ember_ledger`，更新 `ember_balance`，并写
+`shop_purchase_cooldowns`；它不会写 `inventory_items`。
 
 ## 公开用户与社交
 
