@@ -8,6 +8,8 @@ shared by the persistence layer.
 
 from __future__ import annotations
 
+import math
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from typing import Final
 
@@ -27,7 +29,12 @@ DAILY_BET_SETTLE_HOUR: Final = 22
 
 WEEKLY_STAKES: Final[tuple[int, ...]] = (20, 40, 60)
 WEEKLY_ODDS: Final = 2.0
+GROUP_STAKES: Final[tuple[int, ...]] = (20, 40, 60)
+GROUP_ODDS: Final = 2.0
+GROUP_BET_SETTLE_OFFSET: Final = timedelta(minutes=5)
 DAILY_STAKE: Final = 20
+# Every bet carries this much free principal; only the remainder is debited.
+FREE_BET_STAKE: Final = 20
 DAILY_TARGET_ODDS: Final[dict[int, float]] = {
     50: 1.5,
     150: 2.5,
@@ -38,6 +45,15 @@ DAILY_TARGET_PAYOUTS: Final[dict[int, int]] = {
     150: 50,
     300: 80,
 }
+
+# Projection constants.  These only shape the betting-screen estimate; final
+# settlement always uses the real weekly/daily XP.
+PROJECTION_POWER_SCALE: Final = 2000
+PROJECTION_WEEK_STEP: Final = 100
+PROJECTION_DAY_STEP: Final = 10
+PROJECTION_DAY_WINDOW_HOURS: Final = 22
+PROJECTION_MIN_DAY_RATIO: Final = 0.2
+DAILY_PROJECTION_TARGETS: Final[tuple[int, ...]] = (50, 150, 300)
 
 RIVAL_WIN_REWARD: Final = 120
 RIVAL_DRAW_REWARD: Final = 40
@@ -143,6 +159,12 @@ def daily_bet_settles_at(day: date | datetime | str) -> datetime:
     return cal.day_start_at(day) + timedelta(hours=DAILY_BET_SETTLE_HOUR)
 
 
+def group_bet_settles_at(week: date | datetime | str) -> datetime:
+    """Group bets settle with the next Monday 00:05 settlement pass."""
+
+    return cal.week_end_at(week) + GROUP_BET_SETTLE_OFFSET
+
+
 def selection_window_open(
     now: date | datetime | str,
     week: date | datetime | str,
@@ -169,6 +191,70 @@ def rival_reward(outcome: str, *, is_human: bool) -> int:
     return 0
 
 
+def round_to_step(value: float, step: int) -> int:
+    """Round a non-negative estimate to the nearest multiple of ``step``."""
+
+    if step <= 0:
+        raise ValueError("step must be positive")
+    if value <= 0:
+        return 0
+    return int(value / step + 0.5) * step
+
+
+def percentile_value(values: Sequence[int], percentile: float) -> float:
+    """Linear-interpolated quantile over an unweighted XP distribution."""
+
+    if not values:
+        return 0.0
+    clamped = max(0.0, min(1.0, float(percentile)))
+    ordered = sorted(float(value) for value in values)
+    if len(ordered) == 1:
+        return ordered[0]
+    position = clamped * (len(ordered) - 1)
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return ordered[lower]
+    weight = position - lower
+    return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
+
+
+def projected_week_xp(
+    rival_power: int,
+    settled_xps: Sequence[int],
+    current_week_xp: int,
+) -> int:
+    """Estimate the rival's final week XP from power and a settled week.
+
+    ``rival_power / 2000`` is the percentile.  The most recent settled week's
+    XP distribution supplies the matching quantile; without one, this falls
+    back to the rival's current-week XP.  The result is rounded to hundreds.
+    """
+
+    if settled_xps:
+        percentile = max(0.0, float(rival_power) / PROJECTION_POWER_SCALE)
+        raw = percentile_value(settled_xps, percentile)
+    else:
+        raw = float(current_week_xp)
+    return round_to_step(raw, PROJECTION_WEEK_STEP)
+
+
+def projected_today_xp(today_xp: int, now: datetime) -> int:
+    """Extrapolate today's XP to the 22:00 cutoff, rounded to tens.
+
+    The elapsed fraction is measured against the 22-hour window and clamped to
+    at least 20% so a very early single event does not explode the estimate.
+    """
+
+    if today_xp <= 0:
+        return 0
+    local_now = cal.as_local(now)
+    elapsed = (local_now - cal.day_start_at(local_now.date())).total_seconds()
+    ratio = elapsed / (PROJECTION_DAY_WINDOW_HOURS * 3600)
+    ratio = max(PROJECTION_MIN_DAY_RATIO, min(1.0, ratio))
+    return round_to_step(today_xp / ratio, PROJECTION_DAY_STEP)
+
+
 __all__ = [
     "AUTO_POWER_BAND_MAX",
     "AUTO_POWER_BAND_MIN",
@@ -179,12 +265,22 @@ __all__ = [
     "BetWindowClosed",
     "DAILY_BET_LOCK_HOUR",
     "DAILY_BET_SETTLE_HOUR",
+    "DAILY_PROJECTION_TARGETS",
     "DAILY_STAKE",
     "DAILY_TARGET_ODDS",
     "DAILY_TARGET_PAYOUTS",
+    "FREE_BET_STAKE",
+    "GROUP_BET_SETTLE_OFFSET",
+    "GROUP_ODDS",
+    "GROUP_STAKES",
     "OUTCOME_DRAW",
     "OUTCOME_LOSS",
     "OUTCOME_WIN",
+    "PROJECTION_DAY_STEP",
+    "PROJECTION_DAY_WINDOW_HOURS",
+    "PROJECTION_MIN_DAY_RATIO",
+    "PROJECTION_POWER_SCALE",
+    "PROJECTION_WEEK_STEP",
     "RIVAL_DRAW_REWARD",
     "RIVAL_WIN_REWARD",
     "RivalError",
@@ -198,8 +294,13 @@ __all__ = [
     "auto_select_at",
     "daily_bet_locks_at",
     "daily_bet_settles_at",
+    "group_bet_settles_at",
+    "percentile_value",
+    "projected_today_xp",
+    "projected_week_xp",
     "rival_outcome",
     "rival_reward",
+    "round_to_step",
     "selection_window_open",
     "week_lock_at",
     "week_lock_display",

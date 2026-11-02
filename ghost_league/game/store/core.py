@@ -23,7 +23,7 @@ from ..stars import (
     is_valid_palette,
 )
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 ALGORITHM_VERSION = "phase1-v1"
 DEFAULT_DB_PATH = Path("data/league/league.db")
 SOURCE_AI = "wakatime_public_leaderboard"
@@ -462,6 +462,8 @@ CREATE TABLE IF NOT EXISTS bets (
     period_key TEXT NOT NULL,
     rival_id TEXT NOT NULL,
     stake INTEGER NOT NULL CHECK (stake >= 0),
+    free_stake INTEGER NOT NULL DEFAULT 0,
+    paid_stake INTEGER NOT NULL DEFAULT 0,
     target_margin INTEGER NOT NULL DEFAULT 0,
     odds REAL NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('placed', 'won', 'lost', 'void')),
@@ -477,6 +479,28 @@ CREATE INDEX IF NOT EXISTS idx_bets_player_kind_period
     ON bets (player_id, kind, period_key);
 CREATE INDEX IF NOT EXISTS idx_bets_kind_period_status
     ON bets (kind, period_key, status);
+
+CREATE TABLE IF NOT EXISTS group_bets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id TEXT NOT NULL,
+    week_start TEXT NOT NULL,
+    group_id INTEGER NOT NULL,
+    stake INTEGER NOT NULL,
+    free_stake INTEGER NOT NULL DEFAULT 20,
+    paid_stake INTEGER NOT NULL,
+    odds REAL NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('placed', 'won', 'lost', 'void')),
+    placed_at TEXT NOT NULL,
+    settled_at TEXT,
+    payout INTEGER NOT NULL DEFAULT 0,
+    group_rank INTEGER,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    UNIQUE (player_id, week_start)
+);
+CREATE INDEX IF NOT EXISTS idx_group_bets_week_group
+    ON group_bets (week_start, group_id);
+CREATE INDEX IF NOT EXISTS idx_group_bets_week_status
+    ON group_bets (week_start, status);
 """
 
 _TABLE_NAMES = (
@@ -519,6 +543,7 @@ _TABLE_NAMES = (
     "rival_assignments",
     "rival_results",
     "bets",
+    "group_bets",
 )
 
 
@@ -571,6 +596,7 @@ class CoreMixin:
             self._migrate_players(conn)
             self._migrate_shop(conn)
             self._migrate_stars(conn)
+            self._migrate_bets(conn)
             now = cal.iso_ts(
                 cal.parse_datetime(self._epoch_started_at)
                 if self._epoch_started_at is not None
@@ -1039,6 +1065,37 @@ class CoreMixin:
             "idx_player_stars_catalog_code "
             "ON player_stars (catalog_code)"
         )
+
+    @staticmethod
+    def _migrate_bets(conn: sqlite3.Connection) -> None:
+        """Add the per-bet free/paid split to an older ``bets`` table.
+
+        Legacy rows already paid their full stake, so they are backfilled with
+        ``free_stake = 0`` and ``paid_stake = stake``.  The update only runs
+        when a column is actually added, so it never rewrites newer bets on a
+        later startup.
+        """
+
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(bets)")
+        }
+        added_free = "free_stake" not in columns
+        added_paid = "paid_stake" not in columns
+        if added_free:
+            conn.execute(
+                "ALTER TABLE bets ADD COLUMN free_stake INTEGER NOT NULL "
+                "DEFAULT 0"
+            )
+        if added_paid:
+            conn.execute(
+                "ALTER TABLE bets ADD COLUMN paid_stake INTEGER NOT NULL "
+                "DEFAULT 0"
+            )
+        if added_free or added_paid:
+            conn.execute(
+                "UPDATE bets SET free_stake = 0, paid_stake = stake"
+            )
 
     @staticmethod
     def _migrate_diamonds(conn: sqlite3.Connection, *, now: str) -> None:

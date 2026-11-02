@@ -125,7 +125,9 @@ class RivalStateAPITests(RivalAPITestBase):
         self.assertIsNone(payload["result"])
         self.assertEqual(payload["me"]["user_id"], "owner")
         self.assertEqual(payload["me"]["group_no"], 1)
-        self.assertEqual(payload["bets"], {"weekly": None, "daily": None})
+        self.assertEqual(
+            payload["bets"], {"weekly": None, "daily": None, "group": None}
+        )
         self.assertEqual(
             payload["bet_windows"],
             {
@@ -260,8 +262,10 @@ class BetAPITests(RivalAPITestBase):
         weekly_payload = weekly.json()
         self.assertEqual(weekly_payload["bet"]["kind"], "weekly")
         self.assertEqual(weekly_payload["bet"]["stake"], 20)
+        self.assertEqual(weekly_payload["bet"]["free_stake"], 20)
+        self.assertEqual(weekly_payload["bet"]["paid_stake"], 0)
         self.assertEqual(weekly_payload["bet"]["odds"], 2.0)
-        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 980)
+        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 1000)
         self.assertEqual(
             weekly_payload["state"]["bets"]["weekly"]["id"],
             weekly_payload["bet"]["id"],
@@ -274,7 +278,7 @@ class BetAPITests(RivalAPITestBase):
         )
         self.assertEqual(repeat.status_code, 200, repeat.text)
         self.assertEqual(repeat.json()["bet"]["id"], weekly_payload["bet"]["id"])
-        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 980)
+        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 1000)
 
         daily = client.post(
             "/v1/me/bets",
@@ -283,9 +287,11 @@ class BetAPITests(RivalAPITestBase):
         )
         self.assertEqual(daily.status_code, 200, daily.text)
         self.assertEqual(daily.json()["bet"]["stake"], 20)
+        self.assertEqual(daily.json()["bet"]["free_stake"], 20)
+        self.assertEqual(daily.json()["bet"]["paid_stake"], 0)
         self.assertEqual(daily.json()["bet"]["target_margin"], 50)
         self.assertEqual(daily.json()["bet"]["odds"], 1.5)
-        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 960)
+        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 1000)
 
         duplicate_daily = client.post(
             "/v1/me/bets",
@@ -305,6 +311,8 @@ class BetAPITests(RivalAPITestBase):
         self.assertEqual(
             listed_payload["bets"]["daily"]["id"], daily.json()["bet"]["id"]
         )
+        self.assertIsNone(listed_payload["bets"]["group"])
+        self.assertIsNone(listed_payload["group"])
 
         keys: set[str] = set()
         collect_keys(weekly_payload, keys)
@@ -317,6 +325,48 @@ class BetAPITests(RivalAPITestBase):
             "balance",
         ):
             self.assertNotIn(forbidden, keys)
+
+    def test_group_bet_api_returns_group_without_rival(self) -> None:
+        client = self.client()
+        store = self.store(client)
+
+        response = client.post(
+            "/v1/me/bets",
+            headers=auth(),
+            json={"kind": "group", "stake": 40, "request_id": "group-1"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        bet = response.json()["bet"]
+        self.assertEqual(bet["kind"], "group")
+        self.assertEqual(bet["stake"], 40)
+        self.assertEqual(bet["free_stake"], 20)
+        self.assertEqual(bet["paid_stake"], 20)
+        self.assertEqual(bet["odds"], 2.0)
+        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 980)
+
+        repeat = client.post(
+            "/v1/me/bets",
+            headers=auth(),
+            json={"kind": "group", "stake": 40, "request_id": "group-1"},
+        )
+        self.assertEqual(repeat.status_code, 200, repeat.text)
+        self.assertEqual(repeat.json()["bet"]["id"], bet["id"])
+        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 980)
+
+        duplicate = client.post(
+            "/v1/me/bets",
+            headers=auth(),
+            json={"kind": "group", "stake": 20, "request_id": "group-2"},
+        )
+        self.assertEqual(duplicate.status_code, 409, duplicate.text)
+
+        listed = client.get("/v1/me/bets", headers=auth())
+        self.assertEqual(listed.status_code, 200, listed.text)
+        payload = listed.json()
+        self.assertEqual(payload["bets"]["group"]["id"], bet["id"])
+        self.assertEqual(payload["group"]["id"], bet["id"])
+        self.assertIsNone(payload["bets"]["weekly"])
+        self.assertIsNone(payload["bets"]["daily"])
 
     def test_bet_rejections(self) -> None:
         client = self.client()

@@ -16,12 +16,15 @@ from .. import calendar as cal
 from ..rival import (
     AUTO_POWER_BAND_MAX,
     AUTO_POWER_BAND_MIN,
+    DAILY_PROJECTION_TARGETS,
     RivalNotFound,
     RivalSelectionRejected,
     RivalWindowClosed,
     auto_select_at,
     daily_bet_locks_at,
     daily_bet_settles_at,
+    projected_today_xp,
+    projected_week_xp,
     rival_outcome,
     rival_reward,
     selection_window_open,
@@ -216,6 +219,52 @@ class RivalMixin:
             "daily_settles_at": cal.iso_ts(daily_bet_settles_at(day)),
         }
 
+    @staticmethod
+    def _projection_with(
+        conn: sqlite3.Connection,
+        local_now: datetime,
+        rival: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Estimate the lines shown on the betting screen.
+
+        These values are display-only.  Settlement keeps using the actual
+        final XP, never this projection.
+        """
+
+        if rival is None:
+            return None
+        settled = conn.execute(
+            "SELECT week_start FROM weeks WHERE status = 'settled' "
+            "ORDER BY week_start DESC LIMIT 1"
+        ).fetchone()
+        settled_xps: list[int] = []
+        if settled is not None:
+            settled_xps = [
+                int(row["xp"])
+                for row in conn.execute(
+                    "SELECT xp FROM weekly_scores WHERE week_start = ? "
+                    "ORDER BY player_id",
+                    (str(settled["week_start"]),),
+                )
+            ]
+        week_estimate = projected_week_xp(
+            int(rival["power"]),
+            settled_xps,
+            int(rival["week_xp"]),
+        )
+        today_estimate = projected_today_xp(
+            int(rival["today_xp"]), local_now
+        )
+        return {
+            "rival_week_estimate": week_estimate,
+            "week_line": week_estimate + 1,
+            "rival_today_estimate": today_estimate,
+            "daily_lines": {
+                str(target): today_estimate + target
+                for target in DAILY_PROJECTION_TARGETS
+            },
+        }
+
     # ------------------------------------------------------------------
     # Public read API
     # ------------------------------------------------------------------
@@ -276,6 +325,7 @@ class RivalMixin:
                 "ORDER BY week_start DESC LIMIT 1",
                 (player_id,),
             ).fetchone()
+            projection = self._projection_with(conn, local_now, rival)
 
         locked = bool(assignment and assignment["locked_at"])
         selection_open = selection_window_open(local_now, week_date) and not locked
@@ -305,6 +355,7 @@ class RivalMixin:
                 else None
             ),
             "bets": bets,
+            "projection": projection,
             "bet_windows": self._bet_windows(local_now),
         }
 

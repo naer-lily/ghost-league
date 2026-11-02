@@ -1,7 +1,8 @@
-"""Weekly/daily rival bets with immediate stake debit and idempotent payouts.
+"""Weekly/daily/group rival bets with a per-bet free stake.
 
-The stake is taken from the diamond wallet when the bet is placed; a win or a
-weekly draw pays back through the same diamond ledger.  Every payout uses a key
+Every bet carries up to 20 free principal, so only ``paid_stake`` is taken
+from the diamond wallet when the bet is placed.  A win pays on the full
+``stake``; a draw/void refunds only the paid part.  Every payout uses a key
 derived from the bet id, so replaying settlement can never pay twice.
 """
 
@@ -16,6 +17,9 @@ from ..rival import (
     DAILY_STAKE,
     DAILY_TARGET_ODDS,
     DAILY_TARGET_PAYOUTS,
+    FREE_BET_STAKE,
+    GROUP_ODDS,
+    GROUP_STAKES,
     WEEKLY_ODDS,
     WEEKLY_STAKES,
     BetAlreadyPlaced,
@@ -24,6 +28,7 @@ from ..rival import (
     RivalUnavailable,
     daily_bet_locks_at,
     daily_bet_settles_at,
+    group_bet_settles_at,
     rival_outcome,
     weekly_bet_locks_at,
 )
@@ -42,6 +47,8 @@ class BetsMixin:
             "period_key": str(data["period_key"]),
             "rival_id": str(data["rival_id"]),
             "stake": int(data["stake"]),
+            "free_stake": int(data["free_stake"]),
+            "paid_stake": int(data["paid_stake"]),
             "target_margin": int(data["target_margin"]),
             "odds": float(data["odds"]),
             "status": str(data["status"]),
@@ -52,6 +59,33 @@ class BetsMixin:
             "result_diff": (
                 int(data["result_diff"])
                 if data["result_diff"] is not None
+                else None
+            ),
+        }
+
+    @staticmethod
+    def _group_bet_payload(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+        data = dict(row)
+        return {
+            "id": int(data["id"]),
+            "kind": "group",
+            "period_key": str(data["week_start"]),
+            "rival_id": None,
+            "stake": int(data["stake"]),
+            "free_stake": int(data["free_stake"]),
+            "paid_stake": int(data["paid_stake"]),
+            "target_margin": 0,
+            "odds": float(data["odds"]),
+            "status": str(data["status"]),
+            "placed_at": str(data["placed_at"]),
+            "locked_at": None,
+            "settled_at": data["settled_at"],
+            "payout": int(data["payout"]),
+            "result_diff": None,
+            "group_id": int(data["group_id"]),
+            "group_rank": (
+                int(data["group_rank"])
+                if data["group_rank"] is not None
                 else None
             ),
         }
@@ -69,6 +103,17 @@ class BetsMixin:
             (player_id, kind, period_key),
         ).fetchone()
 
+    @staticmethod
+    def _group_bet_row_with(
+        conn: sqlite3.Connection,
+        player_id: str,
+        week_iso: str,
+    ) -> sqlite3.Row | None:
+        return conn.execute(
+            "SELECT * FROM group_bets WHERE player_id = ? AND week_start = ?",
+            (player_id, week_iso),
+        ).fetchone()
+
     def _bets_for_with(
         self,
         conn: sqlite3.Connection,
@@ -78,9 +123,13 @@ class BetsMixin:
     ) -> dict[str, dict[str, Any] | None]:
         weekly = self._bet_row_with(conn, player_id, "weekly", week_iso)
         daily = self._bet_row_with(conn, player_id, "daily", day_iso)
+        group = self._group_bet_row_with(conn, player_id, week_iso)
         return {
             "weekly": self._bet_payload(weekly) if weekly is not None else None,
             "daily": self._bet_payload(daily) if daily is not None else None,
+            "group": (
+                self._group_bet_payload(group) if group is not None else None
+            ),
         }
 
     def bets_for(
@@ -88,7 +137,7 @@ class BetsMixin:
         player_id: str,
         now: datetime | str | None = None,
     ) -> dict[str, dict[str, Any] | None]:
-        """Return this week's and today's bet, if any."""
+        """Return this week's weekly/group bet and today's daily bet."""
 
         local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
         week_iso = cal.iso_date(cal.week_start(local_now))
@@ -110,7 +159,7 @@ class BetsMixin:
     ) -> dict[str, Any]:
         if not isinstance(request_id, str) or not request_id.strip():
             raise ValueError("request_id must be non-empty")
-        if kind not in {"weekly", "daily"}:
+        if kind not in {"weekly", "daily", "group"}:
             raise BetRejected("invalid_kind", "下注类型不合法")
         if isinstance(stake, bool) or (
             stake is not None and not isinstance(stake, int)
@@ -137,7 +186,7 @@ class BetsMixin:
             target = 0
             odds = WEEKLY_ODDS
             resolved_stake = int(stake)
-        else:
+        elif kind == "daily":
             if stake is not None and stake != DAILY_STAKE:
                 raise BetRejected("invalid_stake", "日注本金固定为 20")
             if target_margin not in DAILY_TARGET_ODDS:
@@ -148,13 +197,97 @@ class BetsMixin:
             target = int(target_margin)
             odds = DAILY_TARGET_ODDS[target]
             resolved_stake = DAILY_STAKE
+        else:
+            if stake not in GROUP_STAKES:
+                raise BetRejected(
+                    "invalid_stake", "组注本金必须是 20、40 或 60"
+                )
+            if target_margin not in (None, 0):
+                raise BetRejected("invalid_target", "组注不需要目标差值")
+            period_key = week_iso
+            target = 0
+            odds = GROUP_ODDS
+            resolved_stake = int(stake)
 
-        bet_key = f"bet:{player_id}:{kind}:{period_key}:{request_id}"
+        free_stake = min(FREE_BET_STAKE, resolved_stake)
+        paid_stake = resolved_stake - free_stake
+        bet_key = (
+            f"group-bet:{player_id}:{week_iso}:{request_id}"
+            if kind == "group"
+            else f"bet:{player_id}:{kind}:{period_key}:{request_id}"
+        )
 
         with self.transaction() as conn:
             player = self._get_player_with(conn, player_id)  # type: ignore[attr-defined]
             if str(player["kind"]) != "human":
                 raise BetRejected("human_only", "只有真人可以下注")
+
+            if kind == "group":
+                existing_group = self._group_bet_row_with(
+                    conn, player_id, week_iso
+                )
+                if existing_group is not None:
+                    if str(existing_group["idempotency_key"]) == bet_key:
+                        return self._group_bet_payload(existing_group)
+                    raise BetAlreadyPlaced("本周已经下过组注")
+                keyed_group = conn.execute(
+                    "SELECT * FROM group_bets WHERE idempotency_key = ?",
+                    (bet_key,),
+                ).fetchone()
+                if keyed_group is not None:
+                    return self._group_bet_payload(keyed_group)
+
+                if local_now >= weekly_bet_locks_at(week_date):
+                    raise BetWindowClosed("组注已截止")
+                group = conn.execute(
+                    "SELECT g.id AS group_id FROM groups g "
+                    "JOIN group_members gm ON gm.group_id = g.id "
+                    "WHERE g.week_start = ? AND gm.player_id = ? "
+                    "ORDER BY g.id DESC LIMIT 1",
+                    (week_iso, player_id),
+                ).fetchone()
+                if group is None:
+                    raise BetRejected(
+                        "no_group", "本周还没有分组，暂时不能下组注"
+                    )
+
+                if paid_stake > 0:
+                    self._debit_diamonds_with(  # type: ignore[attr-defined]
+                        conn,
+                        player_id=player_id,
+                        amount=paid_stake,
+                        reason="group_bet_stake",
+                        ref_type="group_bet",
+                        ref_id=week_iso,
+                        idempotency_key=f"group-bet-stake:{bet_key}",
+                        now=local_now,
+                        create_for_unknown=False,
+                    )
+                now_iso = cal.iso_ts(local_now)
+                cursor = conn.execute(
+                    "INSERT INTO group_bets "
+                    "(player_id, week_start, group_id, stake, free_stake, "
+                    "paid_stake, odds, status, placed_at, settled_at, payout, "
+                    "group_rank, idempotency_key) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 'placed', ?, NULL, 0, "
+                    "NULL, ?)",
+                    (
+                        player_id,
+                        week_iso,
+                        int(group["group_id"]),
+                        resolved_stake,
+                        free_stake,
+                        paid_stake,
+                        odds,
+                        now_iso,
+                        bet_key,
+                    ),
+                )
+                group_bet_id = int(cursor.lastrowid)
+                stored_group = conn.execute(
+                    "SELECT * FROM group_bets WHERE id = ?", (group_bet_id,)
+                ).fetchone()
+                return self._group_bet_payload(stored_group)
 
             existing = self._bet_row_with(conn, player_id, kind, period_key)
             if existing is not None:
@@ -184,30 +317,35 @@ class BetsMixin:
                 raise BetWindowClosed("日注已截止")
 
             rival_id = str(assignment["rival_id"])
-            self._debit_diamonds_with(  # type: ignore[attr-defined]
-                conn,
-                player_id=player_id,
-                amount=resolved_stake,
-                reason="bet_stake",
-                ref_type="bet",
-                ref_id=f"{kind}:{period_key}",
-                idempotency_key=f"bet-stake:{bet_key}",
-                now=local_now,
-                create_for_unknown=False,
-            )
+            if paid_stake > 0:
+                self._debit_diamonds_with(  # type: ignore[attr-defined]
+                    conn,
+                    player_id=player_id,
+                    amount=paid_stake,
+                    reason="bet_stake",
+                    ref_type="bet",
+                    ref_id=f"{kind}:{period_key}",
+                    idempotency_key=f"bet-stake:{bet_key}",
+                    now=local_now,
+                    create_for_unknown=False,
+                )
             now_iso = cal.iso_ts(local_now)
             cursor = conn.execute(
                 "INSERT INTO bets "
-                "(player_id, kind, period_key, rival_id, stake, "
-                "target_margin, odds, status, placed_at, locked_at, "
-                "settled_at, payout, result_diff, idempotency_key) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, 'placed', ?, ?, NULL, 0, NULL, ?)",
+                "(player_id, kind, period_key, rival_id, stake, free_stake, "
+                "paid_stake, target_margin, odds, status, placed_at, "
+                "locked_at, settled_at, payout, result_diff, "
+                "idempotency_key) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'placed', ?, ?, NULL, "
+                "0, NULL, ?)",
                 (
                     player_id,
                     kind,
                     period_key,
                     rival_id,
                     resolved_stake,
+                    free_stake,
+                    paid_stake,
                     target,
                     odds,
                     now_iso,
@@ -298,6 +436,28 @@ class BetsMixin:
             ref_type="bet",
             ref_id=str(bet_id),
             idempotency_key=f"bet-payout:{bet_id}",
+            now=now,
+        )
+
+    def _credit_group_payout_with(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        group_bet_id: int,
+        player_id: str,
+        payout: int,
+        now: datetime,
+    ) -> None:
+        if payout <= 0:
+            return
+        self._credit_diamonds_with(  # type: ignore[attr-defined]
+            conn,
+            player_id=player_id,
+            amount=int(payout),
+            reason="group_bet_payout",
+            ref_type="group_bet",
+            ref_id=str(group_bet_id),
+            idempotency_key=f"group-bet-payout:{group_bet_id}",
             now=now,
         )
 
@@ -429,7 +589,7 @@ class BetsMixin:
                 payout = stake * 2
             elif outcome == "draw":
                 status = "void"
-                payout = stake
+                payout = int(row["paid_stake"])
             else:
                 status = "lost"
                 payout = 0
@@ -452,6 +612,137 @@ class BetsMixin:
                 "SELECT * FROM bets WHERE id = ?", (bet_id,)
             ).fetchone()
             results.append(self._bet_payload(stored))
+        return {
+            "week_start": week_iso,
+            "status": "settled",
+            "settled": len(results),
+            "results": results,
+        }
+
+    # ------------------------------------------------------------------
+    # Group settlement
+    # ------------------------------------------------------------------
+    def settle_group_bets(
+        self,
+        week: date | datetime | str,
+        now: datetime | str | None = None,
+        *,
+        conn: sqlite3.Connection | None = None,
+    ) -> dict[str, Any]:
+        """Settle this week's group bets on the next Monday 00:05 pass.
+
+        A group bet wins when its group's summed ``weekly_scores.xp`` is in the
+        top three of its tier; ties break by ascending ``group_id``.  The rank
+        is written back, and a replayed settlement cannot pay twice.
+        """
+
+        week_date = cal.week_start(week)
+        week_iso = week_date.isoformat()
+        local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
+        if local_now < group_bet_settles_at(week_date):
+            return {
+                "week_start": week_iso,
+                "status": "skipped",
+                "reason": "before_group_settlement",
+                "settled": 0,
+                "results": [],
+            }
+        if conn is not None:
+            return self._settle_group_bets_with(conn, week_iso, local_now)
+        with self.transaction() as tx:
+            return self._settle_group_bets_with(tx, week_iso, local_now)
+
+    def _group_rankings_with(
+        self,
+        conn: sqlite3.Connection,
+        week_iso: str,
+        tier: str,
+    ) -> dict[int, int]:
+        rows = conn.execute(
+            "SELECT g.id AS group_id, "
+            "COALESCE(SUM(COALESCE(ws.xp, 0)), 0) AS group_xp "
+            "FROM groups g "
+            "LEFT JOIN group_members gm ON gm.group_id = g.id "
+            "LEFT JOIN weekly_scores ws "
+            "ON ws.week_start = ? AND ws.player_id = gm.player_id "
+            "WHERE g.week_start = ? AND g.tier = ? "
+            "GROUP BY g.id "
+            "ORDER BY group_xp DESC, g.id ASC",
+            (week_iso, week_iso, tier),
+        ).fetchall()
+        return {
+            int(row["group_id"]): index + 1
+            for index, row in enumerate(rows)
+        }
+
+    def _settle_group_bets_with(
+        self,
+        conn: sqlite3.Connection,
+        week_iso: str,
+        local_now: datetime,
+    ) -> dict[str, Any]:
+        settled_at = cal.iso_ts(local_now)
+        rows = conn.execute(
+            "SELECT * FROM group_bets WHERE week_start = ? "
+            "AND status = 'placed' ORDER BY id",
+            (week_iso,),
+        ).fetchall()
+        rankings_by_tier: dict[str, dict[int, int]] = {}
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            group_bet_id = int(row["id"])
+            player_id = str(row["player_id"])
+            group_id = int(row["group_id"])
+            paid_stake = int(row["paid_stake"])
+            stake = int(row["stake"])
+
+            group = conn.execute(
+                "SELECT tier FROM groups WHERE id = ? AND week_start = ?",
+                (group_id, week_iso),
+            ).fetchone()
+            group_rank: int | None = None
+            if group is not None:
+                tier = str(group["tier"])
+                rankings = rankings_by_tier.get(tier)
+                if rankings is None:
+                    rankings = self._group_rankings_with(
+                        conn, week_iso, tier
+                    )
+                    rankings_by_tier[tier] = rankings
+                group_rank = rankings.get(group_id)
+
+            if group_rank is None:
+                # Missing group/ranking data is a data anomaly, so void the
+                # bet and return only the paid principal.
+                status = "void"
+                payout = paid_stake
+            elif group_rank <= 3:
+                status = "won"
+                payout = stake * 2
+            else:
+                status = "lost"
+                payout = 0
+
+            cursor = conn.execute(
+                "UPDATE group_bets SET status = ?, settled_at = ?, "
+                "payout = ?, group_rank = ? "
+                "WHERE id = ? AND status = 'placed'",
+                (status, settled_at, payout, group_rank, group_bet_id),
+            )
+            if cursor.rowcount == 0:
+                continue
+            self._credit_group_payout_with(
+                conn,
+                group_bet_id=group_bet_id,
+                player_id=player_id,
+                payout=payout,
+                now=local_now,
+            )
+            stored = conn.execute(
+                "SELECT * FROM group_bets WHERE id = ?", (group_bet_id,)
+            ).fetchone()
+            results.append(self._group_bet_payload(stored))
+
         return {
             "week_start": week_iso,
             "status": "settled",

@@ -163,7 +163,7 @@ class RivalSelectRequest(BaseModel):
 class BetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["weekly", "daily"]
+    kind: Literal["weekly", "daily", "group"]
     stake: int | None = Field(default=None, strict=True)
     target_margin: int | None = Field(default=None, strict=True)
     request_id: str = Field(min_length=1, max_length=200)
@@ -919,11 +919,15 @@ class GameService:
     def bets_for(self, account: dict[str, Any]) -> dict[str, Any]:
         now, week = self._prepare_read(account)
         state = self._rival_payload(account, now, week)
+        bets = state["bets"]
         return {
             "server_now": state["server_now"],
             "week_start": state["week_start"],
             "day": now.date().isoformat(),
-            "bets": state["bets"],
+            "weekly": bets["weekly"],
+            "daily": bets["daily"],
+            "group": bets["group"],
+            "bets": bets,
             "bet_windows": state["bet_windows"],
         }
 

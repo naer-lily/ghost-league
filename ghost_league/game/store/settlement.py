@@ -223,6 +223,9 @@ class SettlementMixin:
                 weekly_bets = self.settle_weekly_bets(  # type: ignore[attr-defined]
                     week_date, now=local_now, conn=conn
                 )
+                group_bets = self.settle_group_bets(  # type: ignore[attr-defined]
+                    week_date, now=local_now, conn=conn
+                )
                 results = conn.execute(
                     "SELECT * FROM weekly_results WHERE week_start = ? "
                     "ORDER BY group_id, rank",
@@ -241,6 +244,7 @@ class SettlementMixin:
                     ],
                     "rivals": rivals,
                     "weekly_bets": weekly_bets,
+                    "group_bets": group_bets,
                 }
 
             groups = conn.execute(
@@ -257,12 +261,16 @@ class SettlementMixin:
                 weekly_bets = self.settle_weekly_bets(  # type: ignore[attr-defined]
                     week_date, now=local_now, conn=conn
                 )
+                group_bets = self.settle_group_bets(  # type: ignore[attr-defined]
+                    week_date, now=local_now, conn=conn
+                )
                 return {
                     "week_start": week_iso,
                     "already_settled": False,
                     "results": [],
                     "rivals": rivals,
                     "weekly_bets": weekly_bets,
+                    "group_bets": group_bets,
                 }
             self._ensure_week_with(conn, week_iso, "locked")
 
@@ -388,12 +396,16 @@ class SettlementMixin:
             weekly_bets = self.settle_weekly_bets(  # type: ignore[attr-defined]
                 week_date, now=local_now, conn=conn
             )
+            group_bets = self.settle_group_bets(  # type: ignore[attr-defined]
+                week_date, now=local_now, conn=conn
+            )
             return {
                 "week_start": week_iso,
                 "already_settled": False,
                 "results": results,
                 "rivals": rivals,
                 "weekly_bets": weekly_bets,
+                "group_bets": group_bets,
             }
 
 

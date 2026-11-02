@@ -9,6 +9,7 @@ from ghost_league.game.rival import (
     RivalNotFound,
     RivalSelectionRejected,
     RivalWindowClosed,
+    projected_today_xp,
 )
 from ghost_league.game.store import GameStore
 from ghost_league.schedule import TZ
@@ -327,3 +328,65 @@ def test_settle_rivals_rewards_once_per_outcome(tmp_path: Path) -> None:
     state = store.rival_state("win", now=NEXT_MONDAY)
     assert state["result"]["outcome"] == "win"
     assert state["result"]["reward_diamonds"] == 120
+
+
+def test_projection_uses_settled_percentile_and_daily_ratio(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path)
+    add_player(store, "h1", power=500)
+    add_player(store, "rival", power=1000)
+    store.create_group(WEEK, tier="Bronze", player_ids=["h1"], now=MONDAY)
+    store.create_group(WEEK, tier="Bronze", player_ids=["rival"], now=MONDAY)
+    set_week_xp(store, "h1", 100)
+    set_week_xp(store, "rival", 100)
+    store.select_rival("h1", "rival", now=MONDAY, request_id="projection")
+    store.ensure_week(PREVIOUS_WEEK, status="settled")
+    for index, xp in enumerate((100, 200, 300, 400, 500), start=1):
+        set_week_xp(
+            store, f"past-{index}", xp, week=PREVIOUS_WEEK
+        )
+
+    at = datetime(2026, 11, 2, 11, 0, 0, tzinfo=TZ)
+    store.ingest_activity(
+        "rival",
+        event_id="rival-today",
+        seconds=600,
+        occurred_at=datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ),
+        source="local_increment",
+        now=at,
+    )
+    state = store.rival_state("h1", now=at)
+    assert state["bets"]["group"] is None
+    assert state["projection"] == {
+        "rival_week_estimate": 300,
+        "week_line": 301,
+        "rival_today_estimate": 200,
+        "daily_lines": {"50": 250, "150": 350, "300": 500},
+    }
+
+
+def test_projection_falls_back_without_settled_week(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    add_player(store, "h1", power=500)
+    add_player(store, "rival", power=1500)
+    store.create_group(WEEK, tier="Bronze", player_ids=["h1"], now=MONDAY)
+    store.create_group(WEEK, tier="Bronze", player_ids=["rival"], now=MONDAY)
+    set_week_xp(store, "h1", 100)
+    set_week_xp(store, "rival", 123)
+    store.select_rival("h1", "rival", now=MONDAY, request_id="fallback")
+
+    state = store.rival_state("h1", now=MONDAY)
+    assert state["projection"] == {
+        "rival_week_estimate": 100,
+        "week_line": 101,
+        "rival_today_estimate": 0,
+        "daily_lines": {"50": 50, "150": 150, "300": 300},
+    }
+
+
+def test_projected_today_xp_clamps_ratio() -> None:
+    assert projected_today_xp(0, datetime(2026, 11, 2, 0, 5, tzinfo=TZ)) == 0
+    assert projected_today_xp(100, datetime(2026, 11, 2, 11, 0, tzinfo=TZ)) == 200
+    assert projected_today_xp(100, datetime(2026, 11, 2, 0, 5, tzinfo=TZ)) == 500
+    assert projected_today_xp(100, datetime(2026, 11, 2, 23, 0, tzinfo=TZ)) == 100

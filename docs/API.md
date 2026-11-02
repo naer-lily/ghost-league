@@ -29,8 +29,8 @@ Channel token。`/badge/...`、`/embed/...`、`/health` 和 `/avatars/...` 公�
 | GET | `/v1/me/rival` | 本周宿敌、选择窗口、下注与上次结果 |
 | GET | `/v1/me/rival/candidates` | 可选择的宿敌候选（跨组） |
 | POST | `/v1/me/rival/select` | 手动选择/改选本周宿敌 |
-| GET | `/v1/me/bets` | 本周周注与当天日注 |
-| POST | `/v1/me/bets` | 下注周注或日注 |
+| GET | `/v1/me/bets` | 本周周注、组注与当天日注 |
+| POST | `/v1/me/bets` | 下注周注、组注或日注 |
 | GET | `/v1/me/stars/{star_id}/svg` | 自己一颗星的独属 SVG |
 | POST | `/v1/me/increments` | 写入真人活动增量 |
 | POST | `/v1/channels/{channel_id}/roster` | Channel 全量周名单 |
@@ -938,8 +938,10 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 ## 宿敌与下注
 
 宿敌是每周一次的跨组配对，只属于真人；它不参与小组排名，也不会改变 `weekly_scores`
-或升降段。周注和日注都要求本周已有宿敌；本金在下注时立即从 `diamond_balance` 扣除，
-中奖通过 `credit_diamonds()` 的同一本账入账。
+或升降段。周注和日注都要求本周已有宿敌；组注要求本周已有小组，但不需要宿敌。
+每笔下注自带 `free_stake = min(20, stake)`：下注时只从 `diamond_balance` 扣除
+`paid_stake = stake - free_stake`，中奖按完整 `stake` 结算并通过 `credit_diamonds()`
+的同一本账入账。输只失去自付部分；平局/void 只退自付部分。
 
 ### 时间口径（Asia/Shanghai）
 
@@ -947,6 +949,8 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 - 自动选：周二 `00:00` 起，为没有宿敌的真人匹配；之后不能改选。没有合适候选时
   `rival` 为 `null`，不伪造对手。
 - 周注：周一 `23:59:59` 前可下；下一个周一 `00:05` 的 `settle_week()` 结算。
+- 组注：与周注同一窗口；下一个周一 `00:05` 随 `settle_week()` 结算，每真人每周
+  一次，可与周注/日注同时存在。
 - 日注：当天 `20:00` 前可下（`now < 20:00`），`20:00` 锁注，`22:00` 结算。
 - 日注按当天 `22:00` 时的打卡 XP 差判定，不使用 23:59 的最终日 XP。
 
@@ -976,7 +980,8 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
   },
   "rival": null,
   "result": null,
-  "bets": {"weekly": null, "daily": null},
+  "bets": {"weekly": null, "daily": null, "group": null},
+  "projection": null,
   "bet_windows": {
     "weekly_locks_at": "2026-11-02T23:59:59+08:00",
     "daily_locks_at": "2026-11-02T20:00:00+08:00",
@@ -990,6 +995,22 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 - `me` / `rival` 只含公开字段；不返回 `kind`、`is_ai`、钱包或钻石余额。
 - `result` 是最近一次已结算宿敌结果（`outcome`、`my_xp`、`rival_xp`、
   `reward_diamonds`、`settled_at`），没有则为 `null`。
+- `projection` 只用于下注界面展示，不参与结算；没有宿敌时为 `null`。有宿敌时：
+
+```json
+{
+  "rival_week_estimate": 3400,
+  "week_line": 3401,
+  "rival_today_estimate": 200,
+  "daily_lines": {"50": 250, "150": 350, "300": 500}
+}
+```
+
+周线：用宿敌 `power / 2000` 作百分位，取最近一个 `weeks.status='settled'` 周的
+`weekly_scores.xp` 分位值，四舍五入到百位；没有已结算周时退化到宿敌本周 XP。
+日线：用当前 `today_xp / 已过比例` 外推到当天 `22:00`，比例最低按 `20%` 计算，
+四舍五入到十位；当天没有 XP 时估计为 `0`。`daily_lines[target] = 估计值 + target`，
+`target` 为 `50` / `150` / `300`。
 
 ### `GET /v1/me/rival/candidates`
 
@@ -1033,7 +1054,10 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
   "server_now": "2026-11-02T12:00:00+08:00",
   "week_start": "2026-11-02",
   "day": "2026-11-02",
-  "bets": {"weekly": null, "daily": null},
+  "weekly": null,
+  "daily": null,
+  "group": null,
+  "bets": {"weekly": null, "daily": null, "group": null},
   "bet_windows": {
     "weekly_locks_at": "2026-11-02T23:59:59+08:00",
     "daily_locks_at": "2026-11-02T20:00:00+08:00",
@@ -1041,6 +1065,10 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
   }
 }
 ```
+
+`weekly` / `daily` / `group` 是 `bets` 同名字段的顶层别名，二者内容一致。
+每笔下注都包含 `stake`、`free_stake`、`paid_stake`、`odds`、`status`、`payout`；
+组注另含 `group_id` 和结算后的 `group_rank`。
 
 ### `POST /v1/me/bets`
 
@@ -1051,7 +1079,22 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 ```
 
 - `stake` 只能是 `20` / `40` / `60`，`odds` 固定 `2.0`。
-- 赢：总返 `stake * 2`；平：退本金（`status=void`）；输：失去本金。
+- `free_stake = min(20, stake)`，`paid_stake = stake - free_stake`；下注只扣
+  `paid_stake`（20 注扣 0、40 注扣 20、60 注扣 40）。赢：总返 `stake * 2`；
+  平：只退 `paid_stake`（`status=void`）；输：失去 `paid_stake`。
+
+组注：
+
+```json
+{"kind": "group", "stake": 20, "request_id": "group-20261102"}
+```
+
+- 要求本周已有小组；与周注/日注可同时存在，每个真人每周一次。
+- `stake` 只能是 `20` / `40` / `60`，`odds` 固定 `2.0`，免费 20 规则同上。
+- 押“我所在的小组本周在本 tier 内进前三”。组排名按本周 `weekly_scores` 的组内
+  XP 总和降序，同分按 `group_id` 升序。
+- 赢：总返 `stake * 2`；输：失去 `paid_stake`。没有平局；`void` 仅用于数据异常，
+  只退 `paid_stake`。结算写入 `group_rank`，重复结算不重复打款。
 
 日注：
 
@@ -1059,20 +1102,21 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 {"kind": "daily", "target_margin": 50, "request_id": "daily-20261102"}
 ```
 
-- 固定本金 `20`；`target_margin` 只能是 `50` / `150` / `300`，对应 `odds`
-  `1.5` / `2.5` / `4.0`，中奖总返 `30` / `50` / `80`。
+- 固定本金 `20`（免费 20，自付 0）；`target_margin` 只能是 `50` / `150` / `300`，
+  对应 `odds` `1.5` / `2.5` / `4.0`，中奖总返 `30` / `50` / `80`。
 - 判定：`my_today_xp - rival_today_xp >= target_margin` 为赢，否则输；没有平局退款。
-- 每週/每天只能一笔；重复 `request_id` 返回原下注，不重复扣款。
+- 周注/组注每週、日注每天只能一笔；重复 `request_id` 返回原下注，不重复扣款。
 - 成功返回 `{"bet": {...}, "state": {...}}`，`state` 与 `GET /v1/me/rival` 同结构。
 
 宿敌周结算：比较本周最终 `weekly_scores.xp`；真人赢 `+120` 钻石，平 `+40`，输 `0`。
-结算和周注都随下一次 `settle_week()` 执行，幂等，重复结算不会重复发钱。
+宿敌、周注、组注都随下一次 `settle_week()` 执行，幂等，重复结算不会重复发钱；
+组注在下一个周一 `00:05` 的结算窗口写入 `group_rank`。
 
 ### 下注错误
 
-- `409`：选择/下注窗口关闭、本周/当天已下注、没有宿敌、钻石不足。
+- `409`：选择/下注窗口关闭、本周/当天/本周组注已下注、没有宿敌、钻石不足。
 - `404`：候选不存在。
-- `422`：本金、目标差值或请求体不合法。
+- `422`：本金、目标差值或请求体不合法；组注时本周还没有分组。
 - `401`：缺少或错误的 Bearer token。
 
 钻石软上限不拒绝下注；扣款后余额可以高于上限，超出部分继续按每小时 1% 复利衰减。
