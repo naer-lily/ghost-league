@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -11,6 +12,16 @@ from typing import Any
 
 from .. import calendar as cal
 from ..progression import CATALOG_ITEMS, CATALOG_TITLES
+from ..stars import (
+    RARITY_TYPE_POOLS,
+    TYPE_PALETTES,
+    VISUAL_SEED_MAX,
+    catalog_code_is_valid,
+    companion_count_for,
+    deterministic_catalog_code,
+    deterministic_star_visual,
+    is_valid_palette,
+)
 
 SCHEMA_VERSION = "4"
 ALGORITHM_VERSION = "phase1-v1"
@@ -342,6 +353,12 @@ CREATE TABLE IF NOT EXISTS player_stars (
     price_diamonds INTEGER NOT NULL,
     acquired_at TEXT NOT NULL,
     source TEXT NOT NULL,
+    star_type TEXT,
+    rarity TEXT,
+    palette_json TEXT,
+    visual_seed INTEGER,
+    companion_count INTEGER,
+    catalog_code TEXT,
     UNIQUE (player_id, season_key)
 );
 
@@ -501,6 +518,7 @@ class CoreMixin:
             self._migrate_sources(conn)
             self._migrate_players(conn)
             self._migrate_shop(conn)
+            self._migrate_stars(conn)
             now = cal.iso_ts(
                 cal.parse_datetime(self._epoch_started_at)
                 if self._epoch_started_at is not None
@@ -590,7 +608,7 @@ class CoreMixin:
             (
                 "star",
                 "星星",
-                "收藏用星星，可以重复购买；购买时必须为这颗星命名。",
+                "300 钻石抽一颗随机星；名字可省略，由服务器生成，仅自己可见。",
                 300,
                 "inventory",
                 "star",
@@ -604,7 +622,7 @@ class CoreMixin:
             (
                 "seasonal_star",
                 "季节星",
-                "当月限定星星；每个自然月最多购买一颗，必须命名。",
+                "500 钻石抽一颗当季随机星；每个自然月最多一颗，名字可省略。",
                 500,
                 "inventory",
                 "seasonal_star",
@@ -824,6 +842,150 @@ class CoreMixin:
         conn.execute(
             "UPDATE shop_items SET kind = 'inventory' "
             "WHERE kind IS NULL OR kind = ''"
+        )
+        # Only replace the exact legacy copy, so operator edits survive.
+        conn.execute(
+            "UPDATE shop_items SET description = ? "
+            "WHERE id = 'star' AND description = ?",
+            (
+                "300 钻石抽一颗随机星；名字可省略，由服务器生成，仅自己可见。",
+                "收藏用星星，可以重复购买；购买时必须为这颗星命名。",
+            ),
+        )
+        conn.execute(
+            "UPDATE shop_items SET description = ? "
+            "WHERE id = 'seasonal_star' AND description = ?",
+            (
+                "500 钻石抽一颗当季随机星；每个自然月最多一颗，名字可省略。",
+                "当月限定星星；每个自然月最多购买一颗，必须命名。",
+            ),
+        )
+
+    @staticmethod
+    def _migrate_stars(conn: sqlite3.Connection) -> None:
+        """Add and backfill the gacha visual fields on legacy star rows.
+
+        Columns are added with ``ALTER TABLE`` so existing rows survive.  Any
+        missing value is derived from the row's stable ``id`` (and season key),
+        never from wall-clock randomness, then a unique catalog-code index is
+        installed.  Re-running the migration is idempotent.
+        """
+
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(player_stars)")
+        }
+        additions = {
+            "star_type": "TEXT",
+            "rarity": "TEXT",
+            "palette_json": "TEXT",
+            "visual_seed": "INTEGER",
+            "companion_count": "INTEGER",
+            "catalog_code": "TEXT",
+        }
+        for name, declaration in additions.items():
+            if name not in columns:
+                conn.execute(
+                    f"ALTER TABLE player_stars ADD COLUMN {name} {declaration}"
+                )
+
+        rows = conn.execute(
+            "SELECT id, season_key, acquired_at, star_type, rarity, "
+            "palette_json, visual_seed, companion_count, catalog_code "
+            "FROM player_stars ORDER BY rowid"
+        ).fetchall()
+        existing_codes = {
+            str(row["catalog_code"])
+            for row in rows
+            if row["catalog_code"] and str(row["catalog_code"]).strip()
+        }
+        seen_codes: set[str] = set()
+        for row in rows:
+            star_id = str(row["id"])
+            season_key = row["season_key"]
+            stored_type = (
+                str(row["star_type"])
+                if row["star_type"] in TYPE_PALETTES
+                else None
+            )
+            stored_rarity = (
+                str(row["rarity"])
+                if row["rarity"] in RARITY_TYPE_POOLS
+                else None
+            )
+            visual = deterministic_star_visual(
+                star_id,
+                season_key=season_key,
+                star_type=stored_type,
+                rarity=stored_rarity,
+            )
+            star_type = str(visual["star_type"])
+            rarity = str(visual["rarity"])
+            palette = visual["palette"]
+            try:
+                stored_palette = json.loads(str(row["palette_json"]))
+            except (TypeError, ValueError):
+                stored_palette = None
+            if stored_type is not None and is_valid_palette(stored_palette):
+                palette = [str(color) for color in stored_palette]
+            visual_seed = row["visual_seed"]
+            if (
+                not isinstance(visual_seed, int)
+                or isinstance(visual_seed, bool)
+                or not 1 <= visual_seed <= VISUAL_SEED_MAX
+            ):
+                visual_seed = int(visual["visual_seed"])
+            companion_count = companion_count_for(star_type)
+
+            catalog_code = row["catalog_code"]
+            if (
+                not catalog_code_is_valid(catalog_code)
+                or str(catalog_code) in seen_codes
+            ):
+                salt = 0
+                catalog_code = deterministic_catalog_code(
+                    star_id, row["acquired_at"], salt
+                )
+                while (
+                    str(catalog_code) in existing_codes
+                    or str(catalog_code) in seen_codes
+                ):
+                    salt += 1
+                    catalog_code = deterministic_catalog_code(
+                        star_id, row["acquired_at"], salt
+                    )
+            catalog_code = str(catalog_code)
+            seen_codes.add(catalog_code)
+            palette_json = json.dumps(palette, ensure_ascii=False)
+            unchanged = (
+                row["star_type"] == star_type
+                and row["rarity"] == rarity
+                and row["palette_json"] == palette_json
+                and row["visual_seed"] == visual_seed
+                and row["companion_count"] == companion_count
+                and row["catalog_code"] == catalog_code
+            )
+            if unchanged:
+                continue
+            conn.execute(
+                "UPDATE player_stars SET star_type = ?, rarity = ?, "
+                "palette_json = ?, visual_seed = ?, companion_count = ?, "
+                "catalog_code = ? WHERE id = ?",
+                (
+                    star_type,
+                    rarity,
+                    palette_json,
+                    visual_seed,
+                    companion_count,
+                    catalog_code,
+                    star_id,
+                ),
+            )
+
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "idx_player_stars_catalog_code "
+            "ON player_stars (catalog_code)"
         )
 
     @staticmethod

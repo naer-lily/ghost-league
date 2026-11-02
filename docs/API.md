@@ -26,6 +26,7 @@ Channel token。`/badge/...`、`/embed/...`、`/health` 和 `/avatars/...` 公�
 | POST | `/v1/me/avatar` | 上传头像 |
 | GET | `/avatars/{user_id}` | 读取头像，无鉴权 |
 | GET | `/v1/me/status` | 助理轮询状态快照 |
+| GET | `/v1/me/stars/{star_id}/svg` | 自己一颗星的独属 SVG |
 | POST | `/v1/me/increments` | 写入真人活动增量 |
 | POST | `/v1/channels/{channel_id}/roster` | Channel 全量周名单 |
 | POST | `/v1/channels/{channel_id}/increments` | Channel 小时增量 |
@@ -631,10 +632,19 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
   "stars": [
     {
       "id": "8f14e45fceea167a5a36dedd4bea2543",
-      "name": "给妈妈的星",
+      "name": "霜蓝",
       "kind": "normal",
       "season_key": null,
-      "acquired_at": "2026-11-02T15:30:00+08:00"
+      "star_type": "white_dwarf",
+      "type_label": "白矮星",
+      "rarity": "uncommon",
+      "rarity_label": "星辉",
+      "palette": ["#e8f2ff", "#ffffff", "#6b7c99"],
+      "visual_seed": 123456789,
+      "companion_count": 0,
+      "catalog_code": "GL-2026-AB12CD34",
+      "acquired_at": "2026-11-02T15:30:00+08:00",
+      "svg_url": "/v1/me/stars/8f14e45fceea167a5a36dedd4bea2543/svg"
     }
   ],
   "equipped_title": "点火",
@@ -663,8 +673,10 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
   `inventory_items`，是普通星数量；`inventory.seasonal_star` 是季节星数量；
   `inventory.ember` 直接读取现有 `ember_balance.balance`，不复制到 `inventory_items`。
   没有记录的物品返回 0，不会省略字段。
-- `stars` 是自己的命名星列表；每颗星一条记录，含 `id`、`name`、`kind`
-  （`normal` / `seasonal`）、`season_key`（普通星为 `null`）和 `acquired_at`。
+- `stars` 是自己的抽卡星列表；每颗星一条记录，含 `id`、`name`、`kind`
+  （`normal` / `seasonal`）、`season_key`（普通星为 `null`）、`star_type`、
+  `type_label`、`rarity`、`rarity_label`、`palette`、`visual_seed`、
+  `companion_count`、`catalog_code`、`acquired_at` 和 `svg_url`。名字只给本人看；
   只按 `acquired_at` 升序返回本人数据。
 - 钻石、上限、物品栏和星星只在自己的 `/v1/me/status` 返回；`status_for_user`
   （badge/widget 快照）、榜单、公开资料、`/v1/users/{id}` 和任何他人视角都不包含
@@ -718,8 +730,8 @@ python3 -m ghost_league.game.jobs grant-diamonds --player <id> --amount 3000 --r
 
 | id | kind | 名称 | 价格 | 发货 | 限制 |
 | --- | --- | --- | --- | --- | --- |
-| `star` | `star` | 普通星 | 300 钻石/颗 | 写 `player_stars` 一条命名记录，并递增 `inventory_items.star` | 每次只能买 1 颗，必须命名；可重复买 |
-| `seasonal_star` | `seasonal_star` | 季节星 | 500 钻石/颗 | 写 `player_stars` 一条季节记录，并递增 `inventory_items.seasonal_star` | 每个玩家每个自然月最多 1 颗，必须命名 |
+| `star` | `star` | 普通星抽卡 | 300 钻石/抽 | 随机一颗星写 `player_stars`，并递增 `inventory_items.star` | 每次只能买 1 颗；名字可省略；可重复买 |
+| `seasonal_star` | `seasonal_star` | 季节星抽卡 | 500 钻石/抽 | 随机一颗当季星写 `player_stars`，并递增 `inventory_items.seasonal_star` | 每个玩家每个自然月最多 1 颗；名字可省略 |
 | `ember` | `ember` | 余烬 | 800 钻石/个 | 进入现有 `ember_balance`，不写 `inventory_items` | 每次只能买 1 个；72 小时冷却 |
 | `diamond_cap_1` … `diamond_cap_5` | `cap` | 仓库上限升级 | 500 / 800 / 1200 / 1800 / 2600 | 扣钻石，上限 +500，等级 +1 | 只能按当前等级买下一级；5 级后不再出现 |
 
@@ -733,14 +745,33 @@ python3 -m ghost_league.game.jobs grant-diamonds --player <id> --amount 3000 --r
 | 4 | 1800 | 2500 → 3000 |
 | 5 | 2600 | 3000 → 3500 |
 
-命名星规则：
+星星抽卡规则：
 
-- 每颗普通星/季节星必须带 `name`，去掉首尾空白后长度 1–40，拒绝换行和控制字符。
-- 名字不要求全服唯一；每颗星有独立 `id` 和 `acquired_at`，永久保留，不回售。
+- 每次购买先按概率抽 `rarity`，再从该稀有度的类型池均匀抽 `star_type`；概率使用
+  `secrets` 系统随机源，权重常量 `RARITY_WEIGHTS` 之和精确为 1.0。
+- 保底暂未实现；普通星可重复抽，季节星每个自然月仍只允许一颗。
+- 普通星 300 钻石/抽，季节星 500 钻石/抽；本次不改价。
+- `name` 可选：省略或传 `null` 时服务器从中文双字词池生成默认名；显式传空字符串仍是
+  非法名字。名字去掉首尾空白后长度 1–40，拒绝换行和控制字符，只给本人看。
+- 名字不要求全服唯一；每颗星有独立 `id`、`catalog_code`、`visual_seed` 和
+  `acquired_at`，永久保留，不回售。
+- 每颗星记录最终 `palette` 三色和 63 位正整数 `visual_seed`；之后渲染 SVG 只读记录，
+  不重新抽颜色或细节，所以同一颗星每次得到逐字节相同的图。
 - 季节星 `season_key` 使用服务器当前自然月，例如 `2026-11`；客户端提供的任何月份都
   不参与判断。跨月后可以再买下一颗；同月第二颗返回 `409 seasonal_star_owned`。
 - 普通星 `season_key` 为 `null`，`UNIQUE(player_id, season_key)` 不会阻止重复购买；
   季节星由该唯一约束兜底。
+
+| rarity | 中文 | 概率 | 类型池 |
+| --- | --- | --- | --- |
+| `common` | 微光 | 50% | `red_dwarf` 红矮星、`orange_dwarf` 橙矮星、`yellow_dwarf` 黄矮星 |
+| `uncommon` | 星辉 | 30% | `white_dwarf` 白矮星、`blue_white_star` 蓝白星、`variable_star` 变星 |
+| `rare` | 耀星 | 15% | `red_giant` 红巨星、`blue_giant` 蓝巨星、`binary_star` 双星 |
+| `epic` | 奇点 | 4.5% | `triple_star` 三合星、`neutron_star` 中子星、`pulsar` 脉冲星 |
+| `legendary` | 神话 | 0.5% | `black_hole_relic` 黑洞遗迹 |
+
+`binary_star` 固定 1 颗伴星，`triple_star` 固定 2 颗，其余类型为 0。
+`black_hole_relic` 是黑洞遗迹，不是普通恒星。
 
 ### `GET /v1/shop`
 
@@ -754,10 +785,13 @@ Bearer 鉴权。返回当前可买商品数组。普通商品按 `sort` 排序�
   {
     "id": "star",
     "name": "星星",
-    "description": "收藏用星星，可以重复购买；购买时必须为这颗星命名。",
+    "description": "300 钻石抽一颗随机星；名字可省略，由服务器生成，仅自己可见。",
     "price_diamonds": 300,
     "currency": "diamonds",
     "kind": "star",
+    "gacha": true,
+    "rates": {"common": 0.5, "uncommon": 0.3, "rare": 0.15, "epic": 0.045, "legendary": 0.005},
+    "types": ["red_dwarf", "orange_dwarf", "yellow_dwarf", "white_dwarf", "blue_white_star", "variable_star", "red_giant", "blue_giant", "binary_star", "triple_star", "neutron_star", "pulsar", "black_hole_relic"],
     "owned_quantity": 1,
     "cooldown_seconds": 0,
     "cooldown_until": null,
@@ -766,10 +800,13 @@ Bearer 鉴权。返回当前可买商品数组。普通商品按 `sort` 排序�
   {
     "id": "seasonal_star",
     "name": "季节星",
-    "description": "当月限定星星；每个自然月最多购买一颗，必须命名。",
+    "description": "500 钻石抽一颗当季随机星；每个自然月最多一颗，名字可省略。",
     "price_diamonds": 500,
     "currency": "diamonds",
     "kind": "seasonal_star",
+    "gacha": true,
+    "rates": {"common": 0.5, "uncommon": 0.3, "rare": 0.15, "epic": 0.045, "legendary": 0.005},
+    "types": ["red_dwarf", "orange_dwarf", "yellow_dwarf", "white_dwarf", "blue_white_star", "variable_star", "red_giant", "blue_giant", "binary_star", "triple_star", "neutron_star", "pulsar", "black_hole_relic"],
     "season_key": "2026-11",
     "owned_quantity": 1,
     "cooldown_seconds": 0,
@@ -807,8 +844,9 @@ Bearer 鉴权。返回当前可买商品数组。普通商品按 `sort` 排序�
 ### `POST /v1/shop/purchase`
 
 Bearer 鉴权。`request_id` 必填，用于幂等；同一个 `request_id` 重复提交只扣一次款并
-返回同一购买结果（`replayed=true`）。`quantity` 缺省为 1；普通星/季节星/余烬/上限升级
-都只能一次买 1 个。普通星和季节星必须带 `name`。
+返回同一购买结果（`replayed=true`），不会重新抽卡或重复扣钻石。`quantity` 缺省为 1；
+普通星/季节星/余烬/上限升级都只能一次买 1 个。普通星和季节星的 `name` 可省略；省略
+时由服务器生成默认名，显式空字符串仍返回 `422 invalid_star_name`。
 
 ```json
 {
@@ -833,10 +871,19 @@ Bearer 鉴权。`request_id` 必填，用于幂等；同一个 `request_id` 重�
   "replayed": false,
   "star": {
     "id": "8f14e45fceea167a5a36dedd4bea2543",
-    "name": "给妈妈的星",
+    "name": "霜蓝",
     "kind": "normal",
     "season_key": null,
-    "acquired_at": "2026-11-02T15:30:00+08:00"
+    "star_type": "white_dwarf",
+    "type_label": "白矮星",
+    "rarity": "uncommon",
+    "rarity_label": "星辉",
+    "palette": ["#e8f2ff", "#ffffff", "#6b7c99"],
+    "visual_seed": 123456789,
+    "companion_count": 0,
+    "catalog_code": "GL-2026-AB12CD34",
+    "acquired_at": "2026-11-02T15:30:00+08:00",
+    "svg_url": "/v1/me/stars/8f14e45fceea167a5a36dedd4bea2543/svg"
   }
 }
 ```
@@ -850,8 +897,9 @@ Bearer 鉴权。`request_id` 必填，用于幂等；同一个 `request_id` 重�
 购买后会扣钻石、`diamond_cap += 500`、`diamond_cap_level += 1`，并重新计算
 `diamond_excess`。购买本身是消费，不受旧上限阻塞；余额不足仍然拒绝。
 
-扣款、发货、命名星记录、物品栏、冷却、流水和 request 记录在同一个 SQLite 事务内完成。
-任何一步失败都会回滚，普通星失败不会留下半颗星或半条流水。
+扣款、抽卡结果、星记录、物品栏、冷却、流水和 request 记录在同一个 SQLite 事务内完成。
+任何一步失败都会回滚，普通星失败不会留下半颗星或半条流水。同一个 `request_id`
+重放时直接返回已保存的 `star`，不会再抽一次。
 
 错误状态：
 
@@ -868,6 +916,19 @@ Bearer 鉴权。`request_id` 必填，用于幂等；同一个 `request_id` 重�
 
 `ember` 购买成功会同时写负数 `diamond_ledger` 和正数 `ember_ledger`，更新
 `ember_balance`，并写 `shop_purchase_cooldowns`；它不会写 `inventory_items`。
+
+### `GET /v1/me/stars/{star_id}/svg`
+
+Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都返回 `404`，不泄露星星
+是否存在。成功时返回 `image/svg+xml`（UTF-8），正文是完整 `<svg>...</svg>`，
+`viewBox="0 0 512 512"`，透明背景。
+
+- SVG 只由该星的 `star_type`、`rarity`、`palette`、`visual_seed`、
+  `companion_count` 和 `catalog_code` 决定；不读用户名字，不请求外部资源，不包含
+  字体、脚本或远程 URL。
+- 同一颗星重复请求逐字节一致；不同 `visual_seed` 生成不同图形。
+- 普通单星是核心 + 光晕 + 4/6/8 条射线；双星/三合星带 1/2 颗伴星和轨道弧线；
+  中子星/脉冲星是细核心 + 双向光束；黑洞遗迹是深色核心 + 吸积环。
 
 ## 周约/赌博（尚未实现，仅记录规则）
 

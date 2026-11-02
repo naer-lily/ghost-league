@@ -34,6 +34,7 @@ from .badge import render_badge, render_embed
 from .game import calendar as cal
 from .game.feed import FEED_EMOJIS
 from .game.roster import ensure_all_groups
+from .game.star_svg import render_star_svg
 from .game.rules import (
     CHECKIN_XP,
     EMBER_BALANCE_CAP,
@@ -1138,6 +1139,20 @@ class GameService:
             now=self.now(),
         )
 
+    def star_svg_for(
+        self, account: dict[str, Any], star_id: str
+    ) -> str | None:
+        """Render one of the caller's own stars, or return ``None``."""
+
+        self._prepare_read(account)
+        assert self.store is not None
+        star = self.store.get_player_star(
+            str(account["user_id"]), star_id
+        )
+        if star is None:
+            return None
+        return render_star_svg(star)
+
     def checkins_for(
         self, account: dict[str, Any], week_start: date | None = None
     ) -> dict[str, Any]:
@@ -2015,6 +2030,16 @@ def create_app(
             UnknownShopItem,
         ) as exc:
             return shop_error_response(exc)
+
+    @app.get("/v1/me/stars/{star_id}/svg")
+    def star_svg(
+        star_id: str,
+        account: dict[str, Any] = Depends(auth),
+    ) -> Response:
+        svg = service.star_svg_for(account, star_id)
+        if svg is None:
+            raise HTTPException(status_code=404, detail="star not found")
+        return Response(content=svg, media_type="image/svg+xml")
 
     @app.get("/v1/me/embers")
     def embers(account: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

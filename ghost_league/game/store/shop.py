@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import json
 import math
+import secrets
 import sqlite3
-import unicodedata
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
@@ -27,6 +27,18 @@ from ..rules import (
     ShopNotAvailable,
     ShopQuantityRejected,
     UnknownShopItem,
+)
+from ..stars import (
+    RARITY_LABELS,
+    RARITY_WEIGHTS,
+    STAR_TYPES,
+    TYPE_LABELS,
+    generate_star_name,
+    make_star_visual,
+    parse_palette_json,
+    roll_star_rarity,
+    roll_star_type,
+    validate_star_name,
 )
 from .core import _row_to_dict
 
@@ -687,6 +699,10 @@ class ShopMixin:
                     "cooldown_until": cooldown_until,
                     "available": available,
                 }
+                if kind in {"star", "seasonal_star"}:
+                    entry["gacha"] = True
+                    entry["rates"] = dict(RARITY_WEIGHTS)
+                    entry["types"] = list(STAR_TYPES)
                 if kind == "seasonal_star":
                     entry["season_key"] = season_key
                     entry["available"] = available and seasonal_owned == 0
@@ -772,47 +788,83 @@ class ShopMixin:
     def list_player_stars(self, player_id: str) -> list[dict[str, Any]]:
         with self._reader() as conn:
             rows = conn.execute(
-                "SELECT id, name, kind, season_key, acquired_at "
-                "FROM player_stars WHERE player_id = ? "
+                "SELECT * FROM player_stars WHERE player_id = ? "
                 "ORDER BY acquired_at, rowid",
                 (player_id,),
             ).fetchall()
-            return [
-                {
-                    "id": str(row["id"]),
-                    "name": str(row["name"]),
-                    "kind": str(row["kind"]),
-                    "season_key": row["season_key"],
-                    "acquired_at": str(row["acquired_at"]),
-                }
-                for row in rows
-            ]
+            return [self._star_payload(row) for row in rows]
+
+    def get_player_star(
+        self, player_id: str, star_id: str
+    ) -> dict[str, Any] | None:
+        """Return one star only when it belongs to ``player_id``."""
+
+        with self._reader() as conn:
+            row = conn.execute(
+                "SELECT * FROM player_stars "
+                "WHERE id = ? AND player_id = ?",
+                (star_id, player_id),
+            ).fetchone()
+            return None if row is None else self._star_payload(row)
+
+    @staticmethod
+    def _star_payload(row: Any) -> dict[str, Any]:
+        records = dict(row)
+        star_id = str(records["id"])
+        star_type = str(records.get("star_type") or "")
+        rarity = str(records.get("rarity") or "")
+        palette = parse_palette_json(
+            records.get("palette_json") or records.get("palette"), star_type
+        )
+        try:
+            visual_seed = int(records.get("visual_seed") or 0)
+        except (TypeError, ValueError):
+            visual_seed = 0
+        try:
+            companion_count = int(records.get("companion_count") or 0)
+        except (TypeError, ValueError):
+            companion_count = 0
+        return {
+            "id": star_id,
+            "name": str(records["name"]),
+            "kind": str(records["kind"]),
+            "season_key": records.get("season_key"),
+            "star_type": star_type,
+            "type_label": TYPE_LABELS.get(star_type, star_type),
+            "rarity": rarity,
+            "rarity_label": RARITY_LABELS.get(rarity, rarity),
+            "palette": palette,
+            "visual_seed": visual_seed,
+            "companion_count": companion_count,
+            "catalog_code": str(records.get("catalog_code") or ""),
+            "acquired_at": str(records["acquired_at"]),
+            "svg_url": f"/v1/me/stars/{star_id}/svg",
+        }
 
     @staticmethod
     def _validate_star_name(name: str | None) -> str:
-        if not isinstance(name, str):
-            raise ShopQuantityRejected(
-                "invalid_star_name", "star name is required"
-            )
-        normalized = name.strip()
-        if not normalized:
-            raise ShopQuantityRejected(
-                "invalid_star_name", "star name must be 1-40 characters"
-            )
-        if len(normalized) > STAR_NAME_MAX_LENGTH:
-            raise ShopQuantityRejected(
-                "invalid_star_name", "star name must be 1-40 characters"
-            )
-        if any(
-            character in "\r\n"
-            or unicodedata.category(character).startswith("C")
-            for character in normalized
-        ):
-            raise ShopQuantityRejected(
-                "invalid_star_name",
-                "star name must not contain newlines or control characters",
-            )
-        return normalized
+        return validate_star_name(name)
+
+    @staticmethod
+    def roll_star_rarity() -> str:
+        return roll_star_rarity()
+
+    @staticmethod
+    def roll_star_type(rarity: str) -> str:
+        return roll_star_type(rarity)
+
+    @staticmethod
+    def make_star_visual(
+        self,
+        star_type: str,
+        rarity: str,
+        season_key: str | None = None,
+    ) -> dict[str, Any]:
+        return make_star_visual(star_type, rarity, season_key)
+
+    @staticmethod
+    def generate_star_name() -> str:
+        return generate_star_name()
 
     # ------------------------------------------------------------------
     # Purchase
@@ -858,11 +910,13 @@ class ShopMixin:
                 "quantity_must_be_one",
                 f"{item_id} can only be bought one at a time",
             )
-        normalized_name = (
-            self._validate_star_name(name)
-            if item_id in {STAR_ITEM_ID, SEASONAL_STAR_ITEM_ID}
-            else None
-        )
+        normalized_name = None
+        if item_id in {STAR_ITEM_ID, SEASONAL_STAR_ITEM_ID}:
+            normalized_name = (
+                generate_star_name()
+                if name is None
+                else self._validate_star_name(name)
+            )
         key = str(request_id) if request_id is not None else uuid.uuid4().hex
         local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
         created_at = cal.iso_ts(local_now)
@@ -930,6 +984,18 @@ class ShopMixin:
             if cooldown_until is not None:
                 raise ShopCooldown(cooldown_until)
 
+            star_visual: dict[str, Any] | None = None
+            star_type: str | None = None
+            rarity: str | None = None
+            if kind in {"star", "seasonal_star"}:
+                rarity = roll_star_rarity()
+                star_type = roll_star_type(rarity)
+                star_visual = make_star_visual(
+                    star_type,
+                    rarity,
+                    season_key if kind == "seasonal_star" else None,
+                )
+
             price = int(item["price_diamonds"])
             total_price = price * quantity
             self._debit_diamonds_with(
@@ -945,32 +1011,27 @@ class ShopMixin:
             )
 
             star: dict[str, Any] | None = None
-            if kind == "star":
+            if kind in {"star", "seasonal_star"}:
+                assert normalized_name is not None
+                assert star_type is not None
+                assert rarity is not None
+                assert star_visual is not None
                 star = self._insert_player_star_with(
                     conn,
                     player_id=player_id,
-                    name=normalized_name or "",
-                    kind="normal",
-                    season_key=None,
+                    name=normalized_name,
+                    kind="normal" if kind == "star" else "seasonal",
+                    season_key=None if kind == "star" else season_key,
                     price_diamonds=price,
                     acquired_at=created_at,
-                )
-                self._grant_inventory_with(
-                    conn,
-                    player_id=player_id,
-                    item=item,
-                    quantity=SINGLE_PURCHASE_QUANTITY,
-                    now=created_at,
-                )
-            elif kind == "seasonal_star":
-                star = self._insert_player_star_with(
-                    conn,
-                    player_id=player_id,
-                    name=normalized_name or "",
-                    kind="seasonal",
-                    season_key=season_key,
-                    price_diamonds=price,
-                    acquired_at=created_at,
+                    star_type=star_type,
+                    rarity=rarity,
+                    palette=star_visual["palette"],
+                    visual_seed=int(star_visual["visual_seed"]),
+                    companion_count=int(star_visual["companion_count"]),
+                    catalog_code=self._new_catalog_code_with(
+                        conn, created_at
+                    ),
                 )
                 self._grant_inventory_with(
                     conn,
@@ -1173,18 +1234,32 @@ class ShopMixin:
         season_key: str | None,
         price_diamonds: int,
         acquired_at: str,
+        star_type: str,
+        rarity: str,
+        palette: list[str],
+        visual_seed: int,
+        companion_count: int,
+        catalog_code: str,
     ) -> dict[str, Any]:
         star = {
             "id": uuid.uuid4().hex,
             "name": name,
             "kind": kind,
             "season_key": season_key,
+            "star_type": star_type,
+            "rarity": rarity,
+            "palette": list(palette),
+            "visual_seed": int(visual_seed),
+            "companion_count": int(companion_count),
+            "catalog_code": catalog_code,
             "acquired_at": acquired_at,
         }
         conn.execute(
             "INSERT INTO player_stars "
             "(id, player_id, name, kind, season_key, price_diamonds, "
-            "acquired_at, source) VALUES (?, ?, ?, ?, ?, ?, ?, 'shop')",
+            "acquired_at, source, star_type, rarity, palette_json, "
+            "visual_seed, companion_count, catalog_code) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'shop', ?, ?, ?, ?, ?, ?)",
             (
                 star["id"],
                 player_id,
@@ -1193,9 +1268,30 @@ class ShopMixin:
                 season_key,
                 price_diamonds,
                 acquired_at,
+                star_type,
+                rarity,
+                json.dumps(list(palette), ensure_ascii=False),
+                int(visual_seed),
+                int(companion_count),
+                catalog_code,
             ),
         )
-        return star
+        return ShopMixin._star_payload(star)
+
+    @staticmethod
+    def _new_catalog_code_with(
+        conn: sqlite3.Connection, acquired_at: str
+    ) -> str:
+        year = str(acquired_at)[:4] if str(acquired_at)[:4].isdigit() else "2026"
+        for _ in range(64):
+            code = f"GL-{year}-{secrets.token_hex(4).upper()}"
+            exists = conn.execute(
+                "SELECT 1 FROM player_stars WHERE catalog_code = ?",
+                (code,),
+            ).fetchone()
+            if exists is None:
+                return code
+        raise RuntimeError("could not allocate a unique star catalog code")
 
     @staticmethod
     def _record_purchase_request_with(

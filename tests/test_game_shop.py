@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -20,6 +21,16 @@ from ghost_league.game.rules import (
     ShopQuantityRejected,
 )
 from ghost_league.game.store import GameStore, compute_diamond_decay
+from ghost_league.game.stars import (
+    RARITY_LABELS,
+    RARITY_TYPE_POOLS,
+    RARITY_WEIGHTS,
+    TYPE_LABELS,
+    TYPE_PALETTES,
+    make_star_visual,
+    roll_star_rarity,
+    roll_star_type,
+)
 from ghost_league.schedule import TZ
 
 TOKEN = "shop-token"
@@ -60,6 +71,37 @@ def make_ai(store: GameStore, player_id: str = "ai-1") -> str:
 
 def catalog(store: GameStore, player_id: str, *, now: datetime = NOW):
     return {item["id"]: item for item in store.shop_catalog(player_id, now=now)}
+
+
+def assert_star_payload(star: dict) -> None:
+    assert {
+        "id",
+        "name",
+        "kind",
+        "season_key",
+        "star_type",
+        "type_label",
+        "rarity",
+        "rarity_label",
+        "palette",
+        "visual_seed",
+        "companion_count",
+        "catalog_code",
+        "acquired_at",
+        "svg_url",
+    } <= set(star)
+    assert star["star_type"] in TYPE_PALETTES
+    assert star["rarity"] in RARITY_WEIGHTS
+    assert star["type_label"] == TYPE_LABELS[star["star_type"]]
+    assert star["rarity_label"] == RARITY_LABELS[star["rarity"]]
+    assert len(star["palette"]) == 3
+    assert 0 < star["visual_seed"] < (1 << 63)
+    expected = {"binary_star": 1, "triple_star": 2}.get(
+        star["star_type"], 0
+    )
+    assert star["companion_count"] == expected
+    assert re.fullmatch(r"GL-\d{4}-[0-9A-F]{8}", star["catalog_code"])
+    assert star["svg_url"] == f"/v1/me/stars/{star['id']}/svg"
 
 
 # ----------------------------------------------------------------------
@@ -328,7 +370,7 @@ def test_cap_upgrade_absorbs_excess_and_stops_decay(tmp_path) -> None:
 # ----------------------------------------------------------------------
 # Named stars and seasonal stars
 # ----------------------------------------------------------------------
-def test_normal_stars_require_a_name_and_are_independent_records(tmp_path) -> None:
+def test_normal_stars_are_gacha_with_optional_generated_names(tmp_path) -> None:
     store = make_store(tmp_path)
     human = make_human(store)
     store.credit_diamonds(
@@ -337,7 +379,7 @@ def test_normal_stars_require_a_name_and_are_independent_records(tmp_path) -> No
     before_ledger = len(store.diamond_ledger(human))
 
     for index, name in enumerate(
-        (None, "", "   ", "x" * 41, "line\nbreak", "tab\tname")
+        ("", "   ", "x" * 41, "line\nbreak", "tab\tname")
     ):
         with pytest.raises(ShopQuantityRejected) as exc:
             store.purchase_shop_item(
@@ -350,36 +392,207 @@ def test_normal_stars_require_a_name_and_are_independent_records(tmp_path) -> No
             )
         assert exc.value.code == "invalid_star_name"
     with pytest.raises(ShopQuantityRejected):
-        store.purchase_shop_item(human, "star", 2, "two", name="双子", now=NOW)
+        store.purchase_shop_item(human, "star", 2, "two", now=NOW)
 
     assert len(store.diamond_ledger(human)) == before_ledger
     assert store.list_player_stars(human) == []
     assert store.get_inventory(human) == {"star": 0, "seasonal_star": 0}
 
     first = store.purchase_shop_item(
-        human, "star", 1, "star-1", name="  给妈妈的星  ", now=NOW
+        human, "star", 1, "star-1", now=NOW
     )
+    first_star = first["star"]
+    assert_star_payload(first_star)
+    assert first_star["name"].strip()
+    assert len(first_star["name"]) == 2
+    assert first_star["kind"] == "normal"
+    assert first_star["season_key"] is None
+
     second = store.purchase_shop_item(
-        human, "star", 1, "star-2", name="给妈妈的星", now=NOW
+        human, "star", 1, "star-2", name="  给妈妈的星  ", now=NOW
     )
-    assert first["star"]["name"] == "给妈妈的星"
-    assert first["star"]["kind"] == "normal"
-    assert first["star"]["season_key"] is None
-    assert first["star"]["id"] != second["star"]["id"]
+    second_star = second["star"]
+    assert_star_payload(second_star)
+    assert second_star["name"] == "给妈妈的星"
+    assert first_star["id"] != second_star["id"]
+    assert first_star["visual_seed"] != second_star["visual_seed"]
+
     stars = store.list_player_stars(human)
-    assert [star["name"] for star in stars] == ["给妈妈的星", "给妈妈的星"]
+    assert [star["name"] for star in stars] == [
+        first_star["name"],
+        "给妈妈的星",
+    ]
+    assert all("svg_url" in star for star in stars)
     assert store.get_inventory(human) == {"star": 2, "seasonal_star": 0}
 
     replay = store.purchase_shop_item(
         human, "star", 1, "star-1", name="另一个名字", now=NOW
     )
     assert replay["replayed"] is True
-    assert replay["star"]["id"] == first["star"]["id"]
+    assert replay["star"] == first_star
     assert len(store.list_player_stars(human)) == 2
     assert [row["delta"] for row in store.diamond_ledger(human)][-2:] == [
         -300,
         -300,
     ]
+
+
+def test_rarity_weights_type_pools_and_companion_counts() -> None:
+    assert sum(RARITY_WEIGHTS.values()) == 1.0
+    assert set(RARITY_TYPE_POOLS) == set(RARITY_WEIGHTS)
+    all_types = [star_type for pool in RARITY_TYPE_POOLS.values() for star_type in pool]
+    assert len(all_types) == len(set(all_types))
+    assert set(all_types) == set(TYPE_PALETTES)
+    assert all(star_type in TYPE_LABELS for star_type in all_types)
+    for rarity, pool in RARITY_TYPE_POOLS.items():
+        for _ in range(25):
+            assert roll_star_type(rarity) in pool
+    for _ in range(200):
+        rarity = roll_star_rarity()
+        assert rarity in RARITY_WEIGHTS
+        assert roll_star_type(rarity) in RARITY_TYPE_POOLS[rarity]
+
+    visuals = {}
+    for rarity, pool in RARITY_TYPE_POOLS.items():
+        for star_type in pool:
+            visual = make_star_visual(star_type, rarity)
+            assert len(visual["palette"]) == 3
+            assert 0 < visual["visual_seed"] < (1 << 63)
+            assert visual["companion_count"] == {
+                "binary_star": 1,
+                "triple_star": 2,
+            }.get(star_type, 0)
+            visuals[star_type] = visual
+    assert len({visual["visual_seed"] for visual in visuals.values()}) == len(
+        visuals
+    )
+    seasonal = make_star_visual("red_dwarf", "common", "2026-12")
+    plain = make_star_visual("red_dwarf", "common")
+    assert len(seasonal["palette"]) == 3
+    assert seasonal["palette"] != plain["palette"]
+
+
+def test_rarity_roll_boundaries_follow_exact_weights(monkeypatch) -> None:
+    import ghost_league.game.stars as stars
+
+    cases = (
+        (0, "common"),
+        (499_999, "common"),
+        (500_000, "uncommon"),
+        (799_999, "uncommon"),
+        (800_000, "rare"),
+        (949_999, "rare"),
+        (950_000, "epic"),
+        (994_999, "epic"),
+        (995_000, "legendary"),
+        (999_999, "legendary"),
+    )
+    for pick, expected in cases:
+        monkeypatch.setattr(stars.secrets, "randbelow", lambda _n, p=pick: p)
+        assert roll_star_rarity() == expected
+
+
+def test_legacy_player_stars_are_backfilled_with_unique_catalog_codes(
+    tmp_path,
+) -> None:
+    path = tmp_path / "league.db"
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE player_stars (
+                id TEXT PRIMARY KEY,
+                player_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK (kind IN ('normal', 'seasonal')),
+                season_key TEXT,
+                price_diamonds INTEGER NOT NULL,
+                acquired_at TEXT NOT NULL,
+                source TEXT NOT NULL,
+                UNIQUE (player_id, season_key)
+            );
+            """
+        )
+        connection.executemany(
+            "INSERT INTO player_stars "
+            "(id, player_id, name, kind, season_key, price_diamonds, "
+            "acquired_at, source) VALUES (?, ?, ?, ?, ?, ?, ?, 'shop')",
+            (
+                (
+                    "legacy-a",
+                    "human-1",
+                    "旧普通星",
+                    "normal",
+                    None,
+                    300,
+                    "2025-12-01T00:00:00+08:00",
+                ),
+                (
+                    "legacy-b",
+                    "human-1",
+                    "旧季节星",
+                    "seasonal",
+                    "2026-01",
+                    500,
+                    "2026-01-03T00:00:00+08:00",
+                ),
+                (
+                    "legacy-c",
+                    "human-2",
+                    "另一颗",
+                    "normal",
+                    None,
+                    300,
+                    "2026-02-04T00:00:00+08:00",
+                ),
+            ),
+        )
+        connection.commit()
+
+    store = GameStore(path, epoch_reason="test")
+    stars = store.list_player_stars("human-1")
+    assert [star["name"] for star in stars] == ["旧普通星", "旧季节星"]
+    for star in stars:
+        assert_star_payload(star)
+        assert star["catalog_code"]
+        assert star["palette"]
+    all_stars = store.list_player_stars("human-1") + store.list_player_stars("human-2")
+    assert len({star["catalog_code"] for star in all_stars}) == 3
+    assert len({star["visual_seed"] for star in all_stars}) == 3
+
+    with sqlite3.connect(path) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(player_stars)")
+        }
+        assert {
+            "star_type",
+            "rarity",
+            "palette_json",
+            "visual_seed",
+            "companion_count",
+            "catalog_code",
+        } <= columns
+        assert connection.execute(
+            "SELECT COUNT(*) FROM player_stars WHERE star_type IS NULL "
+            "OR rarity IS NULL OR palette_json IS NULL "
+            "OR visual_seed IS NULL OR companion_count IS NULL "
+            "OR catalog_code IS NULL"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' "
+            "AND name = 'idx_player_stars_catalog_code'"
+        ).fetchone()[0] == 1
+        first_snapshot = connection.execute(
+            "SELECT id, star_type, rarity, palette_json, visual_seed, "
+            "companion_count, catalog_code FROM player_stars ORDER BY id"
+        ).fetchall()
+
+    store.initialize()
+    with sqlite3.connect(path) as connection:
+        second_snapshot = connection.execute(
+            "SELECT id, star_type, rarity, palette_json, visual_seed, "
+            "companion_count, catalog_code FROM player_stars ORDER BY id"
+        ).fetchall()
+    assert first_snapshot == second_snapshot
 
 
 def test_seasonal_star_is_monthly_and_persistent(tmp_path) -> None:
@@ -393,8 +606,10 @@ def test_seasonal_star_is_monthly_and_persistent(tmp_path) -> None:
     assert items["seasonal_star"]["available"] is True
 
     bought = store.purchase_shop_item(
-        human, "seasonal_star", 1, "season-11", name="十一月", now=november
+        human, "seasonal_star", 1, "season-11", now=november
     )
+    assert_star_payload(bought["star"])
+    assert bought["star"]["name"].strip()
     assert bought["star"]["kind"] == "seasonal"
     assert bought["star"]["season_key"] == "2026-11"
     assert bought["star"]["acquired_at"] == "2026-11-02T12:00:00+08:00"
@@ -418,6 +633,7 @@ def test_seasonal_star_is_monthly_and_persistent(tmp_path) -> None:
     second = store.purchase_shop_item(
         human, "seasonal_star", 1, "season-12", name="十二月", now=december
     )
+    assert_star_payload(second["star"])
     assert second["star"]["season_key"] == "2026-12"
     assert second["diamonds"] == 0
     assert store.get_inventory(human) == {"star": 0, "seasonal_star": 2}
@@ -596,17 +812,23 @@ class ShopAPITests(unittest.TestCase):
             self.assertEqual(status["diamonds"], 700)
             self.assertEqual(status["diamond_excess"], 0)
             self.assertEqual(status["inventory"]["star"], 1)
+            self.assertEqual(len(status["stars"]), 1)
+            listed = status["stars"][0]
+            self.assertEqual(listed["id"], star["id"])
+            self.assertEqual(listed["name"], "给妈妈的星")
+            self.assertEqual(listed["kind"], "normal")
+            self.assertIsNone(listed["season_key"])
+            self.assertEqual(listed["star_type"], star["star_type"])
+            self.assertEqual(listed["type_label"], star["type_label"])
+            self.assertEqual(listed["rarity"], star["rarity"])
+            self.assertEqual(listed["rarity_label"], star["rarity_label"])
+            self.assertEqual(listed["palette"], star["palette"])
+            self.assertEqual(listed["visual_seed"], star["visual_seed"])
+            self.assertEqual(listed["companion_count"], star["companion_count"])
+            self.assertEqual(listed["catalog_code"], star["catalog_code"])
+            self.assertEqual(listed["svg_url"], star["svg_url"])
             self.assertEqual(
-                status["stars"],
-                [
-                    {
-                        "id": star["id"],
-                        "name": "给妈妈的星",
-                        "kind": "normal",
-                        "season_key": None,
-                        "acquired_at": "2026-11-02T12:00:00+08:00",
-                    }
-                ],
+                listed["acquired_at"], "2026-11-02T12:00:00+08:00"
             )
 
     def test_other_views_have_no_private_wallet_inventory_or_stars(self) -> None:
@@ -662,15 +884,49 @@ class ShopAPITests(unittest.TestCase):
             self.assertEqual(items["diamond_cap_1"]["kind"], "cap")
             self.assertEqual(items["diamond_cap_1"]["required_cap_level"], 0)
             self.assertNotIn("season_key", items["star"])
+            for item_id in ("star", "seasonal_star"):
+                self.assertTrue(items[item_id]["gacha"])
+                self.assertEqual(
+                    items[item_id]["rates"],
+                    {
+                        "common": 0.5,
+                        "uncommon": 0.3,
+                        "rare": 0.15,
+                        "epic": 0.045,
+                        "legendary": 0.005,
+                    },
+                )
+                self.assertEqual(
+                    set(items[item_id]["types"]),
+                    {
+                        "red_dwarf",
+                        "orange_dwarf",
+                        "yellow_dwarf",
+                        "white_dwarf",
+                        "blue_white_star",
+                        "variable_star",
+                        "red_giant",
+                        "blue_giant",
+                        "binary_star",
+                        "triple_star",
+                        "neutron_star",
+                        "pulsar",
+                        "black_hole_relic",
+                    },
+                )
 
-            missing_name = client.post(
+            empty_name = client.post(
                 "/v1/shop/purchase",
                 headers=auth(),
-                json={"item_id": "star", "request_id": "missing-name"},
+                json={
+                    "item_id": "star",
+                    "name": "",
+                    "request_id": "empty-name",
+                },
             )
-            self.assertEqual(missing_name.status_code, 422, missing_name.text)
+            self.assertEqual(empty_name.status_code, 422, empty_name.text)
             self.assertEqual(
-                missing_name.json()["detail"]["code"], "invalid_star_name"
+                empty_name.json()["detail"]["code"], "invalid_star_name"
             )
 
             purchase = client.post(
@@ -784,6 +1040,94 @@ class ShopAPITests(unittest.TestCase):
             self.assertEqual(ember.json()["code"], "insufficient_diamonds")
             self.assertEqual(ember.json()["balance"], 200)
             self.assertEqual(ember.json()["detail"]["balance"], 200)
+
+    def test_purchase_without_name_generates_private_default(self) -> None:
+        with self.client() as client:
+            response = client.post(
+                "/v1/shop/purchase",
+                headers=auth(),
+                json={"item_id": "star", "request_id": "default-name"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            star = response.json()["star"]
+            self.assertTrue(star["name"].strip())
+            self.assertEqual(len(star["name"]), 2)
+            self.assertEqual(star["kind"], "normal")
+            self.assertIsNone(star["season_key"])
+            self.assertTrue(star["star_type"])
+            self.assertTrue(star["type_label"])
+            self.assertTrue(star["rarity"])
+            self.assertTrue(star["rarity_label"])
+            self.assertEqual(len(star["palette"]), 3)
+            self.assertGreater(star["visual_seed"], 0)
+            self.assertIn(star["companion_count"], (0, 1, 2))
+            self.assertRegex(star["catalog_code"], r"^GL-\d{4}-[0-9A-F]{8}$")
+            self.assertEqual(
+                star["svg_url"], f"/v1/me/stars/{star['id']}/svg"
+            )
+
+            replay = client.post(
+                "/v1/shop/purchase",
+                headers=auth(),
+                json={"item_id": "star", "request_id": "default-name"},
+            )
+            self.assertEqual(replay.status_code, 200, replay.text)
+            self.assertEqual(replay.json()["star"], star)
+            self.assertTrue(replay.json()["replayed"])
+
+    def test_star_svg_is_private_stable_and_seed_specific(self) -> None:
+        self.accounts.create("other", "Other", token="other-token")
+        with self.client() as client:
+            first = client.post(
+                "/v1/shop/purchase",
+                headers=auth(),
+                json={"item_id": "star", "request_id": "svg-first"},
+            ).json()["star"]
+            second = client.post(
+                "/v1/shop/purchase",
+                headers=auth(),
+                json={"item_id": "star", "request_id": "svg-second"},
+            ).json()["star"]
+
+            own = client.get(first["svg_url"], headers=auth())
+            self.assertEqual(own.status_code, 200, own.text)
+            self.assertTrue(
+                own.headers["content-type"].startswith("image/svg+xml")
+            )
+            svg = own.content.decode("utf-8")
+            self.assertTrue(svg.startswith("<svg"))
+            self.assertTrue(svg.endswith("</svg>"))
+            self.assertIn('viewBox="0 0 512 512"', svg)
+            self.assertNotIn(first["name"], svg)
+            lowered = svg.lower()
+            self.assertNotIn("<script", lowered)
+            self.assertNotIn("<image", lowered)
+            self.assertNotIn("href=", lowered)
+            without_namespace = svg.replace(
+                'xmlns="http://www.w3.org/2000/svg"', ""
+            )
+            self.assertNotIn("http://", without_namespace)
+            self.assertNotIn("https://", without_namespace)
+
+            repeated = client.get(first["svg_url"], headers=auth())
+            self.assertEqual(repeated.status_code, 200)
+            self.assertEqual(repeated.content, own.content)
+
+            other_svg = client.get(second["svg_url"], headers=auth())
+            self.assertEqual(other_svg.status_code, 200)
+            self.assertNotEqual(other_svg.content, own.content)
+
+            other_star = client.post(
+                "/v1/shop/purchase",
+                headers=auth("other-token"),
+                json={"item_id": "star", "request_id": "other-star"},
+            ).json()["star"]
+            hidden = client.get(other_star["svg_url"], headers=auth())
+            self.assertEqual(hidden.status_code, 404, hidden.text)
+            missing = client.get(
+                "/v1/me/stars/does-not-exist/svg", headers=auth()
+            )
+            self.assertEqual(missing.status_code, 404, missing.text)
 
     def test_ember_cooldown_is_enforced_over_http(self) -> None:
         with self.client() as client:
