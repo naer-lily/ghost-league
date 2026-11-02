@@ -15,13 +15,14 @@ from ghost_league.game.rival import (
     bet_odds,
     daily_bet_locks_at,
     daily_bet_settles_at,
+    group_market_odds_table,
     payout_for_win,
     power_ratio,
     target_in_range,
     target_options,
     wager_result,
 )
-from ghost_league.game.rules import InsufficientDiamonds
+from ghost_league.game.rules import InsufficientDiamonds, group_quota
 from ghost_league.game.store import GameStore
 from ghost_league.schedule import TZ
 
@@ -794,12 +795,13 @@ def test_group_bet_places_once_with_free_stake(tmp_path: Path) -> None:
         request_id="group-1",
     )
     assert bet["kind"] == "group"
+    assert bet["market"] == "top3"
     assert bet["stake"] == 40
     assert bet["free_stake"] == 20
     assert bet["paid_stake"] == 20
     assert bet["target_rank"] == 3
     assert bet["target_margin"] == 0
-    assert bet["odds"] == 2.0
+    assert bet["odds"] > 1.0
     assert bet["status"] == "placed"
     assert bet["group_id"] == store.group_for_player("grouped", WEEK)["id"]
     assert store.get_diamond_balance("grouped", now=MONDAY) == 980
@@ -824,6 +826,37 @@ def test_group_bet_places_once_with_free_stake(tmp_path: Path) -> None:
             request_id="group-2",
         )
 
+    # The same player may place a different market in the same week.
+    promote = store.place_bet(
+        "grouped",
+        "group",
+        paid_stake=10,
+        target_margin=None,
+        now=MONDAY,
+        request_id="group-promote",
+        market="promote",
+    )
+    assert promote["market"] == "promote"
+    assert promote["id"] != bet["id"]
+    assert store.get_diamond_balance("grouped", now=MONDAY) == 970
+    listed = store.bets_for("grouped", now=MONDAY)
+    assert {
+        entry["market"] for entry in listed["groups"]
+    } == {"top3", "promote"}
+
+    with pytest.raises(BetRejected) as unavailable:
+        store.place_bet(
+            "grouped",
+            "group",
+            paid_stake=0,
+            target_margin=None,
+            now=MONDAY,
+            request_id="group-no-demote",
+            market="no_demote",
+        )
+    assert unavailable.value.code == "market_unavailable"
+    assert store.get_diamond_balance("grouped", now=MONDAY) == 970
+
     with pytest.raises(BetRejected) as no_group:
         store.place_bet(
             "solo",
@@ -845,6 +878,215 @@ def test_group_bet_places_once_with_free_stake(tmp_path: Path) -> None:
             request_id="group-late",
         )
     assert store.get_diamond_balance("late", now=TUESDAY) == 1000
+
+
+def test_group_market_odds_are_deterministic_and_ordered() -> None:
+    for size in (2, 3, 5, 13, 14, 15):
+        for rank in sorted({1, max(1, size // 2), size}):
+            first = group_market_odds_table(group_size=size, rank=rank)
+            second = group_market_odds_table(group_size=size, rank=rank)
+            assert first == second
+            assert first["top3"] > first["promote"] > first["no_demote"]
+            assert first["no_demote"] >= 1.1
+
+    # A larger current cushion lowers the same market's odds.
+    no_gap = group_market_odds_table(group_size=15, rank=3)
+    cushion = group_market_odds_table(
+        group_size=15,
+        rank=3,
+        xp_gaps={"top3": 400, "promote": 400, "no_demote": 400},
+    )
+    assert cushion["top3"] < no_gap["top3"]
+
+
+def test_three_group_markets_place_and_settle_independently(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path)
+    players = [f"m{index:02d}" for index in range(1, 16)]
+    for player_id in players:
+        add_player(store, player_id)
+    store.create_group(WEEK, tier="Silver", player_ids=players, now=MONDAY)
+    for index, player_id in enumerate(players):
+        set_week_xp(store, player_id, 5000 - index * 100)
+
+    bets = {}
+    for index, market in enumerate(("top3", "promote", "no_demote")):
+        bets[market] = store.place_bet(
+            "m04",
+            "group",
+            paid_stake=10,
+            target_margin=None,
+            now=MONDAY,
+            request_id=f"three-{market}",
+            market=market,
+        )
+    assert len({bet["id"] for bet in bets.values()}) == 3
+    assert store.get_diamond_balance("m04", now=MONDAY) == 970
+    odds = [bets[market]["odds"] for market in ("top3", "promote", "no_demote")]
+    assert odds[0] > odds[1] > odds[2]
+
+    listed = store.bets_for("m04", now=MONDAY)
+    assert [entry["market"] for entry in listed["groups"]] == [
+        "top3",
+        "promote",
+        "no_demote",
+    ]
+    assert all(entry["bet"] is not None for entry in listed["groups"])
+    assert listed["group"]["market"] == "top3"
+
+    settled = store.settle_group_bets(WEEK, now=NEXT_MONDAY)
+    assert settled["settled"] == 3
+    by_market = {row["market"]: row for row in settled["results"]}
+    assert by_market["top3"]["status"] == "lost"
+    assert by_market["promote"]["status"] == "won"
+    assert by_market["no_demote"]["status"] == "won"
+    assert by_market["promote"]["target_rank"] == group_quota(15) == 4
+    assert all(row["group_rank"] == 4 for row in by_market.values())
+    expected = sum(
+        payout_for_win(row["stake"], row["odds"])
+        for row in by_market.values()
+        if row["status"] == "won"
+    )
+    assert store.get_diamond_balance("m04", now=NEXT_MONDAY) == 970 + expected
+
+    again = store.settle_group_bets(WEEK, now=NEXT_MONDAY)
+    assert again["settled"] == 0
+    assert store.get_diamond_balance("m04", now=NEXT_MONDAY) == 970 + expected
+
+
+def test_bronze_cannot_bet_no_demote_and_diamond_cannot_bet_promote(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path)
+    bronze_players = [f"b{index:02d}" for index in range(1, 6)]
+    diamond_players = [f"d{index:02d}" for index in range(1, 6)]
+    for player_id in (*bronze_players, *diamond_players):
+        add_player(store, player_id)
+    store.create_group(
+        WEEK, tier="Bronze", player_ids=bronze_players, now=MONDAY
+    )
+    store.create_group(
+        WEEK, tier="Diamond", player_ids=diamond_players, now=MONDAY
+    )
+
+    with pytest.raises(BetRejected) as bronze:
+        store.place_bet(
+            "b01",
+            "group",
+            now=MONDAY,
+            request_id="bronze-no-demote",
+            market="no_demote",
+        )
+    assert bronze.value.code == "market_unavailable"
+    assert store.get_diamond_balance("b01", now=MONDAY) == 1000
+    bronze_state = store.bets_for("b01", now=MONDAY)
+    assert [
+        entry["market"] for entry in bronze_state["groups"]
+    ] == ["top3", "promote"]
+
+    with pytest.raises(BetRejected) as diamond:
+        store.place_bet(
+            "d01",
+            "group",
+            now=MONDAY,
+            request_id="diamond-promote",
+            market="promote",
+        )
+    assert diamond.value.code == "market_unavailable"
+    diamond_state = store.bets_for("d01", now=MONDAY)
+    assert [
+        entry["market"] for entry in diamond_state["groups"]
+    ] == ["top3", "no_demote"]
+    assert store.get_diamond_balance("d01", now=MONDAY) == 1000
+
+    sold = store.place_bet(
+        "d01",
+        "group",
+        now=MONDAY,
+        request_id="diamond-no-demote",
+        market="no_demote",
+    )
+    assert sold["market"] == "no_demote"
+
+
+def test_group_bets_migration_adds_market_and_widens_unique_key(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy-group-bets.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE group_bets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id TEXT NOT NULL,
+            week_start TEXT NOT NULL,
+            group_id INTEGER NOT NULL,
+            stake INTEGER NOT NULL,
+            free_stake INTEGER NOT NULL DEFAULT 20,
+            paid_stake INTEGER NOT NULL,
+            odds REAL NOT NULL,
+            status TEXT NOT NULL,
+            placed_at TEXT NOT NULL,
+            settled_at TEXT,
+            payout INTEGER NOT NULL DEFAULT 0,
+            group_rank INTEGER,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            UNIQUE (player_id, week_start)
+        );
+        INSERT INTO group_bets
+            (player_id, week_start, group_id, stake, free_stake,
+             paid_stake, odds, status, placed_at, idempotency_key)
+        VALUES ('legacy', '2026-11-02', 7, 40, 20, 20, 2.0, 'placed',
+                '2026-11-02T08:00:00+08:00', 'legacy-group-key');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = GameStore(path, epoch_reason="test")
+    with store.transaction() as tx:
+        row = tx.execute("SELECT * FROM group_bets").fetchone()
+        columns = {
+            str(info["name"])
+            for info in tx.execute("PRAGMA table_info(group_bets)")
+        }
+        indexes = {
+            tuple(
+                str(info["name"])
+                for info in tx.execute(
+                    f"PRAGMA index_info({index['name']})"
+                )
+            )
+            for index in tx.execute("PRAGMA index_list(group_bets)")
+            if int(index["unique"]) == 1
+        }
+    assert "market" in columns
+    assert ("player_id", "week_start", "market") in indexes
+    assert row["market"] == "top3"
+    assert int(row["id"]) == 1
+    assert int(row["stake"]) == 40
+    assert int(row["paid_stake"]) == 20
+    assert row["status"] == "placed"
+
+    with store.transaction() as tx:
+        tx.execute(
+            "INSERT INTO group_bets (player_id, week_start, market, group_id, "
+            "stake, free_stake, paid_stake, odds, status, placed_at, "
+            "idempotency_key) VALUES ('legacy', '2026-11-02', 'promote', 7, "
+            "40, 20, 20, 3.0, 'placed', '2026-11-02T08:00:00+08:00', "
+            "'legacy-promote')"
+        )
+    # Reopening runs the migration again: it is a no-op and keeps both rows.
+    reopened = GameStore(path, epoch_reason="test")
+    with reopened.transaction() as tx:
+        rows = tx.execute(
+            "SELECT id, market FROM group_bets ORDER BY id"
+        ).fetchall()
+    assert [(int(row["id"]), str(row["market"])) for row in rows] == [
+        (1, "top3"),
+        (2, "promote"),
+    ]
 
 
 def test_group_bet_ranks_players_personally_not_group_total(

@@ -306,17 +306,18 @@ def is_valid_repair_day(
 def group_quota(group_size: int) -> int:
     """Return this group's weekly promotion/demotion quota.
 
-    One seat per five players, rounded half up, with a minimum of one:
-    ``max(1, round_half_up(group_size * 0.2))``.  The integer form
-    ``(2 * n + 5) // 10`` is exactly that formula for a non-negative size.
-    ``group_movement`` handles groups smaller than two players.
+    The top 30% and bottom 30% of every group move, rounded down, with a
+    minimum of one: ``max(1, (group_size * 3) // 10)``.  This gives 15 players
+    4/4, 14 players 4/4, 13 players 3/3, and 2 players 1/1.
+    ``group_movement`` handles groups smaller than two players and the
+    Bronze/Diamond edges.
     """
 
     if isinstance(group_size, bool) or not isinstance(group_size, int):
         raise TypeError("group_size must be an integer")
     if group_size < 0:
         raise ValueError("group_size must be non-negative")
-    return max(1, (group_size * 2 + 5) // 10)
+    return max(1, (group_size * 3) // 10)
 
 
 def group_movement(

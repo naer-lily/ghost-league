@@ -16,6 +16,7 @@ from typing import Any
 
 from ...schedule import TZ
 from .. import calendar as cal
+from ..rival import GROUP_MARKET_LABELS, group_market_threshold
 from ..stars import RARITY_LABELS, TYPE_LABELS
 
 HISTORY_TYPES = (
@@ -233,7 +234,9 @@ class HistoryMixin:
         items: list[dict[str, Any]],
     ) -> None:
         rows = conn.execute(
-            "SELECT * FROM group_bets WHERE player_id = ?",
+            "SELECT gb.*, (SELECT COUNT(*) FROM group_members gm "
+            "WHERE gm.group_id = gb.group_id) AS group_size "
+            "FROM group_bets gb WHERE gb.player_id = ?",
             (player_id,),
         ).fetchall()
         for row in rows:
@@ -245,11 +248,19 @@ class HistoryMixin:
                 continue
             status = _text(record.get("status"))
             status_label = _BET_STATUS_LABELS.get(status, status or "待结算")
+            market = _text(record.get("market")) or "top3"
+            label = GROUP_MARKET_LABELS.get(market, "组内下注")
+            group_size = record.get("group_size")
+            target_rank = (
+                group_market_threshold(market, int(group_size))
+                if group_size is not None and int(group_size) > 0
+                else None
+            )
             rank = record.get("group_rank")
             rank_label = (
                 f"组内第 {_number(rank)} 名"
                 if rank is not None
-                else "组内前三"
+                else f"{label}·待结算"
             )
             payout = _number(record.get("payout"))
             body = _join(
@@ -263,14 +274,16 @@ class HistoryMixin:
                     "id": f"group_bet:{_number(record.get('id'))}",
                     "type": "group_bet",
                     "at": at,
-                    "title": "组内下注",
+                    "title": label,
                     "body": body,
                     "data": {
                         "week_start": _text(record.get("week_start")),
+                        "market": market,
+                        "market_label": label,
                         "group_rank": (
                             _number(rank) if rank is not None else None
                         ),
-                        "target_rank": 3,
+                        "target_rank": target_rank,
                         "odds": float(record.get("odds") or 0),
                         "status": status,
                         "payout": payout,

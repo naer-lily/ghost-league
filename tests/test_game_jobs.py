@@ -48,7 +48,12 @@ def test_monday_settles_previous_week(tmp_path) -> None:
     assert settled["already_settled"] is False
     assert settled["week_start"] == WEEK
     assert [row["rank"] for row in settled["results"]] == list(range(1, 16))
-    assert all(row["promoted"] for row in settled["results"][:3])
+    quota = group_quota(15)
+    assert quota == 4
+    assert all(row["promoted"] for row in settled["results"][:quota])
+    assert not any(
+        row["promoted"] for row in settled["results"][quota:]
+    )
     assert not any(row["demoted"] for row in settled["results"])
     assert store.get_week(WEEK)["status"] == "settled"
     # Only the previous week was touched; no future week was pre-created.

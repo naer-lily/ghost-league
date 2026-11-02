@@ -125,15 +125,27 @@ class RivalStateAPITests(RivalAPITestBase):
         self.assertIsNone(payload["result"])
         self.assertEqual(payload["me"]["user_id"], "owner")
         self.assertEqual(payload["me"]["group_no"], 1)
+        self.assertIsNone(payload["bets"]["weekly"])
+        self.assertIsNone(payload["bets"]["daily"])
+        self.assertIsNone(payload["bets"]["group"])
         self.assertEqual(
-            payload["bets"], {"weekly": None, "daily": None, "group": None}
+            [entry["market"] for entry in payload["bets"]["groups"]],
+            ["top3", "promote"],
+        )
+        self.assertTrue(
+            all(entry["bet"] is None for entry in payload["bets"]["groups"])
         )
         self.assertIsNone(payload["bet_options"]["weekly"])
         self.assertIsNone(payload["bet_options"]["daily"])
-        self.assertEqual(payload["bet_options"]["group"]["target_rank"], 3)
-        self.assertEqual(payload["bet_options"]["group"]["odds"], 2.0)
-        self.assertEqual(payload["bet_options"]["group"]["free_stake"], 20)
-        self.assertEqual(payload["bet_options"]["group"]["max_paid_stake"], 500)
+        group_options = payload["bet_options"]["group"]
+        self.assertEqual(group_options["target_rank"], 3)
+        self.assertGreater(group_options["odds"], 1.0)
+        self.assertEqual(group_options["free_stake"], 20)
+        self.assertEqual(group_options["max_paid_stake"], 500)
+        self.assertEqual(
+            [entry["market"] for entry in group_options["markets"]],
+            ["top3", "promote"],
+        )
         self.assertEqual(
             payload["bet_windows"],
             {
@@ -389,12 +401,13 @@ class BetAPITests(RivalAPITestBase):
         self.assertEqual(response.status_code, 200, response.text)
         bet = response.json()["bet"]
         self.assertEqual(bet["kind"], "group")
+        self.assertEqual(bet["market"], "top3")
         self.assertEqual(bet["stake"], 40)
         self.assertEqual(bet["free_stake"], 20)
         self.assertEqual(bet["paid_stake"], 20)
         self.assertEqual(bet["target_rank"], 3)
         self.assertEqual(bet["target_margin"], 0)
-        self.assertEqual(bet["odds"], 2.0)
+        self.assertGreater(bet["odds"], 1.0)
         self.assertEqual(store.get_diamond_balance("owner", now=NOW), 980)
 
         repeat = client.post(
@@ -409,6 +422,20 @@ class BetAPITests(RivalAPITestBase):
         self.assertEqual(repeat.status_code, 200, repeat.text)
         self.assertEqual(repeat.json()["bet"]["id"], bet["id"])
         self.assertEqual(store.get_diamond_balance("owner", now=NOW), 980)
+
+        promote = client.post(
+            "/v1/me/bets",
+            headers=auth(),
+            json={
+                "kind": "group",
+                "market": "promote",
+                "paid_stake": 10,
+                "request_id": "group-promote",
+            },
+        )
+        self.assertEqual(promote.status_code, 200, promote.text)
+        self.assertEqual(promote.json()["bet"]["market"], "promote")
+        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 970)
 
         duplicate = client.post(
             "/v1/me/bets",
@@ -427,6 +454,12 @@ class BetAPITests(RivalAPITestBase):
         self.assertEqual(payload["bets"]["group"]["id"], bet["id"])
         self.assertEqual(payload["group"]["id"], bet["id"])
         self.assertEqual(payload["bet_options"]["group"]["target_rank"], 3)
+        markets = {
+            entry["market"]: entry for entry in payload["groups"]
+        }
+        self.assertEqual(set(markets), {"top3", "promote"})
+        self.assertEqual(markets["top3"]["status"], "placed")
+        self.assertEqual(markets["promote"]["status"], "placed")
         self.assertIsNone(payload["bets"]["weekly"])
         self.assertIsNone(payload["bets"]["daily"])
 

@@ -88,9 +88,9 @@ def rows_by_group(rows: list[dict]) -> dict[int, list[dict]]:
 
 @pytest.mark.parametrize(
     ("size", "expected"),
-    [(15, 3), (14, 3), (12, 2), (5, 1), (3, 1), (2, 1), (7, 1), (8, 2)],
+    [(15, 4), (14, 4), (13, 3), (12, 3), (5, 1), (3, 1), (2, 1), (7, 2), (8, 2)],
 )
-def test_group_quota_is_round_half_up_with_a_minimum_of_one(
+def test_group_quota_is_thirty_percent_rounded_down_with_a_minimum_of_one(
     size: int, expected: int
 ) -> None:
     assert group_quota(size) == expected
@@ -157,21 +157,31 @@ def test_strong_and_weak_groups_move_independently_within_one_tier(
         row["player_id"]: (row["promoted"], row["demoted"]) for row in weak_rows
     }
 
-    # The weak group's own top three promote even though every strong-group
-    # player (including rank four) scored higher than them.
-    assert [row["player_id"] for row in weak_rows[:3]] == ["b01", "b02", "b03"]
-    assert all(weak_moves[f"b{index:02d}"][0] for index in range(1, 4))
-    assert weak_moves["b04"] == (False, False)
+    # The weak group's own top four promote even though every strong-group
+    # player (including rank five) scored higher than them.
+    assert [row["player_id"] for row in weak_rows[:4]] == [
+        "b01",
+        "b02",
+        "b03",
+        "b04",
+    ]
+    assert all(weak_moves[f"b{index:02d}"][0] for index in range(1, 5))
+    assert weak_moves["b05"] == (False, False)
 
-    # The strong group's fourth place does not promote just because its tier
+    # The strong group's fifth place does not promote just because its tier
     # contains weaker groups.
-    assert [row["player_id"] for row in strong_rows[:3]] == ["a01", "a02", "a03"]
-    assert all(strong_moves[f"a{index:02d}"][0] for index in range(1, 4))
-    assert strong_moves["a04"] == (False, False)
+    assert [row["player_id"] for row in strong_rows[:4]] == [
+        "a01",
+        "a02",
+        "a03",
+        "a04",
+    ]
+    assert all(strong_moves[f"a{index:02d}"][0] for index in range(1, 5))
+    assert strong_moves["a05"] == (False, False)
 
-    # Both groups independently demote their own bottom three.
-    assert all(weak_moves[f"b{index:02d}"][1] for index in range(13, 16))
-    assert all(strong_moves[f"a{index:02d}"][1] for index in range(13, 16))
+    # Both groups independently demote their own bottom four.
+    assert all(weak_moves[f"b{index:02d}"][1] for index in range(12, 16))
+    assert all(strong_moves[f"a{index:02d}"][1] for index in range(12, 16))
     assert all(
         not (promoted and demoted)
         for promoted, demoted in (*strong_moves.values(), *weak_moves.values())
@@ -325,21 +335,21 @@ def test_978_channel_ai_plus_human_three_week_history(tmp_path) -> None:
         )
         settled_results[week] = settled
 
-    assert group_counts == [66, 67, 67]
+    assert group_counts == [66, 66, 66]
     assert tier_counts[WEEK_1] == Counter({"Bronze": 979})
-    assert tier_counts[WEEK_2] == Counter({"Bronze": 781, "Silver": 198})
+    assert tier_counts[WEEK_2] == Counter({"Bronze": 715, "Silver": 264})
     assert tier_counts[WEEK_3] == Counter(
-        {"Bronze": 664, "Silver": 273, "Gold": 42}
+        {"Bronze": 595, "Silver": 312, "Gold": 72}
     )
 
-    assert movement[WEEK_1] == (Counter({"Bronze": 198}), Counter())
+    assert movement[WEEK_1] == (Counter({"Bronze": 264}), Counter())
     assert movement[WEEK_2] == (
-        Counter({"Bronze": 159, "Silver": 42}),
-        Counter({"Silver": 42}),
+        Counter({"Bronze": 192, "Silver": 72}),
+        Counter({"Silver": 72}),
     )
     assert movement[WEEK_3] == (
-        Counter({"Bronze": 135, "Silver": 57, "Gold": 9}),
-        Counter({"Silver": 57, "Gold": 9}),
+        Counter({"Bronze": 160, "Silver": 84, "Gold": 20}),
+        Counter({"Silver": 84, "Gold": 20}),
     )
 
     # Every settled week is immutable, including older weeks rerun after the

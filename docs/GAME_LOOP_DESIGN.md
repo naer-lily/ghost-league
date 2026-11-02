@@ -734,7 +734,7 @@ diamond_ledger(id, player_id, delta, balance_after, reason, ref_type, ref_id,
 - `group_members` 必须满足：每组 15 人（v1），AI 数 = 15 - 真人数；不允许中途移除 AI。
 - 周中新增真人进入**新组**（当前周、14 个 AI），不通过移除已有 AI 塞进旧组；旧组名单周内不变。
 - 组内排名按 seconds 降序，tie-break 用 `player_id` 升序，保证可复现。
-- 升降级按组独立：每个组内成员按 seconds 降序、`player_id` 升序排名，`quota = max(1, round_half_up(group_size * 0.2))`；`weekly_results.promoted/demoted` 写该组结果，`rank` 仍写组内名次；不做 tier 汇总排名。
+- 升降级按组独立：每个组内成员按 seconds 降序、`player_id` 升序排名，`quota = max(1, (group_size * 3) // 10)`（每组前 30% 晋级、后 30% 降级，向下取整）；`weekly_results.promoted/demoted` 写该组结果，`rank` 仍写组内名次；不做 tier 汇总排名。Bronze 不降级，Diamond 不晋级，少于 2 人不移动。
 - 所有时间字符串统一 `Asia/Shanghai` ISO；周起点为周一。
 
 ### 7.4 API 变化

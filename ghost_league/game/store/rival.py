@@ -17,7 +17,6 @@ from ..rival import (
     AUTO_POWER_BAND_MAX,
     AUTO_POWER_BAND_MIN,
     FREE_BET_STAKE,
-    GROUP_ODDS,
     GROUP_TARGET_RANK,
     MAX_PAID_STAKE,
     MIN_PAID_STAKE,
@@ -278,12 +277,14 @@ class RivalMixin:
         me: dict[str, Any],
         rival: dict[str, Any] | None,
         projection: dict[str, Any] | None,
+        group_markets: list[dict[str, Any]] | None = None,
     ) -> dict[str, dict[str, Any] | None]:
         """Build render-ready target/stake options for the betting screen.
 
         Weekly and daily options only exist once a rival is assigned.  Group
-        options only exist once the caller has a group; group bets always
-        target the personal top three and use fixed odds.
+        options only exist once the caller has a group; every group market
+        (``top3`` / ``promote`` / ``no_demote``) carries its server-computed
+        odds and eligibility.
         """
 
         weekly: dict[str, Any] | None = None
@@ -332,6 +333,11 @@ class RivalMixin:
                     rival_power,
                 ),
             }
+        markets = list(group_markets or [])
+        top3 = next(
+            (entry for entry in markets if entry.get("market") == "top3"),
+            None,
+        )
         group = (
             {
                 "target_rank": GROUP_TARGET_RANK,
@@ -339,7 +345,8 @@ class RivalMixin:
                 "min_paid_stake": MIN_PAID_STAKE,
                 "max_paid_stake": MAX_PAID_STAKE,
                 "free_stake": FREE_BET_STAKE,
-                "odds": GROUP_ODDS,
+                "odds": top3["odds"] if top3 is not None else None,
+                "markets": markets,
             }
             if me.get("_group_id") is not None
             else None
@@ -436,7 +443,9 @@ class RivalMixin:
                 else None
             ),
             "bets": bets,
-            "bet_options": self._bet_options_with(me, rival, projection),
+            "bet_options": self._bet_options_with(
+                me, rival, projection, bets.get("groups")
+            ),
             "projection": projection,
             "bet_windows": self._bet_windows(local_now),
         }

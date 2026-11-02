@@ -23,7 +23,7 @@ from ..stars import (
     is_valid_palette,
 )
 
-SCHEMA_VERSION = "7"
+SCHEMA_VERSION = "8"
 ALGORITHM_VERSION = "phase1-v1"
 DEFAULT_DB_PATH = Path("data/league/league.db")
 SOURCE_AI = "wakatime_public_leaderboard"
@@ -502,6 +502,8 @@ CREATE TABLE IF NOT EXISTS group_bets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     player_id TEXT NOT NULL,
     week_start TEXT NOT NULL,
+    market TEXT NOT NULL DEFAULT 'top3'
+        CHECK (market IN ('top3', 'promote', 'no_demote')),
     group_id INTEGER NOT NULL,
     stake INTEGER NOT NULL,
     free_stake INTEGER NOT NULL DEFAULT 20,
@@ -513,7 +515,7 @@ CREATE TABLE IF NOT EXISTS group_bets (
     payout INTEGER NOT NULL DEFAULT 0,
     group_rank INTEGER,
     idempotency_key TEXT NOT NULL UNIQUE,
-    UNIQUE (player_id, week_start)
+    UNIQUE (player_id, week_start, market)
 );
 CREATE INDEX IF NOT EXISTS idx_group_bets_week_group
     ON group_bets (week_start, group_id);
@@ -617,6 +619,7 @@ class CoreMixin:
             self._migrate_shop(conn)
             self._migrate_stars(conn)
             self._migrate_bets(conn)
+            self._migrate_group_bets(conn)
             now = cal.iso_ts(
                 cal.parse_datetime(self._epoch_started_at)
                 if self._epoch_started_at is not None
@@ -1141,6 +1144,104 @@ class CoreMixin:
             conn.execute(
                 "UPDATE bets SET free_stake = 0, paid_stake = stake"
             )
+
+    @staticmethod
+    def _unique_column_sets(
+        conn: sqlite3.Connection, table: str
+    ) -> set[tuple[str, ...]]:
+        """Return the column tuples of every UNIQUE index on ``table``."""
+
+        found: set[tuple[str, ...]] = set()
+        for index in conn.execute(f"PRAGMA index_list({table})"):
+            if int(index["unique"]) != 1:
+                continue
+            columns = tuple(
+                str(info["name"])
+                for info in conn.execute(
+                    f"PRAGMA index_info({index['name']})"
+                )
+            )
+            found.add(columns)
+        return found
+
+    @staticmethod
+    def _migrate_group_bets(conn: sqlite3.Connection) -> None:
+        """Add ``market`` and widen the unique key to one row per market.
+
+        SQLite cannot alter a table-level UNIQUE constraint in place, so an
+        older ``group_bets`` table is rebuilt once.  Legacy rows become
+        ``market = 'top3'`` and keep their id, stake, odds and settlement
+        fields.  The method is idempotent: after the rebuild the triple key is
+        present and later startups do nothing.
+        """
+
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(group_bets)")
+        }
+        target_key = ("player_id", "week_start", "market")
+        legacy_key = ("player_id", "week_start")
+        unique_sets = CoreMixin._unique_column_sets(conn, "group_bets")
+        if (
+            "market" in columns
+            and target_key in unique_sets
+            and legacy_key not in unique_sets
+        ):
+            return
+        market_expr = (
+            "COALESCE(market, 'top3')" if "market" in columns else "'top3'"
+        )
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute("DROP TABLE IF EXISTS group_bets_new")
+            conn.execute(
+                """
+                CREATE TABLE group_bets_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    player_id TEXT NOT NULL,
+                    week_start TEXT NOT NULL,
+                    market TEXT NOT NULL DEFAULT 'top3'
+                        CHECK (market IN ('top3', 'promote', 'no_demote')),
+                    group_id INTEGER NOT NULL,
+                    stake INTEGER NOT NULL,
+                    free_stake INTEGER NOT NULL DEFAULT 20,
+                    paid_stake INTEGER NOT NULL,
+                    odds REAL NOT NULL,
+                    status TEXT NOT NULL
+                        CHECK (status IN ('placed', 'won', 'lost', 'void')),
+                    placed_at TEXT NOT NULL,
+                    settled_at TEXT,
+                    payout INTEGER NOT NULL DEFAULT 0,
+                    group_rank INTEGER,
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    UNIQUE (player_id, week_start, market)
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO group_bets_new "
+                "(id, player_id, week_start, market, group_id, stake, "
+                "free_stake, paid_stake, odds, status, placed_at, "
+                "settled_at, payout, group_rank, idempotency_key) "
+                "SELECT id, player_id, week_start, "
+                f"{market_expr}, group_id, stake, free_stake, paid_stake, "
+                "odds, status, placed_at, settled_at, payout, group_rank, "
+                "idempotency_key FROM group_bets"
+            )
+            conn.execute("DROP TABLE group_bets")
+            conn.execute("ALTER TABLE group_bets_new RENAME TO group_bets")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_group_bets_week_group "
+                "ON group_bets (week_start, group_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_group_bets_week_status "
+                "ON group_bets (week_start, status)"
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
     @staticmethod
     def _migrate_diamonds(conn: sqlite3.Connection, *, now: str) -> None:

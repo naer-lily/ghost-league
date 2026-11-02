@@ -58,9 +58,14 @@ def test_bronze_ranking_promotions_and_no_demotion(tmp_path) -> None:
     assert result["already_settled"] is False
     rows = result["results"]
     quota = group_quota(15)
-    assert quota == 3
+    assert quota == 4
     assert [row["rank"] for row in rows] == list(range(1, 16))
-    assert [row["player_id"] for row in rows[:quota]] == ["p01", "p02", "p03"]
+    assert [row["player_id"] for row in rows[:quota]] == [
+        "p01",
+        "p02",
+        "p03",
+        "p04",
+    ]
     assert all(row["promoted"] for row in rows[:quota])
     assert not any(row["promoted"] for row in rows[quota:])
     assert not any(row["demoted"] for row in rows)
@@ -89,7 +94,7 @@ def test_rerun_is_idempotent_and_does_not_recalculate(tmp_path) -> None:
     assert count == 15
 
 
-def test_silver_demotes_bottom_three_and_diamond_never_promotes(tmp_path) -> None:
+def test_silver_demotes_bottom_four_and_diamond_never_promotes(tmp_path) -> None:
     store = GameStore(tmp_path / "league.db", epoch_reason="test")
     players = [f"p{index:02d}" for index in range(1, 16)]
     for player_id in players:
@@ -119,6 +124,7 @@ def test_silver_demotes_bottom_three_and_diamond_never_promotes(tmp_path) -> Non
         "p01",
         "p02",
         "p03",
+        "p04",
     ]
     assert all(row["promoted"] for row in silver_result["results"][:quota])
     assert all(row["demoted"] for row in silver_result["results"][-quota:])

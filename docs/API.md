@@ -29,8 +29,8 @@ Channel token。`/badge/...`、`/embed/...`、`/health` 和 `/avatars/...` 公�
 | GET | `/v1/me/rival` | 本周宿敌、选择窗口、下注与上次结果 |
 | GET | `/v1/me/rival/candidates` | 可选择的宿敌候选（跨组） |
 | POST | `/v1/me/rival/select` | 手动选择/改选本周宿敌 |
-| GET | `/v1/me/bets` | 本周周注、组注与当天日注 |
-| POST | `/v1/me/bets` | 下注周注、组注或日注 |
+| GET | `/v1/me/bets` | 本周周注、三个组注盘口与当天日注 |
+| POST | `/v1/me/bets` | 下注周注、任一组注盘口或日注 |
 | GET | `/v1/me/stars/{star_id}/svg` | 自己一颗星的独属 SVG |
 | POST | `/v1/me/increments` | 写入真人活动增量 |
 | POST | `/v1/channels/{channel_id}/roster` | Channel 全量周名单 |
@@ -48,7 +48,7 @@ Channel token。`/badge/...`、`/embed/...`、`/health` 和 `/avatars/...` 公�
 | POST | `/v1/me/repair` | 补签 |
 | GET | `/v1/me/checkins` | 按周读取打卡 |
 | GET | `/v1/me/history` | 自己的统一个人历史时间线 |
-| GET | `/v1/users/{user_id}` | 公开用户卡片 |
+| GET | `/v1/users/{user_id}` | 登录态公开卡片 + 与我的本周对比 |
 | POST/DELETE | `/v1/me/follows/{user_id}` | 关注/取消关注 |
 | GET | `/v1/me/follows` | 我关注的人 |
 | GET | `/v1/me/followers` | 关注我的人 |
@@ -319,8 +319,15 @@ API 启动只初始化账号、social 和 `league.db`，确保本地真人存在
 ### `GET /v1/me/league`
 
 返回当前 token 所在的小组、组人数、自己的名次和完整小组榜单。没有 roster 或尚未
-分组时返回 `group=null`、`group_size=0`、`me=null`、`standings=[]`，不自己造数据。
+分组时返回 `group=null`、`group_size=0`、`promotion_quota=0`、`demotion_quota=0`、
+`me=null`、`standings=[]`，不自己造数据。
 `GET /v1/league/standings` 返回同一结构。
+
+每组前 30% 晋级、后 30% 降级，均向下取整并至少 1 人：
+`max(1, (group_size * 3) // 10)`。因此 15 人组前 4/后 4、14 人组前 4/后 4、
+13 人组前 3/后 3、2 人组前 1/后 1。Bronze 不降级，Diamond 不晋级，少于 2 人
+不移动。前端直接使用 `promotion_quota`、`demotion_quota` 和每行的
+`promoted`/`demoted`，不要自己按百分比推算。
 
 ```json
 {
@@ -328,6 +335,8 @@ API 启动只初始化账号、social 和 `league.db`，确保本地真人存在
   "group": {"id": 12, "no": 1, "tier": "Bronze", "week_start": "2026-10-26", "size": 15},
   "group_id": 12,
   "group_size": 15,
+  "promotion_quota": 4,
+  "demotion_quota": 4,
   "me": {"rank": 1, "xp": 1234, "power": 421},
   "standings": [
     {
@@ -340,6 +349,8 @@ API 启动只初始化账号、social 和 `league.db`，确保本地真人存在
       "power": 421,
       "checkin": "verified",
       "streak": 3,
+      "promoted": true,
+      "demoted": false,
       "title": "点火",
       "frame": "余烬",
       "backdrop": null
@@ -348,10 +359,11 @@ API 启动只初始化账号、social 和 `league.db`，确保本地真人存在
 }
 ```
 
-榜单每行返回展示用 `title`、`frame`、`backdrop` 和 `power`；`me` 对象也带
-`power`。`power` 为 `null` 表示该玩家还没有任何可用周，不伪造 1000。榜单不返回
-内部 `kind`、`is_ai`、target、source key、channel_id 或原始秒数。成员按 XP 降序排名。
-战力只是派生展示字段，不改变排名、分组、升降级或结算。
+榜单每行返回展示用 `title`、`frame`、`backdrop`、`power` 和当前名次对应的
+`promoted`/`demoted` 标记；`me` 对象也带 `power`。`power` 为 `null` 表示该玩家
+还没有任何可用周，不伪造 1000。榜单不返回内部 `kind`、`is_ai`、target、source key、
+channel_id 或原始秒数。成员按 XP 降序排名。战力只是派生展示字段，不改变排名、
+分组、升降级或结算。
 
 ### `GET /v1/league/history`
 
@@ -408,8 +420,9 @@ API 启动只初始化账号、social 和 `league.db`，确保本地真人存在
 `id` 在每类内稳定：`checkin:{date}`、`bet:{id}`、`group_bet:{id}`、
 `rival:{week_start}`、`star:{star_id}`、`week:{week_start}`。`at` 统一为
 Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为“打卡记录”，
-不会报错或伪造内容。下注 `data` 保留 `period_key`；组注、宿敌、星星和周结算的
-`data` 只包含本人可读的展示字段。
+不会报错或伪造内容。下注 `data` 保留 `period_key`；组注 `data` 另含 `market`、
+`market_label` 和该盘口的 `target_rank`，同一周三笔会显示为三条 `group_bet`；
+宿敌、星星和周结算的 `data` 只包含本人可读的展示字段。
 
 ## 组内动态
 
@@ -1054,7 +1067,39 @@ odds = round(odds, 2)
   },
   "rival": null,
   "result": null,
-  "bets": {"weekly": null, "daily": null, "group": null},
+  "bets": {
+    "weekly": null,
+    "daily": null,
+    "group": null,
+    "groups": [
+      {
+        "market": "top3",
+        "label": "押前三",
+        "available": true,
+        "can_place": true,
+        "reason": null,
+        "target_rank": 3,
+        "promotion_quota": 4,
+        "demotion_quota": 4,
+        "odds": 5.13,
+        "status": "open",
+        "bet": null
+      },
+      {
+        "market": "promote",
+        "label": "押升段",
+        "available": true,
+        "can_place": true,
+        "reason": null,
+        "target_rank": 4,
+        "promotion_quota": 4,
+        "demotion_quota": 4,
+        "odds": 4.19,
+        "status": "open",
+        "bet": null
+      }
+    ]
+  },
   "bet_options": {
     "weekly": null,
     "daily": null,
@@ -1064,7 +1109,8 @@ odds = round(odds, 2)
       "min_paid_stake": 0,
       "max_paid_stake": 500,
       "free_stake": 20,
-      "odds": 2.0
+      "odds": 5.13,
+      "markets": []
     }
   },
   "projection": null,
@@ -1085,8 +1131,10 @@ odds = round(odds, 2)
   在没有宿敌时为 `null`；`group` 在没有小组时为 `null`。周注/日注对象包含
   `target_options`（每项 `margin` + 锁注赔率 `odds`）、`min_target_margin`、
   `max_target_margin`、`min_paid_stake`、`max_paid_stake`、`free_stake` 和
-  `reference`。组注对象包含 `target_rank: 3`、`target_margin: 0`、`odds: 2.0`
-  以及同样的押注上下限和免费本金。
+  `reference`。组注对象保留旧的 `target_rank: 3`、`target_margin: 0` 和
+  `odds`（前三盘口），并新增 `markets`；`markets` 与 `bets.groups` 是同结构、
+  同顺序的可用盘口（Silver 等中间段位为三项；Bronze 不含 `no_demote`，Diamond
+  不含 `promote`；示例中省略重复内容）。赔率全部由服务端计算，前端只显示。
 - `projection` 只用于下注界面展示，不参与结算；没有宿敌时为 `null`。有宿敌时：
 
 ```json
@@ -1149,7 +1197,35 @@ odds = round(odds, 2)
   "weekly": null,
   "daily": null,
   "group": null,
-  "bets": {"weekly": null, "daily": null, "group": null},
+  "groups": [
+    {
+      "market": "top3",
+      "label": "押前三",
+      "available": true,
+      "can_place": true,
+      "reason": null,
+      "target_rank": 3,
+      "promotion_quota": 4,
+      "demotion_quota": 4,
+      "odds": 5.13,
+      "status": "open",
+      "bet": null
+    },
+    {
+      "market": "promote",
+      "label": "押升段",
+      "available": true,
+      "can_place": true,
+      "reason": null,
+      "target_rank": 4,
+      "promotion_quota": 4,
+      "demotion_quota": 4,
+      "odds": 4.19,
+      "status": "open",
+      "bet": null
+    }
+  ],
+  "bets": {"weekly": null, "daily": null, "group": null, "groups": []},
   "bet_options": {
     "weekly": null,
     "daily": null,
@@ -1159,7 +1235,8 @@ odds = round(odds, 2)
       "min_paid_stake": 0,
       "max_paid_stake": 500,
       "free_stake": 20,
-      "odds": 2.0
+      "odds": 5.13,
+      "markets": []
     }
   },
   "bet_windows": {
@@ -1171,19 +1248,30 @@ odds = round(odds, 2)
 ```
 
 `weekly` / `daily` / `group` 是 `bets` 同名字段的顶层别名，二者内容一致。
-`bet_options` 与 `GET /v1/me/rival` 中的结构相同；已下注时 `bets` 仍返回下注本身，
-`bet_options` 继续提供目标档位/赔率/押注上下限，前端不需要自己算赔率。
+`groups` 是组注的权威列表，按固定的 `top3`、`promote`、`no_demote` 顺序返回
+当前段位可用的盘口：Bronze 不返回 `no_demote`，Diamond 不返回 `promote`，所以
+示例（Bronze）只有两项。`bets.groups` 与它内容相同（示例为简洁写空）。
+`bet_options` 与 `GET /v1/me/rival` 中的结构相同；
+`bet_options.group.markets` 也与 `groups` 同结构。已下注时
+`bets`/`groups[].bet` 仍返回下注本身，`groups[].odds` 返回锁注赔率；
+`bet_options` 继续提供赔率/押注上下限，前端不需要自己算赔率。
+
+每个盘口对象都带 `market`、`label`、`available`、`can_place`（未下注且可下）、
+`reason`（`already_placed` / `no_group` / `null`）、
+`target_rank`、`promotion_quota`、`demotion_quota`、服务端赔率 `odds`、
+`status`（未下注为 `open`）和 `bet`（`null` 或下注 payload）。
 
 每笔下注都包含 `id`、`player_id`、`kind`、`period_key`、`stake`、`free_stake`、
 `paid_stake`、`target_margin`、`odds`、`status`、`payout`；周注/日注另含
-`rival_id` 和 `result_diff`，组注另含 `group_id`、`target_rank: 3` 和结算后的
-`group_rank`。
+`rival_id` 和 `result_diff`，组注另含 `market`、`group_id`、`target_rank`、
+`group_size`、`promotion_quota`、`demotion_quota` 和结算后的 `group_rank`。
 
 ### `POST /v1/me/bets`
 
 所有下注的请求体只接受 `paid_stake`（0–500 整数），旧的 `stake` 字段不再作为输入。
 `stake = 20 + paid_stake`，`free_stake = 20`，`paid_stake` 原样保存；下注只扣
-`paid_stake`。周注和日注必须带区间内的 `target_margin`；组注不带 `target_margin`。
+`paid_stake`。周注和日注必须带区间内的 `target_margin`，且不接受 `market`；
+组注不带 `target_margin`，`market` 缺省为 `top3`。
 
 周注：
 
@@ -1210,18 +1298,32 @@ odds = round(odds, 2)
 组注：
 
 ```json
-{"kind": "group", "paid_stake": 100, "request_id": "group-20261102"}
+{"kind": "group", "market": "promote", "paid_stake": 100, "request_id": "group-promote-20261102"}
 ```
 
-- 要求本周已有小组；与周注/日注可同时存在，每个真人每周一次，独立结算。
-- 组注固定押“我本人在本组本周排名前三”，payload 返回 `target_rank: 3`、
-  `target_margin: 0`，赔率固定 `2.0`；`paid_stake` 0–500，免费 20 规则同上。
-- 组内排名按本周 `weekly_scores.xp` 降序，同分按 `player_id` 升序；前三赢。
-  组总 XP 不参与判定：组总 XP 再高，个人第 4 也输。
-- 赢：按 `stake * 2.0` 派彩；输：失去 `paid_stake`。缺小组或缺个人本周分数为
-  `void`，只退 `paid_stake`。结算写回实际 `group_rank`，重复结算不重复打款。
+三个独立盘口，同一真人同一周最多三笔，一笔一个盘口，可分别下注：
 
-- 周注/组注每周、日注每天只能一笔；重复 `request_id` 返回原下注，不重复扣款。
+| `market` | 赢的条件 |
+| --- | --- |
+| `top3` | 本人组内最终排名 ≤ 3 |
+| `promote` | 本人组内最终排名 ≤ `max(1, (group_size * 3) // 10)`，且当前段位不是 Diamond |
+| `no_demote` | 本人组内最终排名 ≤ `group_size - max(1, (group_size * 3) // 10)`，且当前段位不是 Bronze |
+
+- 要求本周已有小组；与周注/日注可同时存在，每个盘口独立扣款、独立赔率、独立结算。
+- 赔率由服务端按组大小、当前组内排名/XP 缓冲和盘口门槛确定性计算，不使用随机数；
+  难度/赔率固定为 `top3 > promote > no_demote`，前端只显示 `odds`。
+- Bronze 不下发 `no_demote`，Diamond 不下发 `promote`；强行提交返回 `422`
+  `market_unavailable`，不写库、不扣款。
+- 组内排名按本周 `weekly_scores.xp` 降序，同分按 `player_id` 升序；组总 XP 不参与判定。
+- 结算：三个盘口分别按最终组内排名判胜负，未命中 `lost`，赢按各自
+  `stake * odds` 派彩；缺小组、段位或个人本周分数为 `void`，只退该笔
+  `paid_stake`。结算写回实际 `group_rank`，重复结算不重复打款。
+- 数据库唯一键是 `(player_id, week_start, market)`；旧数据迁移为 `top3`。
+  `request_id` 幂等键包含 `market`：同一盘口重复 `request_id` 返回原下注，
+  同一盘口换 `request_id` 返回 `409`，不同盘口可复用同一个 `request_id`。
+
+- 周注每周、日注每天只能一笔；组注每个盘口每周一笔。重复 `request_id` 返回原下注，
+  不重复扣款。
 - 成功返回 `{"bet": {...}, "state": {...}}`，`state` 与 `GET /v1/me/rival` 同结构。
 
 宿敌周结算：比较本周最终 `weekly_scores.xp`；真人赢 `+120` 钻石，平 `+40`，输 `0`。
@@ -1230,25 +1332,48 @@ odds = round(odds, 2)
 
 ### 下注错误
 
-- `409`：选择/下注窗口关闭、本周/当天/本周组注已下注、没有宿敌、钻石不足。
+- `409`：选择/下注窗口关闭、本周/当天/同一组注盘口已下注、没有宿敌、钻石不足。
 - `404`：候选不存在。
-- `422`：`paid_stake`、`target_margin` 或请求体不合法；目标超出区间；组注时本周
-  还没有分组。
+- `422`：`paid_stake`、`target_margin`、`market` 或请求体不合法；目标超出区间；
+  组注时本周还没有分组；`market` 不属于 `top3`/`promote`/`no_demote`；
+  Bronze 提交 `no_demote` 或 Diamond 提交 `promote`（`market_unavailable`）。
 - `401`：缺少或错误的 Bearer token。
 
 钻石软上限不拒绝下注；扣款后余额可以高于上限，超出部分继续按每小时 1% 复利衰减。
 
 
-## 公开用户与社交
+## 登录态用户详情与社交
 
 ### `GET /v1/users/{user_id}`
 
-返回本地账号或 Channel player 的公开卡片。公开响应**不包含** `kind`、`is_ai`、
-`origin`、`synthetic` 或原始秒数。字段包括 `user_id`、`display_name`、
+需要普通账号 Bearer token。返回本地账号或 Channel player 的公开卡片，并附带
+“我与目标”的本周对比。公开响应**不包含** `kind`、`is_ai`、`origin`、`synthetic`、
+钻石、钱包、下注、私有库存或原始秒数。顶层字段包括 `user_id`、`display_name`、
 `avatar_url`、`activity_label`、`tier`、`group_id`、`week_start`、`xp`、`rank`、
 `group_size`、`checkin`、`streak`、`equipped_title`、`frame`、`backdrop`、
-`badge_accent`、`is_following`、`followers_count` 和 `following_count`。
-未知 user_id 返回 `404`。
+`badge_accent`、`is_following`、`followers_count`、`following_count` 和
+`comparison`。未知 user_id 返回 `404`；无 token 返回 `401`。
+
+`comparison` 在查看自己时为 `null`（前端不渲染“我和我对比”），查看他人时稳定返回：
+
+```json
+{
+  "viewer_id": "owner",
+  "target_id": "friend-1",
+  "viewer_xp": 100,
+  "target_xp": 300,
+  "viewer_rank": 7,
+  "target_rank": 2,
+  "viewer_group_size": 15,
+  "target_group_size": 15,
+  "xp_diff": -200,
+  "leader": "them"
+}
+```
+
+`xp_diff = viewer_xp - target_xp`，正数表示我领先；`leader` 只有 `me` / `them` /
+`tie`。任一方本周没有小组数据时，对应 `*_rank` 为 `null`、`*_group_size` 为 `0`，
+对比仍按本周 XP 返回，不伪造名次。
 
 ### 关注与发现
 

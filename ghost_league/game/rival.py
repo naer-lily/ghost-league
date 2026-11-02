@@ -14,7 +14,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Final
 
 from . import calendar as cal
-from .rules import GameError
+from .rules import TIERS, GameError, group_quota
 
 # Selection opens Monday 00:05 and closes at the end of Monday (Tuesday 00:00).
 WEEK_SELECT_OPEN_OFFSET: Final = timedelta(minutes=5)
@@ -35,7 +35,19 @@ MAX_PAID_STAKE: Final = 500
 FREE_BET_STAKE: Final = 20
 
 GROUP_TARGET_RANK: Final = 3
-GROUP_ODDS: Final = 2.0
+GROUP_MARKETS: Final = ("top3", "promote", "no_demote")
+GROUP_MARKET_LABELS: Final = {
+    "top3": "押前三",
+    "promote": "押升段",
+    "no_demote": "押不降段",
+}
+# Group odds are deterministic and server-owned.  The fixed order is
+# ``top3 > promote > no_demote``; rank/XP cushion only moves the magnitude.
+GROUP_ODDS_MIN: Final = 1.1
+GROUP_ODDS_MAX: Final = 8.0
+GROUP_ODDS_STEP: Final = 0.1
+GROUP_ODDS_XP_SCALE: Final = 80.0
+GROUP_ODDS_EDGE_SCALE: Final = 0.12
 GROUP_BET_SETTLE_OFFSET: Final = timedelta(minutes=5)
 
 # Dynamic target range: at most twice the rival's estimate, with a floor so
@@ -177,6 +189,152 @@ def group_bet_settles_at(week: date | datetime | str) -> datetime:
     """Group bets settle with the next Monday 00:05 settlement pass."""
 
     return cal.week_end_at(week) + GROUP_BET_SETTLE_OFFSET
+
+
+def group_market_threshold(market: str, group_size: int) -> int:
+    """Return the inclusive rank threshold for one group market.
+
+    ``top3`` is always rank 3 (a smaller group simply cannot place anybody
+    outside it).  ``promote`` is the top 30% quota and ``no_demote`` is the
+    last rank that stays above the bottom 30% quota.
+    """
+
+    if market not in GROUP_MARKETS:
+        raise ValueError(f"unknown group market: {market}")
+    if isinstance(group_size, bool) or not isinstance(group_size, int):
+        raise TypeError("group_size must be an integer")
+    if group_size < 0:
+        raise ValueError("group_size must be non-negative")
+    if market == "top3":
+        return GROUP_TARGET_RANK
+    quota = group_quota(group_size)
+    if market == "promote":
+        return quota
+    return max(0, group_size - quota)
+
+
+def group_market_allowed(market: str, tier: str) -> bool:
+    """Return whether a tier may place this group market at all."""
+
+    if market not in GROUP_MARKETS:
+        raise ValueError(f"unknown group market: {market}")
+    if tier not in TIERS:
+        raise ValueError(f"unknown tier: {tier}")
+    if market == "promote":
+        return tier != TIERS[-1]
+    if market == "no_demote":
+        return tier != TIERS[0]
+    return True
+
+
+def group_market_won(
+    market: str,
+    *,
+    rank: int,
+    group_size: int,
+    tier: str,
+) -> bool:
+    """Judge one settled group bet by the player's final group rank."""
+
+    if market not in GROUP_MARKETS:
+        raise ValueError(f"unknown group market: {market}")
+    if tier not in TIERS:
+        raise ValueError(f"unknown tier: {tier}")
+    if rank < 1 or rank > group_size:
+        raise ValueError("rank must be within the group")
+    if market == "top3":
+        return rank <= GROUP_TARGET_RANK
+    quota = group_quota(group_size)
+    if market == "promote":
+        return rank <= quota and tier != TIERS[-1]
+    return rank <= group_size - quota and tier != TIERS[0]
+
+
+def _group_market_raw_odds(
+    market: str,
+    *,
+    group_size: int,
+    rank: int,
+    xp_gap: float,
+) -> float:
+    """Deterministic single-market odds before enforcing the fixed order."""
+
+    threshold = min(group_market_threshold(market, group_size), group_size)
+    hardness = (group_size - threshold) / max(1, group_size - 1)
+    premium = {"top3": 0.18, "promote": 0.09, "no_demote": 0.0}[market]
+    base = 1.2 + 6.0 * hardness + premium
+    edge = (threshold - rank) + (xp_gap / GROUP_ODDS_XP_SCALE)
+    factor = math.exp(-GROUP_ODDS_EDGE_SCALE * edge)
+    return base * factor
+
+
+def _clamp_group_odds(value: float) -> float:
+    return max(GROUP_ODDS_MIN, min(GROUP_ODDS_MAX, value))
+
+
+def group_market_odds_table(
+    *,
+    group_size: int,
+    rank: int,
+    xp_gaps: dict[str, int] | None = None,
+) -> dict[str, float]:
+    """Return all three group-market odds, ordered by difficulty.
+
+    ``xp_gaps`` maps a market to the player's current XP cushion over the
+    first rank outside that market (negative when they are currently outside).
+    The server computes this once and the frontend only displays it.  No
+    randomness is involved, and ``top3`` is always priced above ``promote``,
+    which is always above ``no_demote``.
+    """
+
+    if isinstance(group_size, bool) or not isinstance(group_size, int):
+        raise TypeError("group_size must be an integer")
+    if group_size < 1:
+        raise ValueError("group_size must be positive")
+    if isinstance(rank, bool) or not isinstance(rank, int):
+        raise TypeError("rank must be an integer")
+    if rank < 1 or rank > group_size:
+        raise ValueError("rank must be within the group")
+    gaps = xp_gaps or {}
+    raw = {
+        market: _group_market_raw_odds(
+            market,
+            group_size=group_size,
+            rank=rank,
+            xp_gap=float(gaps.get(market, 0)),
+        )
+        for market in GROUP_MARKETS
+    }
+    no_demote = _clamp_group_odds(raw["no_demote"])
+    promote = _clamp_group_odds(
+        max(raw["promote"], no_demote + GROUP_ODDS_STEP)
+    )
+    top3 = _clamp_group_odds(max(raw["top3"], promote + GROUP_ODDS_STEP))
+    if top3 < promote + GROUP_ODDS_STEP:
+        # Both raw prices hit the upper clamp; refit downward so the fixed
+        # difficulty order still holds.
+        top3 = GROUP_ODDS_MAX
+        promote = GROUP_ODDS_MAX - GROUP_ODDS_STEP
+        no_demote = min(no_demote, GROUP_ODDS_MAX - 2 * GROUP_ODDS_STEP)
+    return {
+        "top3": round(top3, 2),
+        "promote": round(promote, 2),
+        "no_demote": round(no_demote, 2),
+    }
+
+
+def group_market_odds(
+    market: str,
+    *,
+    group_size: int,
+    rank: int,
+    xp_gaps: dict[str, int] | None = None,
+) -> float:
+    """Return one market's deterministic odds."""
+
+    return group_market_odds_table(
+        group_size=group_size, rank=rank, xp_gaps=xp_gaps
+    )[market]
 
 
 def selection_window_open(
@@ -436,7 +594,10 @@ __all__ = [
     "DAILY_TARGET_STEP",
     "FREE_BET_STAKE",
     "GROUP_BET_SETTLE_OFFSET",
-    "GROUP_ODDS",
+    "GROUP_MARKETS",
+    "GROUP_MARKET_LABELS",
+    "GROUP_ODDS_MAX",
+    "GROUP_ODDS_MIN",
     "GROUP_TARGET_RANK",
     "MAX_PAID_STAKE",
     "MIN_PAID_STAKE",
@@ -473,6 +634,11 @@ __all__ = [
     "daily_bet_settles_at",
     "daily_target_upper_bound",
     "group_bet_settles_at",
+    "group_market_allowed",
+    "group_market_odds",
+    "group_market_odds_table",
+    "group_market_threshold",
+    "group_market_won",
     "odds_reference",
     "payout_for_win",
     "percentile_value",

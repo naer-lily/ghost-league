@@ -62,6 +62,8 @@ from .game.rules import (
     UnknownShopItem,
     WeekLocked,
     earned_embers_for_week,
+    group_movement,
+    group_quota,
     xp_for_seconds,
 )
 from .game.store import (
@@ -182,6 +184,7 @@ class BetRequest(BaseModel):
         le=MAX_PAID_STAKE,
     )
     target_margin: int | None = Field(default=None, strict=True)
+    market: Literal["top3", "promote", "no_demote"] | None = None
     request_id: str = Field(min_length=1, max_length=200)
 
 
@@ -811,10 +814,16 @@ class GameService:
                 "group": None,
                 "group_id": None,
                 "group_size": 0,
+                "promotion_quota": 0,
+                "demotion_quota": 0,
                 "me": None,
                 "standings": [],
             }
         rows = self.store.standings(week, group_id=int(group["id"]), now=now)
+        group_size = len(rows)
+        group_tier = str(group["tier"])
+        promotion_quota = group_quota(group_size) if group_size >= 2 else 0
+        demotion_quota = promotion_quota
         channel_profiles = self.store.channel_profiles_for_players(
             str(row["player_id"]) for row in rows if bool(row.get("is_ai"))
         )
@@ -824,6 +833,13 @@ class GameService:
             player_account = self.accounts.get(player_id)
             loadout = self.store.loadout_view(player_id)
             is_ai = bool(row.get("is_ai"))
+            promoted, demoted = (
+                group_movement(
+                    int(row["rank"]), group_tier, group_size
+                )
+                if group_size >= 2
+                else (False, False)
+            )
             standings.append(
                 {
                     "rank": int(row["rank"]),
@@ -841,6 +857,8 @@ class GameService:
                     ),
                     "checkin": row.get("checkin"),
                     "streak": int(row.get("streak") or 0),
+                    "promoted": promoted,
+                    "demoted": demoted,
                     "title": loadout["title"],
                     "frame": loadout["frame"],
                     "frame_id": loadout["frame_id"],
@@ -848,13 +866,15 @@ class GameService:
                 }
             )
         standings.sort(key=lambda item: (item["rank"], item["user_id"]))
-        group_payload = self._group_payload(group, size=len(standings))
+        group_payload = self._group_payload(group, size=group_size)
         me = next((item for item in standings if item["is_me"]), None)
         return {
             "week_start": week.isoformat(),
             "group": group_payload,
             "group_id": int(group["id"]),
-            "group_size": len(standings),
+            "group_size": group_size,
+            "promotion_quota": promotion_quota,
+            "demotion_quota": demotion_quota,
             "me": (
                 {
                     "rank": int(me["rank"]),
@@ -949,6 +969,7 @@ class GameService:
             "weekly": bets["weekly"],
             "daily": bets["daily"],
             "group": bets["group"],
+            "groups": bets["groups"],
             "bets": bets,
             "bet_options": state["bet_options"],
             "bet_windows": state["bet_windows"],
@@ -962,6 +983,7 @@ class GameService:
         paid_stake: int,
         target_margin: int | None,
         request_id: str,
+        market: str | None = None,
     ) -> dict[str, Any]:
         now, week = self._prepare_read(account)
         assert self.store is not None
@@ -972,6 +994,7 @@ class GameService:
             target_margin=target_margin,
             now=now,
             request_id=request_id,
+            market=market,
         )
         state = self._rival_payload(account, now, week)
         return {"bet": bet, "state": state}
@@ -1568,6 +1591,36 @@ class GameService:
             "followers_count": followers,
         }
 
+    @staticmethod
+    def _comparison_payload(
+        summary: dict[str, Any], viewer_summary: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Public week comparison between the signed-in viewer and the target."""
+
+        my_xp = int(viewer_summary.get("xp") or 0)
+        their_xp = int(summary.get("xp") or 0)
+        diff = my_xp - their_xp
+        if diff > 0:
+            leader = "me"
+        elif diff < 0:
+            leader = "them"
+        else:
+            leader = "tie"
+        return {
+            "viewer_id": str(viewer_summary["user_id"]),
+            "target_id": str(summary["user_id"]),
+            "viewer_xp": my_xp,
+            "target_xp": their_xp,
+            "viewer_rank": viewer_summary.get("rank"),
+            "target_rank": summary.get("rank"),
+            "viewer_group_size": int(
+                viewer_summary.get("group_size") or 0
+            ),
+            "target_group_size": int(summary.get("group_size") or 0),
+            "xp_diff": diff,
+            "leader": leader,
+        }
+
     def user_detail(self, user_id: str, viewer_id: str) -> dict[str, Any]:
         self._prepare_read(self.accounts.get(viewer_id) or {"user_id": viewer_id})
         now = self.now()
@@ -1575,6 +1628,17 @@ class GameService:
         summary = self._summary_for(user_id, viewer_id, now, week)
         if summary is None:
             raise LookupError(user_id)
+        if user_id == viewer_id:
+            summary["comparison"] = None
+        else:
+            viewer_summary = self._summary_for(
+                viewer_id, viewer_id, now, week
+            )
+            summary["comparison"] = (
+                self._comparison_payload(summary, viewer_summary)
+                if viewer_summary is not None
+                else None
+            )
         return summary
 
     def follow_user(self, account: dict[str, Any], target_id: str) -> dict[str, Any]:
@@ -2135,6 +2199,7 @@ def create_app(
                 paid_stake=request.paid_stake,
                 target_margin=request.target_margin,
                 request_id=request.request_id,
+                market=request.market,
             )
         except (
             BetAlreadyPlaced,
