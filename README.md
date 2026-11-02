@@ -108,9 +108,9 @@ token。systemd 模板把 token 放在 `/etc/ghost-league/waka.env`（0600）；
   契约、身份规则和分组规则。
 - [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md)：webhook 事件、签名、重试和 CLI。
 - PWA：`web/` 是旧的移动优先静态应用，`ghost_league/pwa.py` 先注册 API 路由，再挂载
-  静态根；`/v1/...`、`/avatars/...` 始终走 API。生产默认仍使用 `web/`；设置
-  `GHOST_LEAGUE_WEB_ROOT=/opt/ghost-league/web-next` 可切到新构建，SPA 深链回退到
-  `index.html`，旧 `web/` 保留回滚。
+  静态根；`/v1/...`、`/avatars/...` 始终走 API。当前生产通过
+  `GHOST_LEAGUE_WEB_ROOT=/opt/ghost-league/web-next` 挂载新构建，SPA 深链回退到
+  `index.html`；未设置时回退旧 `web/`，旧目录保留回滚。
 - 星图前端：`frontend/` 是 React/TypeScript 新栈，构建到 `web-next/`，不覆盖 `web/`；
   包含首页、小组榜、星图、历史占位、个人页和 PWA shell。启动、测试、切流和截图见
   [`frontend/README.md`](frontend/README.md)。
