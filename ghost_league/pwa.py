@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import app as api_app
+from .api import create_app
 
 WEB_ROOT = Path(__file__).resolve().parents[1] / "web"
 
@@ -87,7 +87,7 @@ def mount_web(app: FastAPI, web_root: str | Path = WEB_ROOT) -> FastAPI:
     return app
 
 
-app = mount_web(api_app, ACTIVE_WEB_ROOT)
+app = mount_web(create_app(start_scheduler=False), ACTIVE_WEB_ROOT)
 
 
 __all__ = ["ACTIVE_WEB_ROOT", "app", "mount_web", "WEB_ROOT"]
