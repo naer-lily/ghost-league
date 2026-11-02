@@ -1,16 +1,5 @@
-import { Compass, History } from 'lucide-react'
+import { Compass } from 'lucide-react'
 import { PlaceholderPage } from './PlaceholderPage'
-
-export function HistoryPage() {
-  return (
-    <PlaceholderPage
-      eyebrow="历史"
-      title="历史"
-      description="每周结算、段位变化和历史名次会在后续迭代接入。"
-      icon={History}
-    />
-  )
-}
 
 export function NotFoundPage() {
   return (

@@ -47,6 +47,7 @@ Channel token。`/badge/...`、`/embed/...`、`/health` 和 `/avatars/...` 公�
 | PATCH | `/v1/me/loadout` | 更新已装备展示项 |
 | POST | `/v1/me/repair` | 补签 |
 | GET | `/v1/me/checkins` | 按周读取打卡 |
+| GET | `/v1/me/history` | 自己的统一个人历史时间线 |
 | GET | `/v1/users/{user_id}` | 公开用户卡片 |
 | POST/DELETE | `/v1/me/follows/{user_id}` | 关注/取消关注 |
 | GET | `/v1/me/follows` | 我关注的人 |
@@ -377,6 +378,38 @@ API 启动只初始化账号、social 和 `league.db`，确保本地真人存在
   "generated_at": "2026-10-28T15:00:00+08:00"
 }
 ```
+
+## 个人历史
+
+### `GET /v1/me/history?limit=100`
+
+只返回当前登录账号自己的历史，不返回他人、钱包、下注账本或任何私有流水。`limit`
+范围为 1–200，默认 100；六类记录合并后按 `at` 降序，`at` 相同时按 `id` 升序稳定
+排序。`type` 只有 `checkin`、`bet`、`group_bet`、`rival`、`star`、`week`。
+
+```json
+{
+  "user_id": "owner",
+  "generated_at": "2026-11-02T22:30:00+08:00",
+  "limit": 100,
+  "items": [
+    {
+      "id": "checkin:2026-11-02",
+      "type": "checkin",
+      "at": "2026-11-02T22:31:00+08:00",
+      "title": "打卡",
+      "body": "画画 · 画了一张速写",
+      "data": {"date": "2026-11-02", "domain": "画画", "content": "画了一张速写"}
+    }
+  ]
+}
+```
+
+`id` 在每类内稳定：`checkin:{date}`、`bet:{id}`、`group_bet:{id}`、
+`rival:{week_start}`、`star:{star_id}`、`week:{week_start}`。`at` 统一为
+Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为“打卡记录”，
+不会报错或伪造内容。下注 `data` 保留 `period_key`；组注、宿敌、星星和周结算的
+`data` 只包含本人可读的展示字段。
 
 ## 组内动态
 

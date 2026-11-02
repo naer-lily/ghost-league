@@ -64,7 +64,14 @@ from .game.rules import (
     earned_embers_for_week,
     xp_for_seconds,
 )
-from .game.store import DEFAULT_DB_PATH, SOURCE_CHANNEL, SOURCE_HUMAN, GameStore
+from .game.store import (
+    DEFAULT_DB_PATH,
+    DEFAULT_HISTORY_LIMIT,
+    MAX_HISTORY_LIMIT,
+    SOURCE_CHANNEL,
+    SOURCE_HUMAN,
+    GameStore,
+)
 from .runtime_jobs import build_scheduled_tasks
 from .schedule import TZ
 from .social import FollowStore
@@ -1041,6 +1048,25 @@ class GameService:
                 for row in rows
             ],
             "generated_at": _iso(now),
+        }
+
+    def personal_history_for(
+        self,
+        account: dict[str, Any],
+        *,
+        limit: int = DEFAULT_HISTORY_LIMIT,
+    ) -> dict[str, Any]:
+        """Return only the signed-in account's own mixed activity timeline."""
+
+        now, _ = self._prepare_read(account)
+        assert self.store is not None
+        user_id = str(account["user_id"])
+        items = self.store.personal_history(user_id, limit=limit)
+        return {
+            "user_id": user_id,
+            "generated_at": _iso(now),
+            "limit": limit,
+            "items": items,
         }
 
     # -- writes --------------------------------------------------------
@@ -2352,6 +2378,17 @@ def create_app(
             )
         except (DuplicateIdempotencyKey, RepairRejected, GameError, ValueError) as exc:
             raise game_error(exc) from exc
+
+    @app.get("/v1/me/history")
+    def personal_history(
+        limit: int = Query(
+            default=DEFAULT_HISTORY_LIMIT,
+            ge=1,
+            le=MAX_HISTORY_LIMIT,
+        ),
+        account: dict[str, Any] = Depends(auth),
+    ) -> dict[str, Any]:
+        return service.personal_history_for(account, limit=limit)
 
     @app.get("/v1/me/checkins")
     def checkins(

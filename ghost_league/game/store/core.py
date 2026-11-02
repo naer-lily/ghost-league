@@ -23,7 +23,7 @@ from ..stars import (
     is_valid_palette,
 )
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
 ALGORITHM_VERSION = "phase1-v1"
 DEFAULT_DB_PATH = Path("data/league/league.db")
 SOURCE_AI = "wakatime_public_leaderboard"
@@ -232,6 +232,9 @@ CREATE TABLE IF NOT EXISTS checkins (
     repaired_at TEXT,
     repair_cost INTEGER NOT NULL DEFAULT 0 CHECK (repair_cost >= 0),
     status TEXT NOT NULL,
+    created_at INTEGER,
+    domain TEXT,
+    content TEXT,
     PRIMARY KEY (player_id, date)
 );
 
@@ -608,6 +611,7 @@ class CoreMixin:
                 or self._table_count(conn, "weekly_results") > 0
             )
             conn.executescript(_SCHEMA)
+            self._migrate_checkins(conn)
             self._migrate_sources(conn)
             self._migrate_players(conn)
             self._migrate_shop(conn)
@@ -954,6 +958,31 @@ class CoreMixin:
                 "当月限定星星；每个自然月最多购买一颗，必须命名。",
             ),
         )
+
+    @staticmethod
+    def _migrate_checkins(conn: sqlite3.Connection) -> None:
+        """Add optional check-in presentation fields for personal history.
+
+        Older rows only carry ``checked_at``.  The new columns stay NULL so
+        history falls back to that timestamp and the generic “打卡记录” body
+        instead of inventing data.  Only missing columns are added, so the
+        migration is idempotent.
+        """
+
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(checkins)")
+        }
+        additions = {
+            "created_at": "INTEGER",
+            "domain": "TEXT",
+            "content": "TEXT",
+        }
+        for name, declaration in additions.items():
+            if name not in columns:
+                conn.execute(
+                    f"ALTER TABLE checkins ADD COLUMN {name} {declaration}"
+                )
 
     @staticmethod
     def _migrate_stars(conn: sqlite3.Connection) -> None:

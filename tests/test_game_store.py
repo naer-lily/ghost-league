@@ -49,7 +49,7 @@ def test_schema_meta_and_epoch(tmp_path) -> None:
         "job_runs",
     } <= tables
     meta = store.meta_snapshot()
-    assert meta["schema_version"] == "6"
+    assert meta["schema_version"] == "7"
     assert meta["algorithm_version"] == "phase1-v1"
     assert meta["epoch_id"]
     assert store.active_epoch()["status"] == "active"

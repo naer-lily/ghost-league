@@ -10,7 +10,9 @@ import type {
   BetsState,
   Collection,
   FriendsStandings,
+  HistoryFeed,
   HomeSnapshot,
+  LeagueFeed,
   PlaceBetResult,
   Profile,
   RivalCandidateList,
@@ -19,12 +21,19 @@ import type {
   Standings,
   StarPurchaseResult,
   Status,
+  UserSummary,
 } from './types'
 
 export const homeQueryKey: QueryKey = ['home', 'snapshot']
 export const shopQueryKey: QueryKey = ['shop', 'catalog']
 export const collectionQueryKey: QueryKey = ['collection']
 export const friendsQueryKey: QueryKey = ['friends', 'standings']
+export const historyQueryKey: QueryKey = ['history', 'timeline']
+export const feedQueryKey: QueryKey = ['feed', 'league']
+
+export function userProfileQueryKey(userId: string): QueryKey {
+  return ['user', userId]
+}
 
 export interface PurchaseShopItemVariables {
   itemId: string
@@ -263,6 +272,101 @@ export function usePlaceBet() {
         queryClient.invalidateQueries({ queryKey: rivalQueryKey }),
         queryClient.invalidateQueries({ queryKey: betsQueryKey }),
         queryClient.invalidateQueries({ queryKey: homeQueryKey }),
+      ])
+    },
+  })
+}
+
+export function useHistory() {
+  return useQuery({
+    queryKey: historyQueryKey,
+    queryFn: ({ signal }) =>
+      apiFetch<HistoryFeed>('/v1/me/history?limit=100', signal ? { signal } : {}),
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+    retry: (count, error) =>
+      !(error instanceof ApiError && error.status === 401) && count < 1,
+  })
+}
+
+export function useLeagueFeed(enabled = true) {
+  return useQuery({
+    queryKey: feedQueryKey,
+    queryFn: ({ signal }) =>
+      apiFetch<LeagueFeed>(
+        '/v1/league/feed?limit=20',
+        signal ? { signal } : {},
+      ),
+    enabled,
+    staleTime: 15_000,
+    refetchInterval: enabled ? 30_000 : false,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
+    retry: (count, error) =>
+      !(error instanceof ApiError && error.status === 401) && count < 1,
+  })
+}
+
+export function useUserProfile(userId: string | null) {
+  return useQuery({
+    queryKey: userProfileQueryKey(userId ?? ''),
+    queryFn: ({ signal }) =>
+      apiFetch<UserSummary>(
+        `/v1/users/${encodeURIComponent(userId ?? '')}`,
+        signal ? { signal } : {},
+      ),
+    enabled: Boolean(userId),
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+    retry: (count, error) =>
+      !(error instanceof ApiError && error.status === 401) && count < 1,
+  })
+}
+
+export interface SetFollowVariables {
+  userId: string
+  follow: boolean
+}
+
+export function useSetFollow() {
+  const queryClient = useQueryClient()
+  return useMutation<UserSummary | null, Error, SetFollowVariables>({
+    mutationFn: ({ userId, follow }: SetFollowVariables) =>
+      follow
+        ? apiFetch<UserSummary>(
+            `/v1/me/follows/${encodeURIComponent(userId)}`,
+            { method: 'POST' },
+          )
+        : apiFetch<void>(`/v1/me/follows/${encodeURIComponent(userId)}`, {
+            method: 'DELETE',
+          }).then(() => null),
+    onSuccess: (data, variables) => {
+      if (data) {
+        queryClient.setQueryData<UserSummary>(
+          userProfileQueryKey(variables.userId),
+          data,
+        )
+        return
+      }
+      queryClient.setQueryData<UserSummary>(
+        userProfileQueryKey(variables.userId),
+        (current) =>
+          current
+            ? {
+                ...current,
+                is_following: false,
+                followers_count: Math.max(0, current.followers_count - 1),
+              }
+            : current,
+      )
+    },
+    onSettled: async (_data, _error, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: feedQueryKey }),
+        queryClient.invalidateQueries({ queryKey: friendsQueryKey }),
+        queryClient.invalidateQueries({
+          queryKey: userProfileQueryKey(variables.userId),
+        }),
       ])
     },
   })

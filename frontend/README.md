@@ -1,7 +1,7 @@
 # 炉火联赛前端 · React + TypeScript
 
 `frontend/` 是当前维护的 React 18 + TypeScript + Vite 前端，包含首页（宿敌 + 赌注）、
-小组/好友榜、物品栏、历史占位页和个人页。构建产物输出到仓库根目录的 `web-next/`；
+小组/好友/动态榜、物品栏、历史时间线和个人页。构建产物输出到仓库根目录的 `web-next/`；
 旧 `web/` 不修改，保留作生产回滚。生产切流只切换 `ghost_league/pwa.py` 的静态根，
 不新增端口。
 
@@ -27,7 +27,7 @@ frontend/
     api/              # fetch/blob 封装、Bearer 注入、API 类型、TanStack Query hook
     components/       # AppShell、PlayerHeader、宿敌卡/候选、物品栏、榜单、TierProgress 等
     lib/              # API → 页面视图映射、宿敌/物品栏格式、段位、音效
-    pages/            # 首页 / 小组 / 宿敌深链 / 物品栏 / 我的 / 登录 / 历史占位
+    pages/            # 首页 / 小组 / 宿敌深链 / 物品栏 / 我的 / 登录 / 历史
     store/            # Zustand UI 状态；复用旧 token
     styles/           # token + 全局基础样式
     test/             # Vitest setup 与 fixtures
@@ -57,7 +57,7 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
 - `/rival` 宿敌选择与对抗的深链页（导航不再单列）
 - `/inventory` 物品栏：星星 / 边框 / 称号 / 其他
 - `/shop`、`/embers` 旧地址重定向到 `/inventory`
-- `/history` 历史占位页（保留）
+- `/history` 历史时间线：打卡 / 下注 / 宿敌 / 星星 / 周结算，按时间倒序并可筛选
 - `/me` 我的
 
 底部/侧边导航固定 5 个入口：首页、小组、物品栏、历史、我的。导航是纯图标 +
@@ -90,6 +90,17 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
     「小组」tab 显示 `GroupBetCard`，文案是“押我本人在本组本周排名前三”。没有小组或
     `bet_options.group` 为 `null` 时不显示，不伪造。组注 dialog 只输入自付钻石，
     请求体发送 `{kind: "group", paid_stake, request_id}`。
+- 动态与他人资料：
+  - `GET /v1/league/feed?limit=20`：只读 feed，渲染作者、正文、时间、reactions 和 tags；
+    不提供自由发帖。
+  - 点击作者头像/名字/卡片读取 `GET /v1/users/{user_id}`，底部显示公开资料卡；不显示
+    他人钻石、下注或私有数据。
+  - 「关注 / 已关注」调用 `POST/DELETE /v1/me/follows/{user_id}`；成功后刷新 feed、
+    资料卡和好友榜，失败显示真实错误。
+- 历史：
+  - `GET /v1/me/history?limit=100`，前端按 全部 / 打卡 / 下注 / 宿敌 / 星星 / 周结算
+    单选筛选；卡片显示相对时间 + Asia/Shanghai 绝对时间；空态明确写“还没有历史记录”。
+  - 页面复用 `PullToRefresh`，并覆盖加载、错误和重试状态。
 - 物品栏：
   - 星星：`GET /v1/shop`、`POST /v1/shop/purchase`、
     `GET /v1/me/stars/{star_id}/svg`
@@ -109,10 +120,15 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
   显示 `+margin XP` 与该档赔率；自付钻石用数字输入 + `0–500` 滑杆，总本金为
   `free_stake + paid_stake`，总返为 `round(stake × 服务端赔率)`。自付 0 合法，默认只
   使用免费 20；周注截止周一 `23:59:59`，日注 `21:00` 锁注、`22:30` 结算。
-- **小组/好友榜**：顶部只有结算倒计时，不显示小组人数。`小组 / 好友` 分段切换。
+- **小组/好友榜**：顶部只有结算倒计时，不显示小组人数。`小组 / 好友 / 动态` 分段切换。
   好友榜按关注关系读真实数据，排除自己，按 XP 排名，没有关注时给空状态。小组榜下方的
   `GroupBetCard` 显示个人前三组注（目标名次、赔率、免费 20、押注 0–500 和已下注状态），
-  好友 tab 不显示组注。
+  好友/动态 tab 不显示组注。
+- **动态与他人资料**：动态只来自真实服务端事件；点击卡片打开 `UserProfileSheet`，
+  显示段位、本周 XP、组内排名、连胜、关注/粉丝数。关注或取消关注后立即刷新 feed、
+  资料卡和好友榜；没有动态或关注时给真实空态。
+- **历史**：`历史` tab 打开真实时间线；筛选 chips 单选，`group_bet` 归入「下注」；
+  计数随筛选更新；时间同时显示相对时间和绝对日期；无记录时不伪造示例。
 - **物品栏**：页面标题和导航都叫“物品栏”。分类为星星 / 边框 / 称号 / 其他；
   星星分类下保留抽卡、概率、稀有度和独属 SVG，其他分类来自 `collection` 和真实库存。
   每类都有加载、错误和空状态。
@@ -158,10 +174,11 @@ PYTHONPATH=. pytest -q tests/test_pwa.py tests/test_pwa_design.py tests/test_pwa
 
 前端单测覆盖：首页有/无宿敌、周注/日注状态、真实更新时间、下拉刷新、周注/日注目标档位、
 自付 0/500 与总返、组注卡片（仅小组 tab）、组注 `paid_stake` payload、小组/好友切换和空态、
+动态 tab、作者资料、关注后好友榜更新、历史六类筛选/计数/空态/错误重试、相对与绝对时间、
 物品栏四类、空态与购买、我的横向段位、钻石/连胜、设置入口、导航和顶栏收敛。
 `e2e/home.spec.ts` 用真实 token 在 390×844 与 1440×1000 走一遍首页、周/日注 dialog、无宿敌、
 下拉刷新、小组组注与好友榜、无组注空态、物品栏分类、我的与设置，并把截图写到
-`artifacts/ghost-ui-group1/`。
+`artifacts/ghost-ui-group1/`。历史与动态/关注走查截图在 `artifacts/ghost-history-feed/`。
 
 ## 部署边界
 

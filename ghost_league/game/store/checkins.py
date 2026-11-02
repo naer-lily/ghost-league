@@ -44,8 +44,16 @@ class CheckinsMixin:
             conn.execute(
                 "INSERT INTO checkins "
                 "(player_id, date, source, seconds, xp, checked_at, repaired_at, "
-                "repair_cost, status) VALUES (?, ?, 'verified', ?, ?, ?, NULL, 0, 'verified')",
-                (player_id, day_iso, day_seconds, day_xp, cal.iso_ts(now)),
+                "repair_cost, status, created_at) "
+                "VALUES (?, ?, 'verified', ?, ?, ?, NULL, 0, 'verified', ?)",
+                (
+                    player_id,
+                    day_iso,
+                    day_seconds,
+                    day_xp,
+                    cal.iso_ts(now),
+                    int(now.timestamp()),
+                ),
             )
             return {
                 "created": True,
@@ -438,7 +446,8 @@ class CheckinsMixin:
             conn.execute(
                 "INSERT INTO checkins "
                 "(player_id, date, source, seconds, xp, checked_at, repaired_at, "
-                "repair_cost, status) VALUES (?, ?, 'repaired', ?, ?, ?, ?, 1, 'repaired')",
+                "repair_cost, status, created_at) "
+                "VALUES (?, ?, 'repaired', ?, ?, ?, ?, 1, 'repaired', ?)",
                 (
                     player_id,
                     day_iso,
@@ -446,6 +455,7 @@ class CheckinsMixin:
                     xp_for_seconds(day_seconds),
                     cal.iso_ts(local_now),
                     cal.iso_ts(local_now),
+                    int(local_now.timestamp()),
                 ),
             )
             new_balance = balance - 1

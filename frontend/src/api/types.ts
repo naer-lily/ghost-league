@@ -367,3 +367,65 @@ export interface FriendsStandings {
   week_start: string
   members: FriendSummary[]
 }
+
+export type UserSummary = FriendSummary
+
+export type HistoryType =
+  | 'checkin'
+  | 'bet'
+  | 'group_bet'
+  | 'rival'
+  | 'star'
+  | 'week'
+
+export interface HistoryItem {
+  id: string
+  type: HistoryType
+  at: string
+  title: string
+  body: string
+  data: Record<string, unknown>
+}
+
+export interface HistoryFeed {
+  user_id: string
+  generated_at: string
+  limit: number
+  items: HistoryItem[]
+}
+
+export interface FeedAuthor {
+  id: string
+  name: string
+  title: string | null
+  frame: string | null
+  avatar_url: string | null
+}
+
+export interface FeedReaction {
+  emoji: string
+  count: number
+  mine: boolean
+}
+
+export interface FeedTag {
+  tag: string
+  count: number
+}
+
+export interface FeedItem {
+  id: number
+  kind: string
+  day: string
+  body: string
+  author: FeedAuthor
+  reactions: FeedReaction[]
+  tags: FeedTag[]
+  created_at: string
+}
+
+export interface LeagueFeed {
+  week_start: string
+  generated_at: string
+  items: FeedItem[]
+}

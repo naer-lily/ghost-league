@@ -40,6 +40,12 @@ from .core import (
 )
 from .feed import FeedMixin
 from .groups import GroupsMixin
+from .history import (
+    DEFAULT_HISTORY_LIMIT,
+    HISTORY_TYPES,
+    MAX_HISTORY_LIMIT,
+    HistoryMixin,
+)
 from .job_runs import (
     JOB_STATUS_FAILED,
     JOB_STATUS_RUNNING,
@@ -121,6 +127,7 @@ class GameStore(
     RivalMixin,
     BetsMixin,
     JobRunMixin,
+    HistoryMixin,
 ):
     """Transactional access to one ``league.db`` file."""
 
@@ -141,13 +148,16 @@ __all__ = [
     "DIAMOND_DECAY_RATE_PER_HOUR",
     "DIAMOND_INITIAL_BALANCE",
     "DIAMOND_INITIAL_CAP",
+    "DEFAULT_HISTORY_LIMIT",
     "EMBER_ITEM_ID",
     "EMBER_PURCHASE_QUANTITY",
     "GROUP_SIZE",
+    "HISTORY_TYPES",
     "ITEM_BY_ID",
     "JOB_STATUS_FAILED",
     "JOB_STATUS_RUNNING",
     "JOB_STATUS_SUCCEEDED",
+    "MAX_HISTORY_LIMIT",
     "POWER_WEIGHTS",
     "POWER_WINDOW_WEEKS",
     "RARITY_BY_TYPE",
