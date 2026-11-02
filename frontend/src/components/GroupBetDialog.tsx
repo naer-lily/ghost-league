@@ -6,7 +6,6 @@ import type { BetWindows, GroupMarketOption } from '../api/types'
 import {
   betReturn,
   describeRivalError,
-  formatCountdown,
   formatOdds,
   formatXp,
   groupLocked,
@@ -209,9 +208,6 @@ export function GroupBetDialog({
             <p className={styles.deadline}>
               <Clock3 size={14} aria-hidden="true" />
               周一 23:59:59 截止 · 次周一结算
-            </p>
-            <p className={styles.note}>
-              本周剩余 {formatCountdown(windows.weekly_locks_at, now)}
             </p>
 
             {error ? (

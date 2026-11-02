@@ -20,7 +20,6 @@ import {
   betStatusText,
   dailyLocked,
   describeRivalError,
-  formatCountdown,
   formatOdds,
   formatXp,
   isPast,
@@ -256,11 +255,9 @@ export function RivalBetDialog({
               </Dialog.Title>
               <Dialog.Description
                 id={descriptionId}
-                className={styles.description}
+                className="visually-hidden"
               >
-                本周宿敌：{state.rival?.display_name ?? '—'}。每注自带{' '}
-                {DEFAULT_FREE_STAKE} 免费本金，只按自付部分扣钻石；赔率以服务端
-                返回为准。
+                下注对话框
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -470,14 +467,6 @@ export function RivalBetDialog({
               {submitLabel}
             </button>
 
-            <p className={styles.note}>
-              每注自带 {freeStake} 免费本金：自付 0 时总本金 {freeStake}，自付
-              多少就扣多少钻石；赢按总本金 × 赔率派彩。
-            </p>
-            <p className={styles.note}>
-              本周剩余 {formatCountdown(windows.weekly_locks_at, now)} · 日注锁注{' '}
-              {formatCountdown(windows.daily_locks_at, now)}
-            </p>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

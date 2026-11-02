@@ -3,6 +3,7 @@ import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
+import { useUiStore } from '../store/useUiStore'
 import { makeSnapshot } from '../test/fixtures'
 import { AppShell } from './AppShell'
 
@@ -42,6 +43,7 @@ function renderShell() {
 describe('AppShell navigation', () => {
   beforeEach(() => {
     window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    useUiStore.setState({ settingsOpen: false })
   })
 
   afterEach(() => {
@@ -105,5 +107,22 @@ describe('AppShell navigation', () => {
       'href',
       '/me',
     )
+  })
+
+  it('keeps the settings description hidden', async () => {
+    useUiStore.setState({ settingsOpen: true })
+    renderShell()
+
+    const dialog = await screen.findByRole('dialog', { name: '设置' })
+    expect(
+      screen.queryByText(
+        '音量、外观和账号都在这里；这些选项沿用现有账号能力。',
+      ),
+    ).not.toBeInTheDocument()
+    const descriptionId = dialog.getAttribute('aria-describedby')
+    expect(descriptionId).toBeTruthy()
+    const description = document.getElementById(descriptionId!)
+    expect(description).toHaveTextContent('设置对话框')
+    expect(description).toHaveClass('visually-hidden')
   })
 })

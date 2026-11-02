@@ -458,6 +458,11 @@ describe('RivalPage', () => {
     expect(within(dialog).getByTestId('rival-bet-payout')).toHaveTextContent(
       '24',
     )
+    expect(within(dialog).queryByText(/本周剩余/)).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/日注锁注/)).not.toBeInTheDocument()
+    expect(
+      within(dialog).getByText('周一 23:59:59 截止 · 次周一结算'),
+    ).toBeInTheDocument()
 
     await user.click(within(dialog).getByTestId('rival-target-300'))
     expect(within(dialog).getByTestId('rival-bet-target')).toHaveTextContent(

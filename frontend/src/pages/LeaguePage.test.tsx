@@ -532,6 +532,10 @@ describe('LeaguePage tabs', () => {
     expect(within(dialog).getByTestId('group-bet-stake')).toHaveTextContent(
       '20',
     )
+    expect(within(dialog).queryByText(/本周剩余/)).not.toBeInTheDocument()
+    expect(
+      within(dialog).getByText('周一 23:59:59 截止 · 次周一结算'),
+    ).toBeInTheDocument()
 
     await user.clear(paidInput)
     await user.type(paidInput, '500')

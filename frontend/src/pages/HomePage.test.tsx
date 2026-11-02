@@ -247,6 +247,12 @@ describe('HomePage rework', () => {
       within(dialog).queryByText('押「我本周最终 XP 比宿敌高多少」'),
     ).not.toBeInTheDocument()
     expect(within(dialog).queryByTestId('rival-target-150')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/本周宿敌：/)).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/每注自带/)).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/本周剩余/)).not.toBeInTheDocument()
+    expect(
+      within(dialog).getByText('21:00 锁注 · 22:30 结算'),
+    ).toBeInTheDocument()
   })
 
   it('opens the rival public profile from the duel avatar and shows the week comparison', async () => {

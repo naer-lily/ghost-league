@@ -64,8 +64,8 @@ export function SettingsDialog({ home }: SettingsDialogProps) {
               </button>
             </Dialog.Close>
           </div>
-          <Dialog.Description className={styles.description}>
-            音量、外观和账号都在这里；这些选项沿用现有账号能力。
+          <Dialog.Description className="visually-hidden">
+            设置对话框
           </Dialog.Description>
 
           <section className={styles.section} aria-labelledby="setting-sound">

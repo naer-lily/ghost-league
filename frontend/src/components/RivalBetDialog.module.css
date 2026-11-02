@@ -46,15 +46,6 @@
   letter-spacing: -0.02em;
 }
 
-.description {
-  max-width: 54ch;
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 700;
-  line-height: 1.5;
-}
-
 .close {
   display: grid;
   flex: none;
@@ -460,15 +451,6 @@
 .submit:not(:disabled):active {
   transform: translateY(2px);
   box-shadow: 0 2px 0 var(--rival-mint-shadow);
-}
-
-.note {
-  margin-top: 9px;
-  color: var(--muted-2);
-  font-size: 0.63rem;
-  font-weight: 700;
-  line-height: 1.5;
-  text-align: center;
 }
 
 @keyframes overlayIn {
