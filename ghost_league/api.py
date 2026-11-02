@@ -35,6 +35,8 @@ from .game import calendar as cal
 from .game.feed import FEED_EMOJIS
 from .game.roster import ensure_all_groups
 from .game.rival import (
+    MAX_PAID_STAKE,
+    MIN_PAID_STAKE,
     BetAlreadyPlaced,
     BetRejected,
     BetWindowClosed,
@@ -166,7 +168,12 @@ class BetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["weekly", "daily", "group"]
-    stake: int | None = Field(default=None, strict=True)
+    paid_stake: int = Field(
+        default=MIN_PAID_STAKE,
+        strict=True,
+        ge=MIN_PAID_STAKE,
+        le=MAX_PAID_STAKE,
+    )
     target_margin: int | None = Field(default=None, strict=True)
     request_id: str = Field(min_length=1, max_length=200)
 
@@ -936,6 +943,7 @@ class GameService:
             "daily": bets["daily"],
             "group": bets["group"],
             "bets": bets,
+            "bet_options": state["bet_options"],
             "bet_windows": state["bet_windows"],
         }
 
@@ -944,7 +952,7 @@ class GameService:
         account: dict[str, Any],
         *,
         kind: str,
-        stake: int | None,
+        paid_stake: int,
         target_margin: int | None,
         request_id: str,
     ) -> dict[str, Any]:
@@ -953,7 +961,7 @@ class GameService:
         bet = self.store.place_bet(
             str(account["user_id"]),
             kind,
-            stake=stake,
+            paid_stake=paid_stake,
             target_margin=target_margin,
             now=now,
             request_id=request_id,
@@ -2098,7 +2106,7 @@ def create_app(
             return service.place_bet_for(
                 account,
                 kind=request.kind,
-                stake=request.stake,
+                paid_stake=request.paid_stake,
                 target_margin=request.target_margin,
                 request_id=request.request_id,
             )

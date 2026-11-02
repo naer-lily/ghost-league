@@ -360,10 +360,21 @@ def test_projection_uses_settled_percentile_and_daily_ratio(
     assert state["bets"]["group"] is None
     assert state["projection"] == {
         "rival_week_estimate": 300,
-        "week_line": 301,
         "rival_today_estimate": 100,
-        "daily_lines": {"50": 150, "150": 250, "300": 400},
+        "weekly_target_max": 600,
+        "daily_target_max": 200,
     }
+    weekly_options = state["bet_options"]["weekly"]
+    daily_options = state["bet_options"]["daily"]
+    assert weekly_options["min_paid_stake"] == 0
+    assert weekly_options["max_paid_stake"] == 500
+    assert weekly_options["free_stake"] == 20
+    assert weekly_options["target_options"][0] == {
+        "margin": 0,
+        "odds": 1.2,
+    }
+    assert weekly_options["target_options"][-1]["margin"] == 600
+    assert daily_options["target_options"][-1]["margin"] == 200
 
 
 def test_projection_falls_back_without_settled_week(tmp_path: Path) -> None:
@@ -379,9 +390,9 @@ def test_projection_falls_back_without_settled_week(tmp_path: Path) -> None:
     state = store.rival_state("h1", now=MONDAY)
     assert state["projection"] == {
         "rival_week_estimate": 100,
-        "week_line": 101,
         "rival_today_estimate": 0,
-        "daily_lines": {"50": 50, "150": 150, "300": 300},
+        "weekly_target_max": 200,
+        "daily_target_max": 50,
     }
 
 

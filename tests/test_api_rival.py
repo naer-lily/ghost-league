@@ -128,6 +128,12 @@ class RivalStateAPITests(RivalAPITestBase):
         self.assertEqual(
             payload["bets"], {"weekly": None, "daily": None, "group": None}
         )
+        self.assertIsNone(payload["bet_options"]["weekly"])
+        self.assertIsNone(payload["bet_options"]["daily"])
+        self.assertEqual(payload["bet_options"]["group"]["target_rank"], 3)
+        self.assertEqual(payload["bet_options"]["group"]["odds"], 2.0)
+        self.assertEqual(payload["bet_options"]["group"]["free_stake"], 20)
+        self.assertEqual(payload["bet_options"]["group"]["max_paid_stake"], 500)
         self.assertEqual(
             payload["bet_windows"],
             {
@@ -256,7 +262,12 @@ class BetAPITests(RivalAPITestBase):
         weekly = client.post(
             "/v1/me/bets",
             headers=auth(),
-            json={"kind": "weekly", "stake": 20, "request_id": "w-1"},
+            json={
+                "kind": "weekly",
+                "paid_stake": 0,
+                "target_margin": 0,
+                "request_id": "w-1",
+            },
         )
         self.assertEqual(weekly.status_code, 200, weekly.text)
         weekly_payload = weekly.json()
@@ -264,17 +275,29 @@ class BetAPITests(RivalAPITestBase):
         self.assertEqual(weekly_payload["bet"]["stake"], 20)
         self.assertEqual(weekly_payload["bet"]["free_stake"], 20)
         self.assertEqual(weekly_payload["bet"]["paid_stake"], 0)
-        self.assertEqual(weekly_payload["bet"]["odds"], 2.0)
+        self.assertEqual(weekly_payload["bet"]["target_margin"], 0)
+        self.assertEqual(weekly_payload["bet"]["odds"], 1.2)
         self.assertEqual(store.get_diamond_balance("owner", now=NOW), 1000)
         self.assertEqual(
             weekly_payload["state"]["bets"]["weekly"]["id"],
             weekly_payload["bet"]["id"],
         )
+        weekly_options = weekly_payload["state"]["bet_options"]["weekly"]
+        self.assertEqual(weekly_options["min_paid_stake"], 0)
+        self.assertEqual(weekly_options["max_paid_stake"], 500)
+        self.assertEqual(weekly_options["free_stake"], 20)
+        self.assertEqual(weekly_options["target_options"][0]["margin"], 0)
+        self.assertEqual(weekly_options["target_options"][0]["odds"], 1.2)
 
         repeat = client.post(
             "/v1/me/bets",
             headers=auth(),
-            json={"kind": "weekly", "stake": 20, "request_id": "w-1"},
+            json={
+                "kind": "weekly",
+                "paid_stake": 0,
+                "target_margin": 0,
+                "request_id": "w-1",
+            },
         )
         self.assertEqual(repeat.status_code, 200, repeat.text)
         self.assertEqual(repeat.json()["bet"]["id"], weekly_payload["bet"]["id"])
@@ -283,20 +306,38 @@ class BetAPITests(RivalAPITestBase):
         daily = client.post(
             "/v1/me/bets",
             headers=auth(),
-            json={"kind": "daily", "target_margin": 50, "request_id": "d-1"},
+            json={
+                "kind": "daily",
+                "paid_stake": 80,
+                "target_margin": 50,
+                "request_id": "d-1",
+            },
         )
         self.assertEqual(daily.status_code, 200, daily.text)
-        self.assertEqual(daily.json()["bet"]["stake"], 20)
-        self.assertEqual(daily.json()["bet"]["free_stake"], 20)
-        self.assertEqual(daily.json()["bet"]["paid_stake"], 0)
-        self.assertEqual(daily.json()["bet"]["target_margin"], 50)
-        self.assertEqual(daily.json()["bet"]["odds"], 1.5)
-        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 1000)
+        daily_bet = daily.json()["bet"]
+        self.assertEqual(daily_bet["stake"], 100)
+        self.assertEqual(daily_bet["free_stake"], 20)
+        self.assertEqual(daily_bet["paid_stake"], 80)
+        self.assertEqual(daily_bet["target_margin"], 50)
+        self.assertGreaterEqual(daily_bet["odds"], 1.2)
+        self.assertLessEqual(daily_bet["odds"], 15.0)
+        daily_options = daily.json()["state"]["bet_options"]["daily"]
+        preview = {
+            entry["margin"]: entry["odds"]
+            for entry in daily_options["target_options"]
+        }
+        self.assertEqual(preview[50], daily_bet["odds"])
+        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 920)
 
         duplicate_daily = client.post(
             "/v1/me/bets",
             headers=auth(),
-            json={"kind": "daily", "target_margin": 150, "request_id": "d-2"},
+            json={
+                "kind": "daily",
+                "paid_stake": 0,
+                "target_margin": 0,
+                "request_id": "d-2",
+            },
         )
         self.assertEqual(duplicate_daily.status_code, 409, duplicate_daily.text)
 
@@ -309,10 +350,16 @@ class BetAPITests(RivalAPITestBase):
             listed_payload["bets"]["weekly"]["id"], weekly_payload["bet"]["id"]
         )
         self.assertEqual(
-            listed_payload["bets"]["daily"]["id"], daily.json()["bet"]["id"]
+            listed_payload["bets"]["daily"]["id"], daily_bet["id"]
         )
         self.assertIsNone(listed_payload["bets"]["group"])
         self.assertIsNone(listed_payload["group"])
+        self.assertEqual(
+            listed_payload["bet_options"]["daily"]["max_paid_stake"], 500
+        )
+        self.assertEqual(
+            listed_payload["bet_options"]["daily"]["free_stake"], 20
+        )
 
         keys: set[str] = set()
         collect_keys(weekly_payload, keys)
@@ -333,7 +380,11 @@ class BetAPITests(RivalAPITestBase):
         response = client.post(
             "/v1/me/bets",
             headers=auth(),
-            json={"kind": "group", "stake": 40, "request_id": "group-1"},
+            json={
+                "kind": "group",
+                "paid_stake": 20,
+                "request_id": "group-1",
+            },
         )
         self.assertEqual(response.status_code, 200, response.text)
         bet = response.json()["bet"]
@@ -341,13 +392,19 @@ class BetAPITests(RivalAPITestBase):
         self.assertEqual(bet["stake"], 40)
         self.assertEqual(bet["free_stake"], 20)
         self.assertEqual(bet["paid_stake"], 20)
+        self.assertEqual(bet["target_rank"], 3)
+        self.assertEqual(bet["target_margin"], 0)
         self.assertEqual(bet["odds"], 2.0)
         self.assertEqual(store.get_diamond_balance("owner", now=NOW), 980)
 
         repeat = client.post(
             "/v1/me/bets",
             headers=auth(),
-            json={"kind": "group", "stake": 40, "request_id": "group-1"},
+            json={
+                "kind": "group",
+                "paid_stake": 20,
+                "request_id": "group-1",
+            },
         )
         self.assertEqual(repeat.status_code, 200, repeat.text)
         self.assertEqual(repeat.json()["bet"]["id"], bet["id"])
@@ -356,7 +413,11 @@ class BetAPITests(RivalAPITestBase):
         duplicate = client.post(
             "/v1/me/bets",
             headers=auth(),
-            json={"kind": "group", "stake": 20, "request_id": "group-2"},
+            json={
+                "kind": "group",
+                "paid_stake": 0,
+                "request_id": "group-2",
+            },
         )
         self.assertEqual(duplicate.status_code, 409, duplicate.text)
 
@@ -365,6 +426,7 @@ class BetAPITests(RivalAPITestBase):
         payload = listed.json()
         self.assertEqual(payload["bets"]["group"]["id"], bet["id"])
         self.assertEqual(payload["group"]["id"], bet["id"])
+        self.assertEqual(payload["bet_options"]["group"]["target_rank"], 3)
         self.assertIsNone(payload["bets"]["weekly"])
         self.assertIsNone(payload["bets"]["daily"])
 
@@ -373,7 +435,12 @@ class BetAPITests(RivalAPITestBase):
         no_rival = client.post(
             "/v1/me/bets",
             headers=auth(),
-            json={"kind": "weekly", "stake": 20, "request_id": "none"},
+            json={
+                "kind": "weekly",
+                "paid_stake": 0,
+                "target_margin": 0,
+                "request_id": "none",
+            },
         )
         self.assertEqual(no_rival.status_code, 409, no_rival.text)
 
@@ -381,9 +448,33 @@ class BetAPITests(RivalAPITestBase):
         invalid_target = client.post(
             "/v1/me/bets",
             headers=auth(),
-            json={"kind": "daily", "target_margin": 100, "request_id": "bad"},
+            json={
+                "kind": "daily",
+                "paid_stake": 0,
+                "target_margin": 100,
+                "request_id": "bad",
+            },
         )
         self.assertEqual(invalid_target.status_code, 422, invalid_target.text)
+
+        legacy_stake = client.post(
+            "/v1/me/bets",
+            headers=auth(),
+            json={"kind": "weekly", "stake": 20, "request_id": "legacy"},
+        )
+        self.assertEqual(legacy_stake.status_code, 422, legacy_stake.text)
+
+        too_much = client.post(
+            "/v1/me/bets",
+            headers=auth(),
+            json={
+                "kind": "weekly",
+                "paid_stake": 501,
+                "target_margin": 0,
+                "request_id": "too-much",
+            },
+        )
+        self.assertEqual(too_much.status_code, 422, too_much.text)
 
         insufficient_store = self.store(client)
         with insufficient_store.transaction() as conn:
@@ -394,7 +485,12 @@ class BetAPITests(RivalAPITestBase):
         poor = client.post(
             "/v1/me/bets",
             headers=auth(),
-            json={"kind": "weekly", "stake": 60, "request_id": "poor"},
+            json={
+                "kind": "weekly",
+                "paid_stake": 20,
+                "target_margin": 0,
+                "request_id": "poor",
+            },
         )
         self.assertEqual(poor.status_code, 409, poor.text)
         self.assertEqual(
@@ -408,7 +504,12 @@ class BetAPITests(RivalAPITestBase):
         response = client.post(
             "/v1/me/bets",
             headers=auth(),
-            json={"kind": "daily", "target_margin": 50, "request_id": "late"},
+            json={
+                "kind": "daily",
+                "paid_stake": 0,
+                "target_margin": 50,
+                "request_id": "late",
+            },
         )
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("截止", response.json()["detail"])

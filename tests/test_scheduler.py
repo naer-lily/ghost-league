@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from ghost_league.accounts import AccountsStore
 from ghost_league.api import create_app
+from ghost_league.game.rival import payout_for_win
 from ghost_league.game.scheduler import (
     GhostScheduler,
     JobSlot,
@@ -341,14 +342,15 @@ def test_2130_does_not_settle_todays_daily_bet_but_2231_does(
         seconds=600,
         occurred_at=datetime(2026, 11, 2, 8, 30, tzinfo=TZ),
     )
-    store.place_bet(
+    bet = store.place_bet(
         "h1",
         "daily",
-        None,
-        50,
+        paid_stake=0,
+        target_margin=50,
         now=datetime(2026, 11, 2, 8, 45, tzinfo=TZ),
         request_id="daily-1",
     )
+    expected_payout = payout_for_win(bet["stake"], bet["odds"])
 
     scheduler = GhostScheduler(
         store,
@@ -377,7 +379,7 @@ def test_2130_does_not_settle_todays_daily_bet_but_2231_does(
     )["daily"]
     assert settled is not None
     assert settled["status"] == "won"
-    assert settled["payout"] == 30
+    assert settled["payout"] == expected_payout
 
 
 def test_daily_catchup_only_scans_past_days_with_pending_bets(
@@ -406,8 +408,8 @@ def test_daily_catchup_only_scans_past_days_with_pending_bets(
     store.place_bet(
         "h1",
         "daily",
-        None,
-        50,
+        paid_stake=0,
+        target_margin=50,
         now=datetime(2026, 11, 1, 8, 45, tzinfo=TZ),
         request_id="daily-yesterday",
     )

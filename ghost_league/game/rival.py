@@ -27,24 +27,36 @@ WEEKLY_BET_LOCK_OFFSET: Final = timedelta(days=1)
 DAILY_BET_LOCK_TIME: Final = time(21, 0)
 DAILY_BET_SETTLE_TIME: Final = time(22, 30)
 
-WEEKLY_STAKES: Final[tuple[int, ...]] = (20, 40, 60)
-WEEKLY_ODDS: Final = 2.0
-GROUP_STAKES: Final[tuple[int, ...]] = (20, 40, 60)
+# Every bet carries this much free principal.  ``paid_stake`` is the part the
+# caller pays from the diamond wallet, so the stored total is
+# ``stake = FREE_BET_STAKE + paid_stake``.
+MIN_PAID_STAKE: Final = 0
+MAX_PAID_STAKE: Final = 500
+FREE_BET_STAKE: Final = 20
+
+GROUP_TARGET_RANK: Final = 3
 GROUP_ODDS: Final = 2.0
 GROUP_BET_SETTLE_OFFSET: Final = timedelta(minutes=5)
-DAILY_STAKE: Final = 20
-# Every bet carries this much free principal; only the remainder is debited.
-FREE_BET_STAKE: Final = 20
-DAILY_TARGET_ODDS: Final[dict[int, float]] = {
-    50: 1.5,
-    150: 2.5,
-    300: 4.0,
-}
-DAILY_TARGET_PAYOUTS: Final[dict[int, int]] = {
-    50: 30,
-    150: 50,
-    300: 80,
-}
+
+# Dynamic target range: at most twice the rival's estimate, with a floor so
+# the first screen always offers a few choices.
+WEEKLY_TARGET_FLOOR: Final = 100
+DAILY_TARGET_FLOOR: Final = 50
+WEEKLY_TARGET_STEP: Final = 50
+DAILY_TARGET_STEP: Final = 10
+
+# Odds are fixed when the bet is placed.  ``reference`` is the rival's
+# estimated XP, floored, then adjusted for the current power gap.
+WEEKLY_REFERENCE_FLOOR: Final = 500
+DAILY_REFERENCE_FLOOR: Final = 50
+POWER_RATIO_MIN: Final = 0.5
+POWER_RATIO_MAX: Final = 2.0
+POWER_GAP_SCALE: Final = 4000
+ODDS_MIN: Final = 1.2
+ODDS_MAX: Final = 15.0
+ODDS_BASE: Final = 1.2
+ODDS_SLOPE: Final = 0.8
+ODDS_EXPONENT: Final = 1.4
 
 # Projection constants.  These only shape the betting-screen estimate; final
 # settlement always uses the real weekly/daily XP.
@@ -56,7 +68,6 @@ PROJECTION_DAY_WINDOW_HOURS: Final = (
     DAILY_BET_SETTLE_TIME.hour + DAILY_BET_SETTLE_TIME.minute / 60
 )
 PROJECTION_MIN_DAY_RATIO: Final = 0.2
-DAILY_PROJECTION_TARGETS: Final[tuple[int, ...]] = (50, 150, 300)
 
 RIVAL_WIN_REWARD: Final = 120
 RIVAL_DRAW_REWARD: Final = 40
@@ -204,6 +215,158 @@ def round_to_step(value: float, step: int) -> int:
     return int(value / step + 0.5) * step
 
 
+def weekly_target_upper_bound(rival_week_estimate: int) -> int:
+    """Largest weekly target margin offered for this rival estimate."""
+
+    return max(
+        WEEKLY_TARGET_FLOOR,
+        round_to_step(max(0, int(rival_week_estimate)) * 2, WEEKLY_TARGET_STEP),
+    )
+
+
+def daily_target_upper_bound(rival_today_estimate: int) -> int:
+    """Largest daily target margin offered for this rival estimate."""
+
+    return max(
+        DAILY_TARGET_FLOOR,
+        round_to_step(max(0, int(rival_today_estimate)) * 2, DAILY_TARGET_STEP),
+    )
+
+
+def target_upper_bound(
+    kind: str,
+    rival_week_estimate: int = 0,
+    rival_today_estimate: int = 0,
+) -> int:
+    """Return the inclusive upper bound for one bet kind."""
+
+    if kind == "weekly":
+        return weekly_target_upper_bound(rival_week_estimate)
+    if kind == "daily":
+        return daily_target_upper_bound(rival_today_estimate)
+    raise ValueError(f"unsupported bet kind: {kind}")
+
+
+def target_in_range(
+    kind: str,
+    target_margin: int,
+    rival_week_estimate: int = 0,
+    rival_today_estimate: int = 0,
+) -> bool:
+    """True when ``target_margin`` is an integer inside the offered range."""
+
+    if isinstance(target_margin, bool) or not isinstance(target_margin, int):
+        return False
+    return 0 <= target_margin <= target_upper_bound(
+        kind, rival_week_estimate, rival_today_estimate
+    )
+
+
+def odds_reference(
+    kind: str,
+    rival_week_estimate: int = 0,
+    rival_today_estimate: int = 0,
+) -> int:
+    """Floored reference XP used by the odds formula."""
+
+    if kind == "weekly":
+        return max(WEEKLY_REFERENCE_FLOOR, int(rival_week_estimate))
+    if kind == "daily":
+        return max(DAILY_REFERENCE_FLOOR, int(rival_today_estimate))
+    raise ValueError(f"unsupported bet kind: {kind}")
+
+
+def power_ratio(my_power: int, rival_power: int) -> float:
+    """Scale the reference by the power gap, clamped to 0.5–2.0."""
+
+    raw = 1 + (int(rival_power) - int(my_power)) / POWER_GAP_SCALE
+    return max(POWER_RATIO_MIN, min(POWER_RATIO_MAX, raw))
+
+
+def bet_odds(
+    kind: str,
+    target_margin: int,
+    rival_week_estimate: int = 0,
+    rival_today_estimate: int = 0,
+    my_power: int = 0,
+    rival_power: int = 0,
+) -> float:
+    """Return the fixed odds for one target margin.
+
+    ``odds = clamp(1.2, 15.0, 1.2 + 0.8 * (target / effective_reference) ** 1.4)``
+    where ``effective_reference = reference * power_ratio``.  The function is
+    monotonically non-decreasing in ``target_margin`` and rounds to 2 decimals.
+    """
+
+    reference = odds_reference(
+        kind, rival_week_estimate, rival_today_estimate
+    )
+    effective_reference = reference * power_ratio(my_power, rival_power)
+    ratio = max(0, int(target_margin)) / effective_reference
+    raw = ODDS_BASE + ODDS_SLOPE * ratio**ODDS_EXPONENT
+    return round(max(ODDS_MIN, min(ODDS_MAX, raw)), 2)
+
+
+def target_options(
+    kind: str,
+    rival_week_estimate: int = 0,
+    rival_today_estimate: int = 0,
+    my_power: int = 0,
+    rival_power: int = 0,
+) -> list[dict[str, float | int]]:
+    """Return sorted preview options with their fixed odds.
+
+    The list always contains 0 and the range upper bound; it also includes the
+    rival estimate's 1/4, 1/2, 1x and 2x points when those are inside the range.
+    """
+
+    if kind == "weekly":
+        base = max(0, int(rival_week_estimate))
+    elif kind == "daily":
+        base = max(0, int(rival_today_estimate))
+    else:
+        raise ValueError(f"unsupported bet kind: {kind}")
+    limit = target_upper_bound(kind, rival_week_estimate, rival_today_estimate)
+    margins = {0, limit}
+    for fraction in (0.25, 0.5, 1, 2):
+        margins.add(min(limit, round_to_step(base * fraction, 1)))
+    return [
+        {
+            "margin": margin,
+            "odds": bet_odds(
+                kind,
+                margin,
+                rival_week_estimate,
+                rival_today_estimate,
+                my_power,
+                rival_power,
+            ),
+        }
+        for margin in sorted(margins)
+    ]
+
+
+def wager_result(diff: int, target_margin: int) -> str:
+    """Outcome of a target-margin wager.
+
+    Reaching the target wins, including a zero-margin tie.  An actual XP tie
+    that falls short of a positive target is a push and refunds the paid part;
+    everything else loses.
+    """
+
+    if int(diff) >= int(target_margin):
+        return "won"
+    if int(diff) == 0:
+        return "void"
+    return "lost"
+
+
+def payout_for_win(stake: int, odds: float) -> int:
+    """Payout for a winning wager: total principal × fixed odds, rounded."""
+
+    return int(math.floor(float(stake) * float(odds) + 0.5))
+
+
 def percentile_value(values: Sequence[int], percentile: float) -> float:
     """Linear-interpolated quantile over an unweighted XP distribution."""
 
@@ -268,17 +431,26 @@ __all__ = [
     "BetWindowClosed",
     "DAILY_BET_LOCK_TIME",
     "DAILY_BET_SETTLE_TIME",
-    "DAILY_PROJECTION_TARGETS",
-    "DAILY_STAKE",
-    "DAILY_TARGET_ODDS",
-    "DAILY_TARGET_PAYOUTS",
+    "DAILY_REFERENCE_FLOOR",
+    "DAILY_TARGET_FLOOR",
+    "DAILY_TARGET_STEP",
     "FREE_BET_STAKE",
     "GROUP_BET_SETTLE_OFFSET",
     "GROUP_ODDS",
-    "GROUP_STAKES",
+    "GROUP_TARGET_RANK",
+    "MAX_PAID_STAKE",
+    "MIN_PAID_STAKE",
+    "ODDS_BASE",
+    "ODDS_EXPONENT",
+    "ODDS_MAX",
+    "ODDS_MIN",
+    "ODDS_SLOPE",
     "OUTCOME_DRAW",
     "OUTCOME_LOSS",
     "OUTCOME_WIN",
+    "POWER_GAP_SCALE",
+    "POWER_RATIO_MAX",
+    "POWER_RATIO_MIN",
     "PROJECTION_DAY_STEP",
     "PROJECTION_DAY_WINDOW_HOURS",
     "PROJECTION_MIN_DAY_RATIO",
@@ -291,22 +463,33 @@ __all__ = [
     "RivalSelectionRejected",
     "RivalUnavailable",
     "RivalWindowClosed",
-    "WEEKLY_ODDS",
-    "WEEKLY_STAKES",
+    "WEEKLY_REFERENCE_FLOOR",
+    "WEEKLY_TARGET_FLOOR",
+    "WEEKLY_TARGET_STEP",
     "WEEK_SELECT_OPEN_OFFSET",
     "auto_select_at",
+    "bet_odds",
     "daily_bet_locks_at",
     "daily_bet_settles_at",
+    "daily_target_upper_bound",
     "group_bet_settles_at",
+    "odds_reference",
+    "payout_for_win",
     "percentile_value",
+    "power_ratio",
     "projected_today_xp",
     "projected_week_xp",
     "rival_outcome",
     "rival_reward",
     "round_to_step",
     "selection_window_open",
+    "target_in_range",
+    "target_options",
+    "target_upper_bound",
+    "wager_result",
     "week_lock_at",
     "week_lock_display",
     "week_open_at",
     "weekly_bet_locks_at",
+    "weekly_target_upper_bound",
 ]

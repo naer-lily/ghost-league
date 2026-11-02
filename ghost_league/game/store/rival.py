@@ -16,18 +16,25 @@ from .. import calendar as cal
 from ..rival import (
     AUTO_POWER_BAND_MAX,
     AUTO_POWER_BAND_MIN,
-    DAILY_PROJECTION_TARGETS,
+    FREE_BET_STAKE,
+    GROUP_ODDS,
+    GROUP_TARGET_RANK,
+    MAX_PAID_STAKE,
+    MIN_PAID_STAKE,
     RivalNotFound,
     RivalSelectionRejected,
     RivalWindowClosed,
     auto_select_at,
     daily_bet_locks_at,
     daily_bet_settles_at,
+    odds_reference,
     projected_today_xp,
     projected_week_xp,
     rival_outcome,
     rival_reward,
     selection_window_open,
+    target_options,
+    target_upper_bound,
     week_lock_display,
 )
 from ..rules import PlayerNotFound
@@ -257,13 +264,87 @@ class RivalMixin:
         )
         return {
             "rival_week_estimate": week_estimate,
-            "week_line": week_estimate + 1,
             "rival_today_estimate": today_estimate,
-            "daily_lines": {
-                str(target): today_estimate + target
-                for target in DAILY_PROJECTION_TARGETS
-            },
+            "weekly_target_max": target_upper_bound(
+                "weekly", rival_week_estimate=week_estimate
+            ),
+            "daily_target_max": target_upper_bound(
+                "daily", rival_today_estimate=today_estimate
+            ),
         }
+
+    @staticmethod
+    def _bet_options_with(
+        me: dict[str, Any],
+        rival: dict[str, Any] | None,
+        projection: dict[str, Any] | None,
+    ) -> dict[str, dict[str, Any] | None]:
+        """Build render-ready target/stake options for the betting screen.
+
+        Weekly and daily options only exist once a rival is assigned.  Group
+        options only exist once the caller has a group; group bets always
+        target the personal top three and use fixed odds.
+        """
+
+        weekly: dict[str, Any] | None = None
+        daily: dict[str, Any] | None = None
+        if rival is not None and projection is not None:
+            my_power = int(me["power"])
+            rival_power = int(rival["power"])
+            week_estimate = int(projection["rival_week_estimate"])
+            day_estimate = int(projection["rival_today_estimate"])
+            common = {
+                "min_paid_stake": MIN_PAID_STAKE,
+                "max_paid_stake": MAX_PAID_STAKE,
+                "free_stake": FREE_BET_STAKE,
+            }
+            weekly = {
+                **common,
+                "reference": odds_reference(
+                    "weekly", rival_week_estimate=week_estimate
+                ),
+                "min_target_margin": 0,
+                "max_target_margin": target_upper_bound(
+                    "weekly", rival_week_estimate=week_estimate
+                ),
+                "target_options": target_options(
+                    "weekly",
+                    week_estimate,
+                    day_estimate,
+                    my_power,
+                    rival_power,
+                ),
+            }
+            daily = {
+                **common,
+                "reference": odds_reference(
+                    "daily", rival_today_estimate=day_estimate
+                ),
+                "min_target_margin": 0,
+                "max_target_margin": target_upper_bound(
+                    "daily", rival_today_estimate=day_estimate
+                ),
+                "target_options": target_options(
+                    "daily",
+                    week_estimate,
+                    day_estimate,
+                    my_power,
+                    rival_power,
+                ),
+            }
+        group = (
+            {
+                "target_rank": GROUP_TARGET_RANK,
+                "target_margin": 0,
+                "min_paid_stake": MIN_PAID_STAKE,
+                "max_paid_stake": MAX_PAID_STAKE,
+                "free_stake": FREE_BET_STAKE,
+                "odds": GROUP_ODDS,
+            }
+            if me.get("_group_id") is not None
+            else None
+        )
+        return {"weekly": weekly, "daily": daily, "group": group}
 
     # ------------------------------------------------------------------
     # Public read API
@@ -355,6 +436,7 @@ class RivalMixin:
                 else None
             ),
             "bets": bets,
+            "bet_options": self._bet_options_with(me, rival, projection),
             "projection": projection,
             "bet_windows": self._bet_windows(local_now),
         }

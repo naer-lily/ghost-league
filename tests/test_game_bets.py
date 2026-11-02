@@ -12,8 +12,14 @@ from ghost_league.game.rival import (
     BetRejected,
     BetWindowClosed,
     RivalUnavailable,
+    bet_odds,
     daily_bet_locks_at,
     daily_bet_settles_at,
+    payout_for_win,
+    power_ratio,
+    target_in_range,
+    target_options,
+    wager_result,
 )
 from ghost_league.game.rules import InsufficientDiamonds
 from ghost_league.game.store import GameStore
@@ -99,6 +105,57 @@ def make_rival_pair(
     store.select_rival(left, right, now=MONDAY, request_id=f"rival-{left}")
 
 
+def test_bet_odds_are_monotonic_reference_and_clamped() -> None:
+    # Equal power and target == reference gives the documented ~2.0 point.
+    assert bet_odds("weekly", 500, 500, 0, 500, 500) == 2.0
+    assert bet_odds("daily", 50, 0, 50, 500, 500) == 2.0
+    assert bet_odds("weekly", 0, 500, 0, 500, 500) == 1.2
+
+    previous = 0.0
+    for target in range(0, 1001, 10):
+        odds = bet_odds("weekly", target, 1000, 0, 500, 500)
+        assert odds >= previous
+        previous = odds
+
+    # Large targets hit the upper clamp, and the power ratio clamps both ways.
+    assert bet_odds("weekly", 10_000_000, 1000, 0, 500, 500) == 15.0
+    assert power_ratio(0, 10_000) == 2.0
+    assert power_ratio(10_000, 0) == 0.5
+
+    assert wager_result(0, 0) == "won"
+    assert wager_result(0, 100) == "void"
+    assert wager_result(-1, 100) == "lost"
+    assert wager_result(100, 100) == "won"
+
+
+def test_target_options_cover_range_and_preview_odds() -> None:
+    weekly = target_options("weekly", 100, 0, 500, 500)
+    weekly_margins = [entry["margin"] for entry in weekly]
+    assert weekly_margins == sorted(set(weekly_margins))
+    assert weekly_margins[0] == 0
+    assert weekly_margins[-1] == 200
+    assert {25, 50, 100, 200}.issubset(weekly_margins)
+    odds = [entry["odds"] for entry in weekly]
+    assert odds == sorted(odds)
+
+    daily = target_options("daily", 0, 0, 500, 500)
+    assert [entry["margin"] for entry in daily] == [0, 50]
+
+    large = target_options("weekly", 1000, 0, 500, 500)
+    assert [entry["margin"] for entry in large] == [
+        0,
+        250,
+        500,
+        1000,
+        2000,
+    ]
+
+    assert target_in_range("weekly", 0, 100, 0)
+    assert target_in_range("weekly", 200, 100, 0)
+    assert not target_in_range("weekly", 201, 100, 0)
+    assert not target_in_range("daily", -1, 0, 0)
+
+
 def test_weekly_bet_uses_free_stake_and_closes_after_monday(
     tmp_path: Path,
 ) -> None:
@@ -107,33 +164,68 @@ def test_weekly_bet_uses_free_stake_and_closes_after_monday(
     make_rival_pair(store, "h3", "h4")
 
     bet = store.place_bet(
-        "h1", "weekly", 20, None, now=MONDAY, request_id="weekly-1"
+        "h1",
+        "weekly",
+        paid_stake=0,
+        target_margin=100,
+        now=MONDAY,
+        request_id="weekly-1",
     )
     assert bet["kind"] == "weekly"
     assert bet["stake"] == 20
     assert bet["free_stake"] == 20
     assert bet["paid_stake"] == 0
-    assert bet["odds"] == 2.0
+    assert bet["target_margin"] == 100
+    assert bet["odds"] == bet_odds("weekly", 100, 100, 0, 500, 700)
     assert bet["status"] == "placed"
     assert store.get_diamond_balance("h1", now=MONDAY) == 1000
 
     repeat = store.place_bet(
-        "h1", "weekly", 20, None, now=MONDAY, request_id="weekly-1"
+        "h1",
+        "weekly",
+        paid_stake=0,
+        target_margin=100,
+        now=MONDAY,
+        request_id="weekly-1",
     )
     assert repeat["id"] == bet["id"]
     assert store.get_diamond_balance("h1", now=MONDAY) == 1000
 
     with pytest.raises(BetAlreadyPlaced):
         store.place_bet(
-            "h1", "weekly", 40, None, now=MONDAY, request_id="weekly-2"
+            "h1",
+            "weekly",
+            paid_stake=20,
+            target_margin=100,
+            now=MONDAY,
+            request_id="weekly-2",
         )
     with pytest.raises(BetWindowClosed):
         store.place_bet(
-            "h3", "weekly", 40, None, now=TUESDAY, request_id="weekly-3"
+            "h3",
+            "weekly",
+            paid_stake=0,
+            target_margin=0,
+            now=TUESDAY,
+            request_id="weekly-3",
         )
     with pytest.raises(BetRejected):
         store.place_bet(
-            "h3", "weekly", 30, None, now=MONDAY, request_id="weekly-4"
+            "h3",
+            "weekly",
+            paid_stake=0,
+            target_margin=250,
+            now=MONDAY,
+            request_id="weekly-4",
+        )
+    with pytest.raises(BetRejected):
+        store.place_bet(
+            "h3",
+            "weekly",
+            paid_stake=501,
+            target_margin=0,
+            now=MONDAY,
+            request_id="weekly-5",
         )
     assert store.get_diamond_balance("h1", now=MONDAY) == 1000
 
@@ -141,25 +233,31 @@ def test_weekly_bet_uses_free_stake_and_closes_after_monday(
 def test_free_stake_debits_only_paid_portion(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     expected = {
-        "free-20": (20, 20, 0, 1000),
-        "paid-40": (40, 20, 20, 980),
-        "paid-60": (60, 20, 40, 960),
+        "free-0": (0, 20, 20, 0, 1000),
+        "paid-20": (20, 40, 20, 20, 980),
+        "paid-500": (500, 520, 20, 500, 500),
     }
-    for player_id, (stake, _, _, _) in expected.items():
+    for player_id in expected:
         make_rival_pair(store, player_id, f"{player_id}-rival")
 
-    for player_id, (stake, free_stake, paid_stake, balance) in expected.items():
+    for player_id, (
+        paid_stake,
+        stake,
+        free_stake,
+        stored_paid,
+        balance,
+    ) in expected.items():
         bet = store.place_bet(
             player_id,
             "weekly",
-            stake,
-            None,
+            paid_stake=paid_stake,
+            target_margin=0,
             now=MONDAY,
             request_id=f"{player_id}-bet",
         )
         assert bet["stake"] == stake
         assert bet["free_stake"] == free_stake
-        assert bet["paid_stake"] == paid_stake
+        assert bet["paid_stake"] == stored_paid
         assert store.get_diamond_balance(player_id, now=MONDAY) == balance
 
 
@@ -174,7 +272,12 @@ def test_free_stake_allows_zero_balance_and_checks_paid_only(
             ("broke",),
         )
     free = store.place_bet(
-        "broke", "weekly", 20, None, now=MONDAY, request_id="free"
+        "broke",
+        "weekly",
+        paid_stake=0,
+        target_margin=0,
+        now=MONDAY,
+        request_id="free",
     )
     assert free["paid_stake"] == 0
     assert store.get_diamond_balance("broke", now=MONDAY) == 0
@@ -187,7 +290,12 @@ def test_free_stake_allows_zero_balance_and_checks_paid_only(
         )
     with pytest.raises(InsufficientDiamonds):
         store.place_bet(
-            "thin", "weekly", 40, None, now=MONDAY, request_id="thin"
+            "thin",
+            "weekly",
+            paid_stake=20,
+            target_margin=0,
+            now=MONDAY,
+            request_id="thin",
         )
     assert store.get_diamond_balance("thin", now=MONDAY) == 19
 
@@ -197,7 +305,12 @@ def test_bet_requires_rival_and_enough_diamonds(tmp_path: Path) -> None:
     add_player(store, "no-rival")
     with pytest.raises(RivalUnavailable):
         store.place_bet(
-            "no-rival", "weekly", 20, None, now=MONDAY, request_id="none"
+            "no-rival",
+            "weekly",
+            paid_stake=0,
+            target_margin=0,
+            now=MONDAY,
+            request_id="none",
         )
 
     make_rival_pair(store, "poor", "rich")
@@ -208,7 +321,12 @@ def test_bet_requires_rival_and_enough_diamonds(tmp_path: Path) -> None:
         )
     with pytest.raises(InsufficientDiamonds):
         store.place_bet(
-            "poor", "weekly", 60, None, now=MONDAY, request_id="poor-1"
+            "poor",
+            "weekly",
+            paid_stake=20,
+            target_margin=0,
+            now=MONDAY,
+            request_id="poor-1",
         )
     assert store.bets_for("poor", now=MONDAY)["weekly"] is None
     assert store.get_diamond_balance("poor", now=MONDAY) == 10
@@ -229,30 +347,54 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
     make_rival_pair(store, "h3", "h4")
 
     bet = store.place_bet(
-        "h1", "daily", None, 50, now=MONDAY_BEFORE_LOCK, request_id="daily-1"
+        "h1",
+        "daily",
+        paid_stake=80,
+        target_margin=50,
+        now=MONDAY_BEFORE_LOCK,
+        request_id="daily-1",
     )
     assert bet["kind"] == "daily"
-    assert bet["stake"] == 20
+    assert bet["stake"] == 100
     assert bet["target_margin"] == 50
-    assert bet["odds"] == 1.5
     assert bet["free_stake"] == 20
-    assert bet["paid_stake"] == 0
-    assert store.get_diamond_balance("h1", now=MONDAY_BEFORE_LOCK) == 1000
+    assert bet["paid_stake"] == 80
+    assert bet["odds"] == bet_odds("daily", 50, 0, 0, 500, 700)
+    assert store.get_diamond_balance("h1", now=MONDAY_BEFORE_LOCK) == 920
 
     with pytest.raises(BetRejected):
         store.place_bet(
-            "h3", "daily", None, 100, now=MONDAY, request_id="daily-bad-target"
+            "h3",
+            "daily",
+            paid_stake=0,
+            target_margin=100,
+            now=MONDAY,
+            request_id="daily-bad-target",
         )
     with pytest.raises(BetRejected):
         store.place_bet(
-            "h3", "daily", 40, 50, now=MONDAY, request_id="daily-bad-stake"
+            "h3",
+            "daily",
+            paid_stake=501,
+            target_margin=50,
+            now=MONDAY,
+            request_id="daily-bad-stake",
+        )
+    with pytest.raises(BetRejected):
+        store.place_bet(
+            "h3",
+            "daily",
+            paid_stake=0,
+            target_margin=None,
+            now=MONDAY,
+            request_id="daily-missing-target",
         )
     with pytest.raises(BetWindowClosed):
         store.place_bet(
             "h3",
             "daily",
-            None,
-            50,
+            paid_stake=0,
+            target_margin=50,
             now=MONDAY_LOCK,
             request_id="daily-late",
         )
@@ -278,9 +420,16 @@ def test_daily_settlement_waits_for_2230_and_uses_2230_xp(
         seconds=600,
         occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
-    store.place_bet(
-        "h1", "daily", None, 50, now=MONDAY, request_id="daily-win"
+    bet = store.place_bet(
+        "h1",
+        "daily",
+        paid_stake=0,
+        target_margin=50,
+        now=MONDAY,
+        request_id="daily-win",
     )
+    expected = payout_for_win(bet["stake"], bet["odds"])
+    assert expected > 20
 
     early = store.settle_daily_bets(
         "2026-11-02", now=datetime(2026, 11, 2, 22, 29, 0, tzinfo=TZ)
@@ -291,9 +440,11 @@ def test_daily_settlement_waits_for_2230_and_uses_2230_xp(
     settled = store.settle_daily_bets("2026-11-02", now=MONDAY_SETTLE)
     assert settled["settled"] == 1
     assert settled["results"][0]["status"] == "won"
-    assert settled["results"][0]["payout"] == 30
+    assert settled["results"][0]["payout"] == expected
     assert settled["results"][0]["result_diff"] == 100
-    assert store.get_diamond_balance("h1", now=MONDAY_SETTLE) == 1030
+    assert (
+        store.get_diamond_balance("h1", now=MONDAY_SETTLE) == 1000 + expected
+    )
 
     again = store.settle_daily_bets(
         "2026-11-02", now=datetime(2026, 11, 2, 22, 35, 0, tzinfo=TZ)
@@ -303,7 +454,7 @@ def test_daily_settlement_waits_for_2230_and_uses_2230_xp(
         store.get_diamond_balance(
             "h1", now=datetime(2026, 11, 2, 22, 35, 0, tzinfo=TZ)
         )
-        == 1030
+        == 1000 + expected
     )
 
 
@@ -325,7 +476,12 @@ def test_daily_settlement_ignores_activity_after_2230(tmp_path: Path) -> None:
         occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     store.place_bet(
-        "h1", "daily", None, 300, now=MONDAY, request_id="daily-cutoff"
+        "h1",
+        "daily",
+        paid_stake=0,
+        target_margin=300,
+        now=MONDAY,
+        request_id="daily-cutoff",
     )
 
     # A late burst would make the final day XP much higher, but the 22:30
@@ -352,7 +508,7 @@ def test_daily_settlement_ignores_activity_after_2230(tmp_path: Path) -> None:
     )
 
 
-def test_daily_loss_and_weekly_draw_refund(tmp_path: Path) -> None:
+def test_daily_loss_and_weekly_tie_refund(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     make_rival_pair(store, "daily", "daily-rival")
     add_activity(
@@ -370,7 +526,12 @@ def test_daily_loss_and_weekly_draw_refund(tmp_path: Path) -> None:
         occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     store.place_bet(
-        "daily", "daily", None, 50, now=MONDAY, request_id="daily-loss"
+        "daily",
+        "daily",
+        paid_stake=0,
+        target_margin=50,
+        now=MONDAY,
+        request_id="daily-loss",
     )
     store.settle_daily_bets("2026-11-02", now=MONDAY_SETTLE)
     assert store.get_diamond_balance("daily", now=MONDAY_SETTLE) == 1000
@@ -379,7 +540,12 @@ def test_daily_loss_and_weekly_draw_refund(tmp_path: Path) -> None:
     set_week_xp(store, "weekly", 200)
     set_week_xp(store, "weekly-rival", 200)
     store.place_bet(
-        "weekly", "weekly", 40, None, now=MONDAY, request_id="weekly-draw"
+        "weekly",
+        "weekly",
+        paid_stake=20,
+        target_margin=100,
+        now=MONDAY,
+        request_id="weekly-draw",
     )
     settled = store.settle_weekly_bets(WEEK, now=NEXT_MONDAY)
     assert settled["settled"] == 1
@@ -398,11 +564,24 @@ def test_weekly_bet_win_and_loss(tmp_path: Path) -> None:
     set_week_xp(store, "winner-rival", 100)
     set_week_xp(store, "loser", 50)
     set_week_xp(store, "loser-rival", 100)
-    store.place_bet(
-        "winner", "weekly", 40, None, now=MONDAY, request_id="weekly-win"
+    winner_bet = store.place_bet(
+        "winner",
+        "weekly",
+        paid_stake=20,
+        target_margin=150,
+        now=MONDAY,
+        request_id="weekly-win",
     )
     store.place_bet(
-        "loser", "weekly", 60, None, now=MONDAY, request_id="weekly-loss"
+        "loser",
+        "weekly",
+        paid_stake=40,
+        target_margin=100,
+        now=MONDAY,
+        request_id="weekly-loss",
+    )
+    winner_payout = payout_for_win(
+        winner_bet["stake"], winner_bet["odds"]
     )
 
     early = store.settle_weekly_bets(WEEK, now=MONDAY)
@@ -412,15 +591,21 @@ def test_weekly_bet_win_and_loss(tmp_path: Path) -> None:
     assert settled["settled"] == 2
     by_rival = {row["rival_id"]: row for row in settled["results"]}
     assert by_rival["winner-rival"]["status"] == "won"
-    assert by_rival["winner-rival"]["payout"] == 80
+    assert by_rival["winner-rival"]["payout"] == winner_payout
     assert by_rival["loser-rival"]["status"] == "lost"
     assert by_rival["loser-rival"]["payout"] == 0
-    assert store.get_diamond_balance("winner", now=NEXT_MONDAY) == 1060
+    assert (
+        store.get_diamond_balance("winner", now=NEXT_MONDAY)
+        == 980 + winner_payout
+    )
     assert store.get_diamond_balance("loser", now=NEXT_MONDAY) == 960
 
     again = store.settle_weekly_bets(WEEK, now=NEXT_MONDAY)
     assert again["settled"] == 0
-    assert store.get_diamond_balance("winner", now=NEXT_MONDAY) == 1060
+    assert (
+        store.get_diamond_balance("winner", now=NEXT_MONDAY)
+        == 980 + winner_payout
+    )
 
 
 def test_settle_week_runs_rivals_and_weekly_bets_once(tmp_path: Path) -> None:
@@ -440,9 +625,15 @@ def test_settle_week_runs_rivals_and_weekly_bets_once(tmp_path: Path) -> None:
         seconds=600,
         occurred_at=datetime(2026, 11, 6, 12, 0, 0, tzinfo=TZ),
     )
-    store.place_bet(
-        "h1", "weekly", 20, None, now=MONDAY, request_id="weekly-integration"
+    bet = store.place_bet(
+        "h1",
+        "weekly",
+        paid_stake=0,
+        target_margin=50,
+        now=MONDAY,
+        request_id="weekly-integration",
     )
+    bet_payout = payout_for_win(bet["stake"], bet["odds"])
 
     settled = store.settle_week(WEEK, now=NEXT_MONDAY)
     assert settled["already_settled"] is False
@@ -450,11 +641,17 @@ def test_settle_week_runs_rivals_and_weekly_bets_once(tmp_path: Path) -> None:
     assert settled["rivals"]["results"][0]["reward_diamonds"] == 120
     assert settled["weekly_bets"]["results"][0]["status"] == "won"
     assert settled["group_bets"]["settled"] == 0
-    assert store.get_diamond_balance("h1", now=NEXT_MONDAY) == 1160
+    assert (
+        store.get_diamond_balance("h1", now=NEXT_MONDAY)
+        == 1000 + 120 + bet_payout
+    )
 
     again = store.settle_week(WEEK, now=NEXT_MONDAY)
     assert again["already_settled"] is True
-    assert store.get_diamond_balance("h1", now=NEXT_MONDAY) == 1160
+    assert (
+        store.get_diamond_balance("h1", now=NEXT_MONDAY)
+        == 1000 + 120 + bet_payout
+    )
     rewards = [
         row
         for row in store.diamond_ledger("h1")
@@ -493,7 +690,12 @@ def test_rival_auto_and_daily_bet_jobs(tmp_path: Path) -> None:
         occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     daily_store.place_bet(
-        "h1", "daily", None, 50, now=MONDAY, request_id="job-daily"
+        "h1",
+        "daily",
+        paid_stake=0,
+        target_margin=50,
+        now=MONDAY,
+        request_id="job-daily",
     )
     result = run_daily_bets(daily_store.path, at=MONDAY_SETTLE)
     assert result["status"] == "settled"
@@ -557,124 +759,156 @@ def test_group_bet_places_once_with_free_stake(tmp_path: Path) -> None:
 
     with pytest.raises(BetRejected):
         store.place_bet(
-            "h1", "group", None, None, now=MONDAY, request_id="missing-stake"
-        )
-    with pytest.raises(BetRejected):
-        store.place_bet(
-            "h1", "group", 30, None, now=MONDAY, request_id="bad-stake"
+            "h1",
+            "group",
+            paid_stake=501,
+            target_margin=None,
+            now=MONDAY,
+            request_id="bad-stake",
         )
     with pytest.raises(BetRejected):
         store.place_bet(
             "h1",
             "group",
-            20,
-            50,
+            paid_stake=-1,
+            target_margin=None,
+            now=MONDAY,
+            request_id="negative-stake",
+        )
+    with pytest.raises(BetRejected):
+        store.place_bet(
+            "h1",
+            "group",
+            paid_stake=20,
+            target_margin=50,
             now=MONDAY,
             request_id="bad-target",
         )
 
     bet = store.place_bet(
-        "grouped", "group", 40, None, now=MONDAY, request_id="group-1"
+        "grouped",
+        "group",
+        paid_stake=20,
+        target_margin=None,
+        now=MONDAY,
+        request_id="group-1",
     )
     assert bet["kind"] == "group"
     assert bet["stake"] == 40
     assert bet["free_stake"] == 20
     assert bet["paid_stake"] == 20
+    assert bet["target_rank"] == 3
+    assert bet["target_margin"] == 0
     assert bet["odds"] == 2.0
     assert bet["status"] == "placed"
     assert bet["group_id"] == store.group_for_player("grouped", WEEK)["id"]
     assert store.get_diamond_balance("grouped", now=MONDAY) == 980
 
     repeat = store.place_bet(
-        "grouped", "group", 40, None, now=MONDAY, request_id="group-1"
+        "grouped",
+        "group",
+        paid_stake=20,
+        target_margin=None,
+        now=MONDAY,
+        request_id="group-1",
     )
     assert repeat["id"] == bet["id"]
     assert store.get_diamond_balance("grouped", now=MONDAY) == 980
     with pytest.raises(BetAlreadyPlaced):
         store.place_bet(
-            "grouped", "group", 20, None, now=MONDAY, request_id="group-2"
+            "grouped",
+            "group",
+            paid_stake=0,
+            target_margin=None,
+            now=MONDAY,
+            request_id="group-2",
         )
 
     with pytest.raises(BetRejected) as no_group:
         store.place_bet(
-            "solo", "group", 20, None, now=MONDAY, request_id="no-group"
+            "solo",
+            "group",
+            paid_stake=0,
+            target_margin=None,
+            now=MONDAY,
+            request_id="no-group",
         )
     assert no_group.value.code == "no_group"
 
     with pytest.raises(BetWindowClosed):
         store.place_bet(
-            "late", "group", 20, None, now=TUESDAY, request_id="group-late"
+            "late",
+            "group",
+            paid_stake=0,
+            target_margin=None,
+            now=TUESDAY,
+            request_id="group-late",
         )
     assert store.get_diamond_balance("late", now=TUESDAY) == 1000
 
 
-def test_group_bet_ranks_top_three_with_deterministic_ties(
+def test_group_bet_ranks_players_personally_not_group_total(
     tmp_path: Path,
 ) -> None:
     store = make_store(tmp_path)
-    for player_id in ("g1a", "g1b", "g2", "g3", "g4"):
+    for player_id in ("a1", "a2", "a3", "a4", "b1"):
         add_player(store, player_id)
-    group1 = store.create_group(
-        WEEK, tier="Bronze", player_ids=["g1a", "g1b"], now=MONDAY
+    group_a = store.create_group(
+        WEEK,
+        tier="Bronze",
+        player_ids=["a1", "a2", "a3", "a4"],
+        now=MONDAY,
     )
-    group2 = store.create_group(
-        WEEK, tier="Bronze", player_ids=["g2"], now=MONDAY
+    group_b = store.create_group(
+        WEEK, tier="Bronze", player_ids=["b1"], now=MONDAY
     )
-    group3 = store.create_group(
-        WEEK, tier="Bronze", player_ids=["g3"], now=MONDAY
-    )
-    group4 = store.create_group(
-        WEEK, tier="Bronze", player_ids=["g4"], now=MONDAY
-    )
-    set_week_xp(store, "g1a", 300)
-    set_week_xp(store, "g1b", 100)
-    set_week_xp(store, "g2", 300)
-    set_week_xp(store, "g3", 300)
-    set_week_xp(store, "g4", 100)
+    # Group A has the highest combined XP, but a4 is still only 4th inside it.
+    set_week_xp(store, "a1", 500)
+    set_week_xp(store, "a2", 500)
+    set_week_xp(store, "a3", 300)
+    set_week_xp(store, "a4", 200)
+    set_week_xp(store, "b1", 1400)
 
-    store.place_bet(
-        "g1a", "group", 20, None, now=MONDAY, request_id="g1"
+    a2_bet = store.place_bet(
+        "a2", "group", paid_stake=0, now=MONDAY, request_id="group-a2"
+    )
+    a3_bet = store.place_bet(
+        "a3", "group", paid_stake=10, now=MONDAY, request_id="group-a3"
     )
     store.place_bet(
-        "g2", "group", 40, None, now=MONDAY, request_id="g2"
+        "a4", "group", paid_stake=20, now=MONDAY, request_id="group-a4"
     )
-    store.place_bet(
-        "g3", "group", 60, None, now=MONDAY, request_id="g3"
-    )
-    store.place_bet(
-        "g4", "group", 20, None, now=MONDAY, request_id="g4"
+    b1_bet = store.place_bet(
+        "b1", "group", paid_stake=0, now=MONDAY, request_id="group-b1"
     )
 
     settled = store.settle_group_bets(WEEK, now=NEXT_MONDAY)
     assert settled["settled"] == 4
-    by_group = {
-        row["group_id"]: row for row in settled["results"]
-    }
-    assert by_group[group1["id"]]["group_rank"] == 1
-    assert by_group[group2["id"]]["group_rank"] == 2
-    assert by_group[group3["id"]]["group_rank"] == 3
-    assert by_group[group4["id"]]["group_rank"] == 4
-    assert by_group[group1["id"]]["status"] == "won"
-    assert by_group[group2["id"]]["status"] == "won"
-    assert by_group[group3["id"]]["status"] == "won"
-    assert by_group[group4["id"]]["status"] == "lost"
-    assert by_group[group1["id"]]["payout"] == 40
-    assert by_group[group2["id"]]["payout"] == 80
-    assert by_group[group3["id"]]["payout"] == 120
-    assert store.get_diamond_balance("g1a", now=NEXT_MONDAY) == 1040
-    assert store.get_diamond_balance("g2", now=NEXT_MONDAY) == 1060
-    assert store.get_diamond_balance("g3", now=NEXT_MONDAY) == 1080
-    assert store.get_diamond_balance("g4", now=NEXT_MONDAY) == 1000
+    by_player = {row["player_id"]: row for row in settled["results"]}
+    assert by_player["a2"]["group_rank"] == 2
+    assert by_player["a3"]["group_rank"] == 3
+    assert by_player["a4"]["group_rank"] == 4
+    assert by_player["b1"]["group_rank"] == 1
+    assert by_player["a2"]["status"] == "won"
+    assert by_player["a3"]["status"] == "won"
+    assert by_player["a4"]["status"] == "lost"
+    assert by_player["b1"]["status"] == "won"
+    assert by_player["a2"]["group_id"] == group_a["id"]
+    assert by_player["b1"]["group_id"] == group_b["id"]
+    assert by_player["a2"]["payout"] == payout_for_win(
+        a2_bet["stake"], a2_bet["odds"]
+    )
+    assert by_player["a3"]["payout"] == payout_for_win(
+        a3_bet["stake"], a3_bet["odds"]
+    )
+    assert by_player["b1"]["payout"] == payout_for_win(
+        b1_bet["stake"], b1_bet["odds"]
+    )
+    assert by_player["a4"]["payout"] == 0
+    assert store.get_diamond_balance("a4", now=NEXT_MONDAY) == 980
 
     again = store.settle_group_bets(WEEK, now=NEXT_MONDAY)
     assert again["settled"] == 0
-    assert store.get_diamond_balance("g3", now=NEXT_MONDAY) == 1080
-    rewards = [
-        row
-        for row in store.diamond_ledger("g3")
-        if row["reason"] == "group_bet_payout"
-    ]
-    assert len(rewards) == 1
 
 
 def test_group_bet_waits_for_0005_and_voids_missing_group(
@@ -686,7 +920,7 @@ def test_group_bet_waits_for_0005_and_voids_missing_group(
         WEEK, tier="Bronze", player_ids=["void"], now=MONDAY
     )
     store.place_bet(
-        "void", "group", 40, None, now=MONDAY, request_id="void"
+        "void", "group", paid_stake=20, now=MONDAY, request_id="void"
     )
     assert store.get_diamond_balance("void", now=MONDAY) == 980
 
@@ -710,6 +944,28 @@ def test_group_bet_waits_for_0005_and_voids_missing_group(
     assert store.get_diamond_balance("void", now=NEXT_MONDAY) == 1000
 
 
+def test_group_bet_voids_missing_personal_score(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    add_player(store, "noscore")
+    store.create_group(WEEK, tier="Bronze", player_ids=["noscore"], now=MONDAY)
+    with store.transaction() as conn:
+        conn.execute(
+            "DELETE FROM weekly_scores WHERE week_start = ? AND player_id = ?",
+            (WEEK, "noscore"),
+        )
+    store.place_bet(
+        "noscore", "group", paid_stake=30, now=MONDAY, request_id="noscore"
+    )
+    assert store.get_diamond_balance("noscore", now=MONDAY) == 970
+
+    settled = store.settle_group_bets(WEEK, now=NEXT_MONDAY)
+    row = settled["results"][0]
+    assert row["status"] == "void"
+    assert row["group_rank"] is None
+    assert row["payout"] == 30
+    assert store.get_diamond_balance("noscore", now=NEXT_MONDAY) == 1000
+
+
 def test_settle_week_settles_group_bets_once(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     make_rival_pair(store, "h1", "h2")
@@ -727,17 +983,25 @@ def test_settle_week_settles_group_bets_once(tmp_path: Path) -> None:
         seconds=600,
         occurred_at=datetime(2026, 11, 6, 12, 0, 0, tzinfo=TZ),
     )
-    store.place_bet(
-        "h1", "group", 40, None, now=MONDAY, request_id="group-integration"
+    bet = store.place_bet(
+        "h1", "group", paid_stake=20, now=MONDAY, request_id="group-integration"
     )
     assert store.get_diamond_balance("h1", now=MONDAY) == 980
+    group_payout = payout_for_win(bet["stake"], bet["odds"])
 
     settled = store.settle_week(WEEK, now=NEXT_MONDAY)
     assert settled["group_bets"]["settled"] == 1
     assert settled["group_bets"]["results"][0]["status"] == "won"
-    assert settled["group_bets"]["results"][0]["payout"] == 80
-    assert store.get_diamond_balance("h1", now=NEXT_MONDAY) == 1180
+    assert settled["group_bets"]["results"][0]["payout"] == group_payout
+    # The rival reward is also paid in the same weekly pass.
+    assert (
+        store.get_diamond_balance("h1", now=NEXT_MONDAY)
+        == 980 + 120 + group_payout
+    )
 
     again = store.settle_week(WEEK, now=NEXT_MONDAY)
     assert again["group_bets"]["settled"] == 0
-    assert store.get_diamond_balance("h1", now=NEXT_MONDAY) == 1180
+    assert (
+        store.get_diamond_balance("h1", now=NEXT_MONDAY)
+        == 980 + 120 + group_payout
+    )
