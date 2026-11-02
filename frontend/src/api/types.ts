@@ -163,3 +163,111 @@ export interface TokenRotateResponse {
   user_id: string
   token: string
 }
+
+export type RivalOutcome = 'win' | 'loss' | 'draw'
+
+export type BetKind = 'weekly' | 'daily' | 'group'
+
+export type BetStatus = 'placed' | 'won' | 'lost' | 'void'
+
+export interface RivalPlayer {
+  user_id: string
+  display_name: string
+  avatar_url: string | null
+  group_no: number | null
+  tier: string
+  power: number
+  week_xp: number
+  today_xp: number
+}
+
+export interface RivalSelection {
+  open: boolean
+  locks_at: string
+  auto_select_at: string
+  mode: 'manual' | 'auto' | null
+}
+
+export interface RivalResult {
+  week_start: string
+  rival_id: string
+  my_xp: number
+  rival_xp: number
+  outcome: RivalOutcome
+  reward_diamonds: number
+  settled_at: string
+}
+
+export interface Bet {
+  id: number
+  kind: BetKind
+  period_key: string
+  rival_id: string | null
+  stake: number
+  free_stake: number
+  paid_stake: number
+  target_margin: number
+  odds: number
+  status: BetStatus
+  placed_at: string
+  locked_at: string | null
+  settled_at: string | null
+  payout: number
+  result_diff: number | null
+  group_id?: number
+  group_rank?: number | null
+}
+
+export interface RivalBets {
+  weekly: Bet | null
+  daily: Bet | null
+  group: Bet | null
+}
+
+export interface BetWindows {
+  weekly_locks_at: string
+  daily_locks_at: string
+  daily_settles_at: string
+}
+
+export interface RivalProjection {
+  rival_week_estimate: number
+  week_line: number
+  rival_today_estimate: number
+  daily_lines: Record<string, number>
+}
+
+export interface RivalState {
+  server_now: string
+  week_start: string
+  selection: RivalSelection
+  me: RivalPlayer
+  rival: RivalPlayer | null
+  result: RivalResult | null
+  bets: RivalBets
+  projection: RivalProjection | null
+  bet_windows: BetWindows
+}
+
+export interface RivalCandidateList {
+  server_now: string
+  week_start: string
+  selection_open: boolean
+  candidates: RivalPlayer[]
+}
+
+export interface BetsState {
+  server_now: string
+  week_start: string
+  day: string
+  weekly: Bet | null
+  daily: Bet | null
+  group: Bet | null
+  bets: RivalBets
+  bet_windows: BetWindows
+}
+
+export interface PlaceBetResult {
+  bet: Bet
+  state: RivalState
+}

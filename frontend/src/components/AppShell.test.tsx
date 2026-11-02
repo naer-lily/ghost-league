@@ -58,7 +58,7 @@ describe('AppShell navigation', () => {
 
     const bottom = navs[1]!
     const bottomLinks = within(bottom).getAllByRole('link')
-    expect(bottomLinks).toHaveLength(5)
+    expect(bottomLinks).toHaveLength(6)
     for (const link of bottomLinks) {
       expect(link.textContent).toBe('')
       expect(link.getAttribute('aria-label')).toBeTruthy()
@@ -68,6 +68,7 @@ describe('AppShell navigation', () => {
     expect(bottomLinks.map((link) => link.getAttribute('aria-label'))).toEqual([
       '首页',
       '小组',
+      '宿敌',
       '星图',
       '历史',
       '我的',
@@ -75,6 +76,7 @@ describe('AppShell navigation', () => {
     expect(bottomLinks.map((link) => link.getAttribute('href'))).toEqual([
       '/',
       '/league',
+      '/rival',
       '/shop',
       '/history',
       '/me',

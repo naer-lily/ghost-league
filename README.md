@@ -120,7 +120,7 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
   `GHOST_LEAGUE_WEB_ROOT=/opt/ghost-league/web-next` 挂载新构建，SPA 深链回退到
   `index.html`；未设置时回退旧 `web/`，旧目录保留回滚。
 - 星图前端：`frontend/` 是 React/TypeScript 新栈，构建到 `web-next/`，不覆盖 `web/`；
-  包含首页、小组榜、星图、历史占位、个人页和 PWA shell。启动、测试、切流和截图见
+  包含首页、小组榜、宿敌、星图、历史占位、个人页和 PWA shell。启动、测试、切流和截图见
   [`frontend/README.md`](frontend/README.md)。
 - [`docs/AVATAR_FRAME_SPEC.md`](docs/AVATAR_FRAME_SPEC.md)：头像框的 `1.36D` 画布、
   `1.00D` 开孔和 `1.08×` 辉光规范，PWA 与 SVG 状态卡共用同一组数字。

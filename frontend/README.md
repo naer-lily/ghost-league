@@ -31,9 +31,9 @@ frontend/
     icons/                 # 从 web/icons/ 复制的 192/512/apple-touch 图标
   src/
     api/          # fetch/blob 封装、Bearer 注入、API 类型、TanStack Query hook
-    components/   # AppShell、PlayerHeader、榜单、StarArt、StarDialog、通用状态组件
-    lib/          # API → 页面视图映射、星图格式/错误文案、段位资源、音效
-    pages/        # 首页 / 小组 / 星图 / 个人页 / 登录 / 历史占位
+    components/   # AppShell、PlayerHeader、榜单、StarArt、StarDialog、RivalBetDialog、通用状态组件
+    lib/          # API → 页面视图映射、星图/宿敌格式与错误文案、段位资源、音效
+    pages/        # 首页 / 小组 / 宿敌 / 星图 / 个人页 / 登录 / 历史占位
     store/        # Zustand UI 状态；复用旧 token
     styles/       # token + 全局基础样式
     test/         # Vitest setup 与 fixtures
@@ -55,6 +55,8 @@ npm run typecheck     # 严格模式 tsc --noEmit
 npm test -- --run     # Vitest + Testing Library
 npm run build         # tsc --noEmit && vite build，产物写入 ../web-next/
 npm run test:e2e      # Playwright（需要真实 token 与 running API）
+
+宿敌页关键测试：`src/pages/RivalPage.test.tsx`、`src/lib/rival.test.ts`。
 ```
 
 构建后 `web-next/` 必须包含 `index.html`、`assets/`、`manifest.webmanifest`、`sw.js`、
@@ -64,12 +66,13 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
 
 - `/` 首页
 - `/league` 完整小组榜
+- `/rival` 宿敌选择与对抗、下注 dialog
 - `/shop` 星图
 - `/history` 历史占位页（保留）
 - `/me` 我的
 - `/embers` 旧地址重定向到 `/shop`
 
-底部/侧边导航固定 5 个入口：首页、小组、星图、历史、我的。导航是纯图标 +
+底部/侧边导航固定 6 个入口：首页、小组、宿敌、星图、历史、我的。导航是纯图标 +
 `aria-label` + Radix Tooltip。顶栏左侧是品牌，右侧是钻石余额（`Diamond` 图标 +
 `status.diamonds`，`aria-label="钻石 N"`，链接到 `/shop`）、刷新、声音、设置和头像；
 390px 下这些操作不被钻石数字挤出。`gems` 字段仍保留兼容，但不再作为主要货币显示。
@@ -86,6 +89,12 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
   `diamond_excess`、`inventory`（`star` / `seasonal_star` / `ember`）、`stars`、`power`、
   `power_percentile`、`power_updated_at`、`power_provisional`，以及原有 XP、排名、
   连胜、余烬和段位字段。
+- 宿敌读取：
+  - `GET /v1/me/rival`：本周宿敌、选择窗口、状态行、下注与预计达成线
+  - `GET /v1/me/rival/candidates`：跨组候选；前端默认筛“略高于我”，没有时退回全部
+  - `POST /v1/me/rival/select`，请求体 `{ rival_id, request_id }`；成功后直接进入对抗态
+  - `GET /v1/me/bets`、`POST /v1/me/bets`：周注 / 日注 / 组注；成功返回 `{bet, state}`
+  - mutation 成功后 invalidate `rival` / `bets` / `rival candidates`，状态行用真实返回刷新
 - 星图读取：
   - `GET /v1/shop`
   - `POST /v1/shop/purchase`，请求体 `{ item_id, quantity: 1, request_id }`；本次前端不填
@@ -97,9 +106,14 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
 
 ## 页面行为
 
-- 首页保留无卡片布局：单行 `PlayerHeader`、六档今日进度条、小组榜前 5 行。榜单每行在
-  名字下显示 `战力 N`（`null` 显示 `—`），不出现内部身份标签。
+- 首页保留扁平布局：单行 `PlayerHeader`、六档今日进度条、一张轻量宿敌入口、小组榜前
+  5 行。榜单每行在名字下显示 `战力 N`（`null` 显示 `—`），不出现内部身份标签。
 - `/league` 渲染完整小组榜，每行同样显示战力。
+- `/rival` 三态：周一可选时显示候选（头像、名字、组号、战力、本周/今日 XP、选择按钮）；
+  已有宿敌时显示双方 XP、单条左右对撞条、领先/落后、剩余时间与三行下注状态；锁定但
+  没有宿敌时只显示空状态和重试，不伪造对局。下注按钮打开 `RivalBetDialog`，三个 tab
+  分别接周注 / 日注 / 组注，已下注的 tab 不可重复提交，09:00 后日注显示“今天的注已截止”。
+  不显示固定本周目标、免责声明或内部身份标签。
 - `/me` 保留三列统计（本周 XP、排名、余烬）、紧凑 XP 环和“我的榜单位置”行；在三列统计
   下增加一行紧凑资源信息：钻石、星图星数、战力，整行链接到 `/shop`。
 - `/shop` 从上到下：`PlayerHeader`、星图层头（余额、仓库上限、超出量）、抽取区、星库、

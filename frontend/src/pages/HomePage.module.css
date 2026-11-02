@@ -16,3 +16,68 @@
     padding: 8px 0 24px;
   }
 }
+
+
+.rivalEntry {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 0 0 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-tile);
+  background:
+    radial-gradient(circle at 86% 10%, rgba(206, 130, 255, 0.13), transparent 55%),
+    var(--surface-2);
+  box-shadow: var(--shadow-card);
+  transition:
+    border-color 0.15s ease,
+    transform 0.08s ease;
+}
+
+.rivalEntry:hover {
+  border-color: rgba(206, 130, 255, 0.42);
+}
+
+.rivalEntry:active {
+  transform: translateY(2px);
+}
+
+.rivalIcon {
+  display: grid;
+  flex: none;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid rgba(127, 255, 212, 0.3);
+  border-radius: 13px;
+  background: rgba(127, 255, 212, 0.1);
+  color: #7fffd4;
+}
+
+.rivalCopy {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rivalCopy strong {
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.rivalCopy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rivalEntry > svg {
+  flex: none;
+  color: var(--muted-2);
+}

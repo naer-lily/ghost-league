@@ -53,9 +53,10 @@
 
 .diamondBalance {
   display: inline-flex;
-  min-width: 0;
+  min-width: 44px;
   max-width: 92px;
   align-items: center;
+  justify-content: center;
   gap: 4px;
   height: 44px;
   padding: 0 6px;
@@ -175,7 +176,7 @@
   left: 0;
   z-index: 70;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   height: calc(var(--bottom-nav) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   border-top: 1px solid var(--border);

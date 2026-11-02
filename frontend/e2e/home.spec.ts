@@ -216,7 +216,7 @@ async function assertIconOnlyNav(page: Page): Promise<void> {
     new Array(count).fill(''),
   )
   expect(info.every((entry) => entry.label.length > 0)).toBeTruthy()
-  for (const label of ['首页', '小组', '星图', '历史', '我的']) {
+  for (const label of ['首页', '小组', '宿敌', '星图', '历史', '我的']) {
     expect(info.some((entry) => entry.label === label)).toBeTruthy()
   }
 }

@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Settings,
   Sparkles,
+  Swords,
   Trophy,
   User,
   Volume2,
@@ -47,6 +48,14 @@ const NAV_ITEMS = [
     end: false,
     color: '#ffc800',
     soft: 'rgba(255, 200, 0, 0.16)',
+  },
+  {
+    to: '/rival',
+    label: '宿敌',
+    icon: Swords,
+    end: false,
+    color: '#ce82ff',
+    soft: 'rgba(206, 130, 255, 0.16)',
   },
   {
     to: '/shop',

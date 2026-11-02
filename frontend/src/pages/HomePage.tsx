@@ -1,4 +1,6 @@
+import { ChevronRight, Swords } from 'lucide-react'
 import type { CSSProperties } from 'react'
+import { Link } from 'react-router-dom'
 import { useHomeSnapshot } from '../api/queries'
 import { PageError, PageLoading } from '../components/PageState'
 import { PlayerHeader } from '../components/PlayerHeader'
@@ -43,6 +45,17 @@ export function HomePage() {
           tier={view.tier}
         />
       </div>
+
+      <Link className={styles.rivalEntry} to="/rival" data-testid="rival-entry">
+        <span className={styles.rivalIcon} aria-hidden="true">
+          <Swords size={20} />
+        </span>
+        <span className={styles.rivalCopy}>
+          <strong>宿敌</strong>
+          <small>本周追一个对手，实时对撞。</small>
+        </span>
+        <ChevronRight size={18} aria-hidden="true" />
+      </Link>
 
       <StandingsBoard view={view} onRefresh={() => void home.refetch()} />
     </div>
