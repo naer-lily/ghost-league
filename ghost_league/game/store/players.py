@@ -57,9 +57,21 @@ class PlayersMixin:
         )
         if conn is not None:
             self._insert_player(conn, values)
+            self._ensure_wallet_with(
+                conn,
+                player_id,
+                now=cal.parse_datetime(created),
+                create_for_unknown=False,
+            )
             return self._get_player_with(conn, player_id)
         with self.transaction() as tx:
             self._insert_player(tx, values)
+            self._ensure_wallet_with(
+                tx,
+                player_id,
+                now=cal.parse_datetime(created),
+                create_for_unknown=False,
+            )
             return self._get_player_with(tx, player_id)
 
     @staticmethod
@@ -270,6 +282,12 @@ class PlayersMixin:
                     "is_active = 1 WHERE id = ? AND kind = 'human'",
                     (display_name, joined, player_id),
                 )
+            self._ensure_wallet_with(
+                conn,
+                player_id,
+                now=local_now,
+                create_for_unknown=False,
+            )
             return self._get_player_with(conn, player_id)
 
     def upsert_source(

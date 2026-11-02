@@ -12,7 +12,7 @@ from typing import Any
 from .. import calendar as cal
 from ..progression import CATALOG_ITEMS, CATALOG_TITLES
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 ALGORITHM_VERSION = "phase1-v1"
 DEFAULT_DB_PATH = Path("data/league/league.db")
 SOURCE_AI = "wakatime_public_leaderboard"
@@ -333,17 +333,41 @@ CREATE TABLE IF NOT EXISTS inventory_items (
     PRIMARY KEY (player_id, item_id)
 );
 
+CREATE TABLE IF NOT EXISTS player_stars (
+    id TEXT PRIMARY KEY,
+    player_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('normal', 'seasonal')),
+    season_key TEXT,
+    price_diamonds INTEGER NOT NULL,
+    acquired_at TEXT NOT NULL,
+    source TEXT NOT NULL,
+    UNIQUE (player_id, season_key)
+);
+
 CREATE TABLE IF NOT EXISTS shop_items (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT NOT NULL,
     price_diamonds INTEGER NOT NULL CHECK (price_diamonds >= 0),
     grant_kind TEXT NOT NULL CHECK (grant_kind IN ('inventory', 'ember')),
+    kind TEXT NOT NULL DEFAULT 'inventory'
+        CHECK (kind IN ('star', 'seasonal_star', 'ember', 'inventory', 'cap')),
     grant_item_id TEXT,
     grant_quantity INTEGER NOT NULL DEFAULT 1 CHECK (grant_quantity > 0),
+    season_key TEXT,
+    required_cap_level INTEGER,
     cooldown_seconds INTEGER NOT NULL DEFAULT 0 CHECK (cooldown_seconds >= 0),
     active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
     sort INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS shop_cap_upgrades (
+    level INTEGER PRIMARY KEY CHECK (level >= 1),
+    price_diamonds INTEGER NOT NULL CHECK (price_diamonds >= 0),
+    cap_delta INTEGER NOT NULL CHECK (cap_delta > 0),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -368,6 +392,9 @@ CREATE TABLE IF NOT EXISTS shop_purchase_requests (
 CREATE TABLE IF NOT EXISTS diamond_balance (
     player_id TEXT PRIMARY KEY,
     balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
+    diamond_cap INTEGER NOT NULL DEFAULT 1000 CHECK (diamond_cap >= 0),
+    diamond_cap_level INTEGER NOT NULL DEFAULT 0 CHECK (diamond_cap_level >= 0),
+    last_decay_at TEXT,
     updated_at TEXT NOT NULL
 );
 
@@ -416,7 +443,9 @@ _TABLE_NAMES = (
     "player_items",
     "loadouts",
     "inventory_items",
+    "player_stars",
     "shop_items",
+    "shop_cap_upgrades",
     "shop_purchase_cooldowns",
     "shop_purchase_requests",
     "diamond_balance",
@@ -471,11 +500,13 @@ class CoreMixin:
             conn.executescript(_SCHEMA)
             self._migrate_sources(conn)
             self._migrate_players(conn)
+            self._migrate_shop(conn)
             now = cal.iso_ts(
                 cal.parse_datetime(self._epoch_started_at)
                 if self._epoch_started_at is not None
                 else cal.now_local()
             )
+            self._migrate_diamonds(conn, now=now)
             self._seed_catalog(conn)
             self._seed_shop(conn, now=now)
             self._seed_progression_start(
@@ -549,19 +580,40 @@ class CoreMixin:
 
     @staticmethod
     def _seed_shop(conn: sqlite3.Connection, *, now: str) -> None:
-        """Install the two launch shop items without duplicating rows."""
+        """Install the launch products and the tiered cap upgrades.
+
+        ``ON CONFLICT DO NOTHING`` keeps operator edits and older rows intact;
+        the migration above already labels pre-existing ``star``/``ember``.
+        """
 
         rows = (
             (
                 "star",
                 "星星",
-                "收藏用星星，可以重复购买。",
+                "收藏用星星，可以重复购买；购买时必须为这颗星命名。",
                 300,
                 "inventory",
                 "star",
+                "star",
                 1,
+                None,
+                None,
                 0,
                 10,
+            ),
+            (
+                "seasonal_star",
+                "季节星",
+                "当月限定星星；每个自然月最多购买一颗，必须命名。",
+                500,
+                "inventory",
+                "seasonal_star",
+                "seasonal_star",
+                1,
+                None,
+                None,
+                0,
+                15,
             ),
             (
                 "ember",
@@ -570,7 +622,10 @@ class CoreMixin:
                 800,
                 "ember",
                 "ember",
+                "ember",
                 1,
+                None,
+                None,
                 259_200,
                 20,
             ),
@@ -581,17 +636,21 @@ class CoreMixin:
             description,
             price,
             grant_kind,
+            kind,
             grant_item_id,
             grant_quantity,
+            season_key,
+            required_cap_level,
             cooldown_seconds,
             sort,
         ) in rows:
             conn.execute(
                 "INSERT INTO shop_items "
-                "(id, name, description, price_diamonds, grant_kind, "
-                "grant_item_id, grant_quantity, cooldown_seconds, active, sort, "
+                "(id, name, description, price_diamonds, grant_kind, kind, "
+                "grant_item_id, grant_quantity, season_key, "
+                "required_cap_level, cooldown_seconds, active, sort, "
                 "created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?) "
                 "ON CONFLICT(id) DO NOTHING",
                 (
                     item_id,
@@ -599,13 +658,34 @@ class CoreMixin:
                     description,
                     price,
                     grant_kind,
+                    kind,
                     grant_item_id,
                     grant_quantity,
+                    season_key,
+                    required_cap_level,
                     cooldown_seconds,
                     sort,
                     now,
                     now,
                 ),
+            )
+        upgrades = (
+            (1, 500, 500),
+            (2, 800, 500),
+            (3, 1200, 500),
+            (4, 1800, 500),
+            (5, 2600, 500),
+        )
+        for level, price, delta in upgrades:
+            conn.execute(
+                "INSERT INTO shop_cap_upgrades "
+                "(level, price_diamonds, cap_delta, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(level) DO UPDATE SET "
+                "price_diamonds = excluded.price_diamonds, "
+                "cap_delta = excluded.cap_delta, "
+                "updated_at = excluded.updated_at",
+                (level, price, delta, now, now),
             )
 
     def _seed_progression_start(
@@ -711,6 +791,89 @@ class CoreMixin:
             "(SELECT MAX(week_start) FROM opponent_week_plan "
             " WHERE opponent_week_plan.player_id = players.id), "
             "joined_week) WHERE last_seen_week = ''"
+        )
+
+    @staticmethod
+    def _migrate_shop(conn: sqlite3.Connection) -> None:
+        """Add product-type metadata to an older ``shop_items`` table."""
+
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(shop_items)")
+        }
+        if "kind" not in columns:
+            conn.execute(
+                "ALTER TABLE shop_items ADD COLUMN kind TEXT "
+                "NOT NULL DEFAULT 'inventory'"
+            )
+        if "season_key" not in columns:
+            conn.execute("ALTER TABLE shop_items ADD COLUMN season_key TEXT")
+        if "required_cap_level" not in columns:
+            conn.execute(
+                "ALTER TABLE shop_items ADD COLUMN required_cap_level INTEGER"
+            )
+        conn.execute("UPDATE shop_items SET kind = 'star' WHERE id = 'star'")
+        conn.execute("UPDATE shop_items SET kind = 'ember' WHERE id = 'ember'")
+        conn.execute(
+            "UPDATE shop_items SET kind = 'seasonal_star' "
+            "WHERE id = 'seasonal_star'"
+        )
+        conn.execute(
+            "UPDATE shop_items SET kind = 'cap' WHERE grant_kind = 'cap'"
+        )
+        conn.execute(
+            "UPDATE shop_items SET kind = 'inventory' "
+            "WHERE kind IS NULL OR kind = ''"
+        )
+
+    @staticmethod
+    def _migrate_diamonds(conn: sqlite3.Connection, *, now: str) -> None:
+        """Add the soft cap columns and backfill legacy human wallets.
+
+        An existing wallet keeps its balance, receives the 1000 cap, and starts
+        its decay clock at migration time.  Human players that never had a
+        wallet row get the normal 1000 / 1000 starting wallet.
+        """
+
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(diamond_balance)")
+        }
+        if "diamond_cap" not in columns:
+            conn.execute(
+                "ALTER TABLE diamond_balance ADD COLUMN diamond_cap INTEGER "
+                "NOT NULL DEFAULT 1000"
+            )
+        if "diamond_cap_level" not in columns:
+            conn.execute(
+                "ALTER TABLE diamond_balance ADD COLUMN diamond_cap_level "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "last_decay_at" not in columns:
+            conn.execute(
+                "ALTER TABLE diamond_balance ADD COLUMN last_decay_at TEXT"
+            )
+        conn.execute(
+            "UPDATE diamond_balance SET diamond_cap = 1000 "
+            "WHERE diamond_cap IS NULL"
+        )
+        conn.execute(
+            "UPDATE diamond_balance SET diamond_cap_level = 0 "
+            "WHERE diamond_cap_level IS NULL"
+        )
+        conn.execute(
+            "UPDATE diamond_balance SET last_decay_at = ? "
+            "WHERE last_decay_at IS NULL",
+            (now,),
+        )
+        conn.execute(
+            "INSERT INTO diamond_balance "
+            "(player_id, balance, diamond_cap, diamond_cap_level, "
+            "last_decay_at, updated_at) "
+            "SELECT id, 1000, 1000, 0, ?, ? FROM players "
+            "WHERE kind = 'human' "
+            "ON CONFLICT(player_id) DO NOTHING",
+            (now, now),
         )
 
     @contextmanager

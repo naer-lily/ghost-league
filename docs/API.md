@@ -624,7 +624,19 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
   "embers": {"balance": 1, "cap": 3, "earned_this_week": 1},
   "gems": 20,
   "diamonds": 2700,
-  "inventory": {"star": 1, "ember": 1},
+  "diamond_cap": 1000,
+  "diamond_cap_level": 0,
+  "diamond_excess": 1700,
+  "inventory": {"star": 1, "seasonal_star": 1, "ember": 1},
+  "stars": [
+    {
+      "id": "8f14e45fceea167a5a36dedd4bea2543",
+      "name": "给妈妈的星",
+      "kind": "normal",
+      "season_key": null,
+      "acquired_at": "2026-11-02T15:30:00+08:00"
+    }
+  ],
   "equipped_title": "点火",
   "equipped_title_id": "title_ignition",
   "frame": "余烬",
@@ -640,14 +652,24 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 - `gems` 继续是原来的展示值，由该玩家 `weekly_scores` 的累计 `SUM(xp) // 10` 派生，
   每累计 10 XP 得 1 个宝石；不按本周 XP 重置，也没有独立 ledger 表。`gems` 不是钻石，
   不会因为商店消费而变化。
-- `diamonds` 是独立的钻石钱包余额。初始为 0，不自动发放；没有钱包记录时返回 0。
-  当前只有本地管理命令/未来奖励接入会充值，正式的宿敌、活动奖励后续再接。钻石只属于
-  真人，AI 没有钱包。`status_for_user`（badge/widget 快照）返回同样的 0/余额字段。
-- `inventory` 至少包含 `star` 与 `ember`。`inventory.star` 读取通用物品栏
-  `inventory_items`；`inventory.ember` 直接读取现有 `ember_balance.balance`，不复制到
-  `inventory_items`。没有记录的物品返回 0，不会省略字段。
-- 钻石和物品栏只在自己的 status（以及内部 `status_for_user` 快照）返回；榜单、公开资料、
-  `/v1/users/{id}` 和任何他人视角都不包含 `diamonds`/`inventory`。
+- `diamonds` 是独立钻石钱包余额。新真人钱包初始 1000，`diamond_cap` 初始 1000、
+  `diamond_cap_level` 初始 0。旧库中已有钱包保留余额并补 1000 上限；没有钱包记录的
+  真人补 1000/1000。AI 没有钱包。当前只有本地管理命令/未来奖励接入会充值，正式的
+  宿敌、活动奖励后续再接。
+- 钻石是**软上限**：余额可以超过上限，超出部分 `diamond_excess = max(0, diamonds - cap)`
+  不删、不拒绝入账，按完整小时 1% 复利损耗；只有完整小时计费，重复读取同一小时不会
+  重复扣。服务器离线后按 `last_decay_at` 在下次钱包读写或 `diamond-decay` job 补算。
+- `inventory` 至少包含 `star`、`seasonal_star` 与 `ember`。`inventory.star` 读取通用物品栏
+  `inventory_items`，是普通星数量；`inventory.seasonal_star` 是季节星数量；
+  `inventory.ember` 直接读取现有 `ember_balance.balance`，不复制到 `inventory_items`。
+  没有记录的物品返回 0，不会省略字段。
+- `stars` 是自己的命名星列表；每颗星一条记录，含 `id`、`name`、`kind`
+  （`normal` / `seasonal`）、`season_key`（普通星为 `null`）和 `acquired_at`。
+  只按 `acquired_at` 升序返回本人数据。
+- 钻石、上限、物品栏和星星只在自己的 `/v1/me/status` 返回；`status_for_user`
+  （badge/widget 快照）、榜单、公开资料、`/v1/users/{id}` 和任何他人视角都不包含
+  `diamonds`、`diamond_cap`、`diamond_cap_level`、`diamond_excess`、`inventory`、
+  `stars`。
 - `power` 是 0–2000 的派生展示战力。计算窗口为最近 4 个自然周（含当前未结束周），
   权重从新到旧为 `0.4 / 0.3 / 0.2 / 0.1`，只按该玩家实际有 `weekly_scores` 行的周
   重新归一化；每周百分位 `p = (less_count + equal_count / 2) / total_count`，
@@ -672,34 +694,87 @@ curl -sS "https://your-host.example/v1/me/status" \
 
 ## 钻石与商店
 
-钻石是独立于 `gems` 的新货币。初始余额为 0，不自动发放；当前只有本地管理命令
-`python3 -m ghost_league.game.jobs grant-diamonds --player <id> --amount 3000 --reason test`
-用于测试或未来奖励接入，不提供公开的“给自己加钻石”HTTP 接口。钻石只属于真人，AI
-没有钱包、不能购买，也不会出现在他人视角。
+钻石是独立于 `gems` 的货币，只属于真人。新真人钱包初始 1000 钻石、1000 软上限；
+旧库已有钱包保留余额并补 1000 上限、0 级、`last_decay_at` 置为迁移时间；缺失的真人
+钱包补 1000/1000。AI 没有钱包、不能购买，也不会出现在他人视角。
 
-当前上架两个商品：
+钻石是**软上限**，不是硬截断：
 
-| id | 名称 | 价格 | 发货 | 冷却 |
-| --- | --- | --- | --- | --- |
-| `star` | 星星 | 300 钻石/个 | 写入 `inventory_items`，可累积；单次最多 99 个 | 无 |
-| `ember` | 余烬 | 800 钻石/个 | 进入现有 `ember_balance`，不写 `inventory_items`；每次只能买 1 个 | 72 小时（259200 秒） |
+- 余额可以超过 `diamond_cap`；超出部分按完整小时 `1%` 复利损耗：
+  `new_balance = cap + floor(excess * 0.99 ** hours)`，损耗后不低于上限。
+- 余额不高于上限时不损耗；同一小时重复读取/job 不会重复扣。
+- 每次实际损耗写一条负数 `diamond_ledger`，`reason='decay'`；服务器离线后按
+  `last_decay_at` 在钱包读写时惰性补算，或由
+  `python3 -m ghost_league.game.jobs diamond-decay --at <iso>` 统一补算。
+- 充值/奖励不因超过上限被拒绝；下注等未来消耗也不受上限阻塞。
+
+本地管理命令仍可用于测试或未来奖励接入：
+
+```bash
+python3 -m ghost_league.game.jobs grant-diamonds --player <id> --amount 3000 --reason test
+```
+
+当前商品：
+
+| id | kind | 名称 | 价格 | 发货 | 限制 |
+| --- | --- | --- | --- | --- | --- |
+| `star` | `star` | 普通星 | 300 钻石/颗 | 写 `player_stars` 一条命名记录，并递增 `inventory_items.star` | 每次只能买 1 颗，必须命名；可重复买 |
+| `seasonal_star` | `seasonal_star` | 季节星 | 500 钻石/颗 | 写 `player_stars` 一条季节记录，并递增 `inventory_items.seasonal_star` | 每个玩家每个自然月最多 1 颗，必须命名 |
+| `ember` | `ember` | 余烬 | 800 钻石/个 | 进入现有 `ember_balance`，不写 `inventory_items` | 每次只能买 1 个；72 小时冷却 |
+| `diamond_cap_1` … `diamond_cap_5` | `cap` | 仓库上限升级 | 500 / 800 / 1200 / 1800 / 2600 | 扣钻石，上限 +500，等级 +1 | 只能按当前等级买下一级；5 级后不再出现 |
+
+上限阶梯：
+
+| 等级 | 价格 | 上限变化 |
+| --- | --- | --- |
+| 1 | 500 | 1000 → 1500 |
+| 2 | 800 | 1500 → 2000 |
+| 3 | 1200 | 2000 → 2500 |
+| 4 | 1800 | 2500 → 3000 |
+| 5 | 2600 | 3000 → 3500 |
+
+命名星规则：
+
+- 每颗普通星/季节星必须带 `name`，去掉首尾空白后长度 1–40，拒绝换行和控制字符。
+- 名字不要求全服唯一；每颗星有独立 `id` 和 `acquired_at`，永久保留，不回售。
+- 季节星 `season_key` 使用服务器当前自然月，例如 `2026-11`；客户端提供的任何月份都
+  不参与判断。跨月后可以再买下一颗；同月第二颗返回 `409 seasonal_star_owned`。
+- 普通星 `season_key` 为 `null`，`UNIQUE(player_id, season_key)` 不会阻止重复购买；
+  季节星由该唯一约束兜底。
 
 ### `GET /v1/shop`
 
-Bearer 鉴权。只返回 `active=1` 的商品数组，按 `sort` 排序：
+Bearer 鉴权。返回当前可买商品数组。普通商品按 `sort` 排序；仓库升级只返回当前等级
+的下一级（5 级后无升级项）。字段包含 `kind`；季节星额外带 `season_key`；上限升级
+额外带 `required_cap_level`。`available` 综合考虑冷却、季节窗口和上限等级；余额是否
+足够仍在购买时单独校验。
 
 ```json
 [
   {
     "id": "star",
     "name": "星星",
-    "description": "收藏用星星，可以重复购买。",
+    "description": "收藏用星星，可以重复购买；购买时必须为这颗星命名。",
     "price_diamonds": 300,
     "currency": "diamonds",
+    "kind": "star",
     "owned_quantity": 1,
     "cooldown_seconds": 0,
     "cooldown_until": null,
     "available": true
+  },
+  {
+    "id": "seasonal_star",
+    "name": "季节星",
+    "description": "当月限定星星；每个自然月最多购买一颗，必须命名。",
+    "price_diamonds": 500,
+    "currency": "diamonds",
+    "kind": "seasonal_star",
+    "season_key": "2026-11",
+    "owned_quantity": 1,
+    "cooldown_seconds": 0,
+    "cooldown_until": null,
+    "available": false
   },
   {
     "id": "ember",
@@ -707,28 +782,39 @@ Bearer 鉴权。只返回 `active=1` 的商品数组，按 `sort` 排序：
     "description": "立即获得 1 枚余烬；每 72 小时最多购买一次。",
     "price_diamonds": 800,
     "currency": "diamonds",
+    "kind": "ember",
     "owned_quantity": 1,
     "cooldown_seconds": 259200,
     "cooldown_until": "2026-11-05T12:00:00+08:00",
     "available": false
+  },
+  {
+    "id": "diamond_cap_1",
+    "name": "仓库上限 1 级",
+    "description": "仓库上限 +500；购买后进入 1 级。",
+    "price_diamonds": 500,
+    "currency": "diamonds",
+    "kind": "cap",
+    "required_cap_level": 0,
+    "owned_quantity": 0,
+    "cooldown_seconds": 0,
+    "cooldown_until": null,
+    "available": true
   }
 ]
 ```
 
-- `owned_quantity`：`star` 读 `inventory_items`；`ember` 直接读现有 `ember_balance`。
-- `cooldown_until`：仍在冷却时是 ISO 时间，否则为 `null`。
-- `available`：当前不在冷却中；余额是否足够在购买时单独校验。
-
 ### `POST /v1/shop/purchase`
 
 Bearer 鉴权。`request_id` 必填，用于幂等；同一个 `request_id` 重复提交只扣一次款并
-返回同一购买结果（`replayed=true`）。`quantity` 缺省为 1，必须是正整数；`star` 单次
-最多 99 个，`ember` 只能买 1 个。
+返回同一购买结果（`replayed=true`）。`quantity` 缺省为 1；普通星/季节星/余烬/上限升级
+都只能一次买 1 个。普通星和季节星必须带 `name`。
 
 ```json
 {
   "item_id": "star",
   "quantity": 1,
+  "name": "给妈妈的星",
   "request_id": "shop-20261102-001"
 }
 ```
@@ -738,30 +824,59 @@ Bearer 鉴权。`request_id` 必填，用于幂等；同一个 `request_id` 重�
   "ok": true,
   "item_id": "star",
   "quantity": 1,
-  "diamonds": 2700,
-  "inventory": {"star": 1, "ember": 0},
+  "diamonds": 700,
+  "diamond_cap": 1000,
+  "diamond_cap_level": 0,
+  "diamond_excess": 0,
+  "inventory": {"star": 1, "seasonal_star": 0, "ember": 0},
   "cooldown_until": null,
-  "replayed": false
+  "replayed": false,
+  "star": {
+    "id": "8f14e45fceea167a5a36dedd4bea2543",
+    "name": "给妈妈的星",
+    "kind": "normal",
+    "season_key": null,
+    "acquired_at": "2026-11-02T15:30:00+08:00"
+  }
 }
 ```
 
-扣款、发货、冷却、流水和 request 记录在同一个 SQLite 事务内完成。任何一步失败都会
-回滚，不会只扣钱不发货。
+上限升级示例：
+
+```json
+{"item_id": "diamond_cap_1", "quantity": 1, "request_id": "cap-1"}
+```
+
+购买后会扣钻石、`diamond_cap += 500`、`diamond_cap_level += 1`，并重新计算
+`diamond_excess`。购买本身是消费，不受旧上限阻塞；余额不足仍然拒绝。
+
+扣款、发货、命名星记录、物品栏、冷却、流水和 request 记录在同一个 SQLite 事务内完成。
+任何一步失败都会回滚，普通星失败不会留下半颗星或半条流水。
 
 错误状态：
 
 - 未知商品：`404`。
-- 数量非法、`star > 99`、`ember != 1`：`422`，`detail.code` 为
-  `invalid_quantity` / `quantity_too_large` / `ember_quantity`。
+- 数量非法、一次买多颗、普通星/季节星名字非法：`422`，`detail.code` 为
+  `invalid_quantity` / `quantity_must_be_one` / `invalid_star_name`。
 - 余额不足：`409`，响应顶层和 `detail` 都带当前 `balance`/`diamonds`，`detail.code`
   为 `insufficient_diamonds`。
+- 同月第二颗季节星：`409`，`detail.code='seasonal_star_owned'`，带 `season_key`。
+- 上限升级不是当前下一级或已经满级：`409`，`detail.code='cap_unavailable'`。
 - `ember` 冷却未到：`409`，响应顶层和 `detail` 都带 `cooldown_until`，
-  `detail.code` 为 `cooldown`；冷却到期后可再次购买。
+  `detail.code` 为 `cooldown`。
 - 同一 `request_id` 用于不同商品/数量：`409`。
 
-`star` 没有冷却，可连续购买多个。`ember` 购买成功会同时写负数
-`diamond_ledger` 和正数 `ember_ledger`，更新 `ember_balance`，并写
-`shop_purchase_cooldowns`；它不会写 `inventory_items`。
+`ember` 购买成功会同时写负数 `diamond_ledger` 和正数 `ember_ledger`，更新
+`ember_balance`，并写 `shop_purchase_cooldowns`；它不会写 `inventory_items`。
+
+## 周约/赌博（尚未实现，仅记录规则）
+
+本单不实现周约或赌博代码；未来下注接口必须遵守以下约束：
+
+- 钻石软上限不拒绝超上限下注；扣款后余额仍可高于上限。
+- 结算后赢来的超出部分按每小时 1% 复利损耗，不硬截断。
+- 下注前可以提示“结算后超出部分会衰减”，但不能拒绝下注或偷偷扣掉超出部分。
+- 玩家可以立刻消费或升级仓库上限，让超出部分进入新上限，从而停止衰减。
 
 ## 公开用户与社交
 

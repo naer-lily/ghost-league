@@ -114,6 +114,27 @@ def run_grant_diamonds(
     }
 
 
+def run_diamond_decay(
+    db_path: str | Path,
+    *,
+    at: datetime | str | None = None,
+) -> dict[str, Any]:
+    """Apply the hourly soft-cap decay to every existing wallet.
+
+    The operation uses the same pure function as lazy wallet reads, so an
+    offline server catches up at the next timer or read without double-charging
+    a complete hour.
+    """
+
+    local_now = cal.parse_datetime(at) if at is not None else cal.now_local()
+    store = GameStore(Path(db_path))
+    result = store.apply_all_diamond_decay(now=local_now)
+    return {
+        "status": "decayed" if result["decayed"] else "ok",
+        **result,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m ghost_league.game.jobs",
@@ -138,6 +159,11 @@ def build_parser() -> argparse.ArgumentParser:
     grant.add_argument("--reason", default="test")
     grant.add_argument("--idempotency-key")
     grant.add_argument("--at")
+    decay = sub.add_parser(
+        "diamond-decay", help="apply hourly soft-cap decay to every wallet"
+    )
+    decay.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    decay.add_argument("--at")
     return parser
 
 
@@ -157,6 +183,8 @@ def main(argv: list[str] | None = None) -> int:
             idempotency_key=args.idempotency_key,
             at=args.at,
         )
+    elif args.command == "diamond-decay":
+        result = run_diamond_decay(args.db, at=args.at)
     else:  # pragma: no cover - argparse rejects unknown subcommands
         parser.error(f"unknown command: {args.command}")
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))

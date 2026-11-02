@@ -44,6 +44,7 @@ from .game.rules import (
     RepairRejected,
     ShopCooldown,
     ShopNotAllowed,
+    ShopNotAvailable,
     ShopQuantityRejected,
     UnknownShopItem,
     WeekLocked,
@@ -129,6 +130,7 @@ class ShopPurchaseRequest(BaseModel):
 
     item_id: str = Field(min_length=1, max_length=64)
     quantity: int = Field(default=1, strict=True, ge=1)
+    name: str | None = None
     request_id: str = Field(min_length=1, max_length=200)
 
 
@@ -602,6 +604,7 @@ class GameService:
         size = int(snapshot.get("group_size") or 0)
         week_seconds = int(snapshot.get("seconds") or 0)
         loadout = self.store.loadout_view(user_id)
+        wallet = self.store.get_diamond_wallet(user_id, now=now)
         streak = snapshot.get("streak") or {
             "current": 0,
             "longest": 0,
@@ -635,8 +638,12 @@ class GameService:
             },
             "embers": self._ember_summary(user_id, week, week_seconds),
             "gems": int(snapshot.get("lifetime_xp") or 0) // 10,
-            "diamonds": self.store.get_diamond_balance(user_id),
+            "diamonds": wallet["balance"],
+            "diamond_cap": wallet["diamond_cap"],
+            "diamond_cap_level": wallet["diamond_cap_level"],
+            "diamond_excess": wallet["diamond_excess"],
             "inventory": self._inventory_summary(user_id),
+            "stars": self.store.list_player_stars(user_id),
             "equipped_title": loadout["title"],
             "equipped_title_id": loadout["title_id"],
             "frame": loadout["frame"],
@@ -662,7 +669,19 @@ class GameService:
 
         account = self.accounts.get(user_id)
         if account is not None:
-            return self.status_for(account)
+            payload = self.status_for(account)
+            # ``status_for_user`` is an unauthenticated badge/widget snapshot;
+            # never leak the wallet, inventory, or named stars through it.
+            for private_key in (
+                "diamonds",
+                "diamond_cap",
+                "diamond_cap_level",
+                "diamond_excess",
+                "inventory",
+                "stars",
+            ):
+                payload.pop(private_key, None)
+            return payload
         self.initialize()
         assert self.store is not None
         try:
@@ -719,8 +738,6 @@ class GameService:
             },
             "embers": self._ember_summary(user_id, week, week_seconds),
             "gems": int(snapshot.get("lifetime_xp") or 0) // 10,
-            "diamonds": self.store.get_diamond_balance(user_id),
-            "inventory": self._inventory_summary(user_id),
             "equipped_title": loadout["title"],
             "equipped_title_id": loadout["title_id"],
             "frame": loadout["frame"],
@@ -1108,6 +1125,7 @@ class GameService:
         item_id: str,
         quantity: int,
         request_id: str,
+        name: str | None = None,
     ) -> dict[str, Any]:
         self._prepare_read(account)
         assert self.store is not None
@@ -1116,6 +1134,7 @@ class GameService:
             item_id,
             quantity,
             request_id,
+            name=name,
             now=self.now(),
         )
 
@@ -1678,6 +1697,12 @@ def create_app(
                     "cooldown_until": exc.cooldown_until,
                 },
             )
+        if isinstance(exc, ShopNotAvailable):
+            detail = {"code": exc.code, "message": exc.detail, **exc.extra}
+            return JSONResponse(
+                status_code=409,
+                content={"detail": detail, **detail},
+            )
         if isinstance(exc, InsufficientDiamonds):
             detail = {
                 "code": exc.code,
@@ -1978,12 +2003,14 @@ def create_app(
                 item_id=request.item_id,
                 quantity=request.quantity,
                 request_id=request.request_id,
+                name=request.name,
             )
         except (
             DuplicateIdempotencyKey,
             InsufficientDiamonds,
             ShopCooldown,
             ShopNotAllowed,
+            ShopNotAvailable,
             ShopQuantityRejected,
             UnknownShopItem,
         ) as exc:

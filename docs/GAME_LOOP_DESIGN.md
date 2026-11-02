@@ -22,7 +22,7 @@
 
 - 每天回来的理由：**今天还差多少 XP 才能打卡、AI 对手今天做了什么、我现在第几名、昨天能不能补签。**
 - 每周在意的理由：**本周 tier 内的晋级/降级名额、周一早上看到上周名次、称号和新小组。**
-- 不做赛季通行证、不做付费货币、不做 52 周预生成。当前新增后端钻石商店（`star` / `ember`），钻石初始 0、不自动发放，正式来源后续接；所有 AI 对手只在当前周、当前小组内生成；过去只保留真实结算过的周。
+- 不做赛季通行证、不做付费货币、不做 52 周预生成。当前后端钻石商店含普通星、季节星、余烬和阶梯仓库上限；新真人钱包初始 1000/1000，超出软上限的部分按小时复利损耗，钻石正式来源后续接；所有 AI 对手只在当前周、当前小组内生成；过去只保留真实结算过的周。
 - 修复资源叫 **余烬（Ember）**，只用于补签，不能买外观、不能交易、不能换数值。
 - AI 的原始锚点只用 WakaTime 的**公开周总量**；对手是 AI 角色，不是那个 WakaTime 用户，UI 始终标明“AI 对手”。
 
@@ -514,9 +514,9 @@ def advance_opponent(opponent, now):
 
 - 奖励是**额外解锁和展示**，不是把已有自由拿走再还。
 - 不提供付费变强，不卖数值；物品/称号只影响展示。
-- 不引入付费货币/付费变强；当前后端钻石商店的星星只影响收藏，余烬仍只修打卡；
-  钻石初始 0，正式来源后续接宿敌/活动奖励，不直接售卖。前端展示由外部程序读取
-  `/v1/me/status`。
+- 不引入付费变强；当前后端钻石商店的命名星只影响收藏，余烬仍只修打卡；
+  新真人钱包初始 1000 钻石/1000 上限，超出部分按小时 1% 复利损耗；正式来源后续接
+  宿敌/活动奖励，不直接售卖。前端展示由外部程序读取 `/v1/me/status`。
 - 不做随机抽奖/开箱；解锁条件确定、可预期。
 - 不用“断连胜扣东西”制造损失厌恶；错过就是错过，补签是可选修复。
 
@@ -549,8 +549,8 @@ def advance_opponent(opponent, now):
 
 - 没有属性加成、没有 XP 加成、没有排名加成。
 - 收藏页显示“已解锁/未解锁”和触发条件；未解锁不显示隐藏概率。
-- 不能交易、不能赠送；外观不能购买。当前新增后端钻石商店（`star` / `ember`），
-  前端展示由外部程序读取 `/v1/me/status`；本阶段不做前端页面。
+- 不能交易、不能赠送；外观不能购买。当前后端钻石商店含命名普通星/季节星、余烬、
+  阶梯仓库上限；前端展示由外部程序读取 `/v1/me/status`；本阶段不做前端页面。
 - 装备变更即时生效，不消耗资源。
 
 ### 6.4 AI 也有称号
@@ -574,9 +574,11 @@ def advance_opponent(opponent, now):
 
 ### 6.6 不做的奖励
 
-- 不做金币、点券、抽卡、通行证、付费轨。当前新增后端钻石商店（`star` / `ember`）：
-  星星 300 钻石、余烬 800 钻石且 72 小时冷却；钻石初始为 0、不自动发放，正式来源
-  后续接宿敌/活动奖励。前端展示由外部程序读取 `/v1/me/status`。
+- 不做金币、点券、抽卡、通行证、付费轨。当前后端钻石商店：普通星 300 钻石/颗
+  （必须命名、每颗独立记录）、季节星 500 钻石/颗（每个自然月最多一颗）、余烬
+  800 钻石且 72 小时冷却、仓库上限 5 级阶梯（500/800/1200/1800/2600）。新真人
+  钱包 1000/1000，超出上限部分按小时 1% 复利损耗，正式来源后续接宿敌/活动奖励。
+  前端展示由外部程序读取 `/v1/me/status`。
 - 不做“连续 30 天送大量资源”的滚雪球。
 - 战力值是派生展示字段（最近四周 XP 百分位，0–2000），不参与排名、分组、升降级或结算；不做称号属性、装备强化。
 - 不做“掉段惩罚性扣除已获得外观”。
@@ -679,13 +681,18 @@ player_items(player_id, item_id, awarded_at, season_id NULL,
              UNIQUE(player_id, item_id))
 loadouts(player_id, title_id, frame_id, backdrop_id, badge_accent_id, updated_at)
 inventory_items(player_id, item_id, quantity, updated_at, PRIMARY KEY(player_id, item_id))
-shop_items(id, name, description, price_diamonds, grant_kind, grant_item_id,
-           grant_quantity, cooldown_seconds, active, sort, created_at, updated_at)
+player_stars(id, player_id, name, kind, season_key, price_diamonds, acquired_at,
+             source, UNIQUE(player_id, season_key))
+shop_items(id, name, description, price_diamonds, grant_kind, kind, grant_item_id,
+           grant_quantity, season_key, required_cap_level, cooldown_seconds,
+           active, sort, created_at, updated_at)
+shop_cap_upgrades(level, price_diamonds, cap_delta, created_at, updated_at)
 shop_purchase_cooldowns(player_id, item_id, last_purchased_at,
                         PRIMARY KEY(player_id, item_id))
 shop_purchase_requests(player_id, request_id, item_id, quantity, result_json,
                        created_at, PRIMARY KEY(player_id, request_id))
-diamond_balance(player_id, balance, updated_at)
+diamond_balance(player_id, balance, diamond_cap, diamond_cap_level,
+                last_decay_at, updated_at)
 diamond_ledger(id, player_id, delta, balance_after, reason, ref_type, ref_id,
                idempotency_key UNIQUE, created_at)
 ```
@@ -697,9 +704,14 @@ diamond_ledger(id, player_id, delta, balance_after, reason, ref_type, ref_id,
 - `checkins` 以 `(player_id, date)` 唯一；补签不能覆盖自然打卡。
 - `ember_ledger.idempotency_key` 唯一；余额只在账本事务里改。
 - `diamond_ledger.idempotency_key` 唯一；`diamond_balance` 只在同一事务里随账本更新。
-  `shop_purchase_requests` 以 `(player_id, request_id)` 唯一，重复请求返回原结果。
+  超出软上限的损耗由钱包读写和 `diamond-decay` job 共用同一纯函数，按完整小时复利；
+  同一小时的损耗 key 幂等。`shop_purchase_requests` 以 `(player_id, request_id)` 唯一，
+  重复请求返回原结果。
 - `inventory_items` 只存 `grant_kind='inventory'` 的商品；`ember` 的数量仍只以
-  `ember_balance.balance` 为真相，不复制进行李栏。`shop_items` 种子幂等，旧库启动自动建表。
+  `ember_balance.balance` 为真相，不复制进行李栏。普通星/季节星同时写
+  `player_stars`；`player_stars` 的 `UNIQUE(player_id, season_key)` 对普通星的
+  `NULL` 不生效，因此普通星可重复购买。`shop_items` / `shop_cap_upgrades` 种子幂等，
+  旧库启动自动建表补列。
 - `group_members` 必须满足：每组 15 人（v1），AI 数 = 15 - 真人数；不允许中途移除 AI。
 - 周中新增真人进入**新组**（当前周、14 个 AI），不通过移除已有 AI 塞进旧组；旧组名单周内不变。
 - 组内排名按 seconds 降序，tie-break 用 `player_id` 升序，保证可复现。
@@ -884,8 +896,10 @@ curl -sS "http://127.0.0.1:8095/v1/me/status" \
 
 - 不写任何 `ghost_league/`、`web/`、`tests/`、`data/` 文件；不执行 reset；不部署；不 commit/push。
 - 不做多用户社交、关注扩展、支付、原生客户端、新外部数据源。
-- 不做 8 周赛季、通行证、交易；当前新增后端钻石商店（`star` / `ember`），钻石初始 0、
-  不自动发放，正式来源后续接入。
+- 不实现周约/赌博代码；未来下注规则只用软上限：超上限不拒绝下注，赢来的超出部分
+  按小时损耗，下注前可提示衰减，玩家可立刻消费或升级仓库保护超出部分。
+- 不做 8 周赛季、通行证、交易；当前后端钻石商店含命名普通星、季节星、余烬和阶梯
+  仓库上限，新真人钱包 1000/1000，正式来源后续接入。
 - 不补造任何过去周；不在加入时预生成未来周。
 - 不改 WakaTime 抓取协议；只做入库前匿名化。
 

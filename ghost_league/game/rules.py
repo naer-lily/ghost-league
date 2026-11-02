@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Final
+from typing import Any, Final
 
 TIERS: Final[tuple[str, ...]] = (
     "Bronze",
@@ -226,6 +226,22 @@ class ShopCooldown(ShopError):
         super().__init__(f"item is on cooldown until {cooldown_until}")
         self.cooldown_until = cooldown_until
         self.detail = f"item is on cooldown until {cooldown_until}"
+
+
+class ShopNotAvailable(ShopError):
+    """A product exists but the player cannot buy it right now.
+
+    ``code`` is stable for API clients; ``extra`` is merged into the error
+    payload (for example the seasonal ``season_key``).
+    """
+
+    code = "not_available"
+
+    def __init__(self, code: str, detail: str, **extra: Any):
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+        self.extra = extra
 
 
 class RepairRejected(GameError):
