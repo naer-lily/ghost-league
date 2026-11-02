@@ -26,6 +26,7 @@ from ..rules import (
     xp_for_seconds,
 )
 from .activity import ActivityMixin
+from .bets import BetsMixin
 from .channel import ChannelMixin
 from .checkins import CheckinsMixin
 from .core import (
@@ -46,6 +47,18 @@ from .power import (
     PowerMixin,
     compute_power_snapshot,
     power_from_percentile,
+)
+from .rival import RivalMixin
+from ..rival import (
+    BetAlreadyPlaced,
+    BetError,
+    BetRejected,
+    BetWindowClosed,
+    RivalError,
+    RivalNotFound,
+    RivalSelectionRejected,
+    RivalUnavailable,
+    RivalWindowClosed,
 )
 from .progression import (
     CATALOG_ITEMS,
@@ -99,12 +112,18 @@ class GameStore(
     SettlementMixin,
     PowerMixin,
     ShopMixin,
+    RivalMixin,
+    BetsMixin,
 ):
     """Transactional access to one ``league.db`` file."""
 
 
 __all__ = [
     "ALGORITHM_VERSION",
+    "BetAlreadyPlaced",
+    "BetError",
+    "BetRejected",
+    "BetWindowClosed",
     "CATALOG_ITEMS",
     "CATALOG_TITLES",
     "CHECKIN_SECONDS",
@@ -143,6 +162,11 @@ __all__ = [
     "GameStore",
     "PlayerNotFound",
     "RepairRejected",
+    "RivalError",
+    "RivalNotFound",
+    "RivalSelectionRejected",
+    "RivalUnavailable",
+    "RivalWindowClosed",
     "ScoreRowLike",
     "WeekLocked",
     "balanced_group_sizes",

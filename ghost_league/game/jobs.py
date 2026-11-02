@@ -135,6 +135,44 @@ def run_diamond_decay(
     }
 
 
+def run_auto_assign_rivals(
+    db_path: str | Path,
+    *,
+    at: datetime | str | None = None,
+) -> dict[str, Any]:
+    """Pair every human without a rival from Tuesday 00:00 onward.
+
+    Running early is a harmless skip, and repeated runs never replace an
+    existing assignment.
+    """
+
+    local_now = cal.parse_datetime(at) if at is not None else cal.now_local()
+    week = cal.week_start(local_now)
+    store = GameStore(Path(db_path))
+    result = store.auto_assign_rivals(week, now=local_now)
+    return {
+        "status": result.get("status", "ok"),
+        **result,
+    }
+
+
+def run_daily_bets(
+    db_path: str | Path,
+    *,
+    at: datetime | str | None = None,
+) -> dict[str, Any]:
+    """Settle today's daily bets at 22:00 local time."""
+
+    local_now = cal.parse_datetime(at) if at is not None else cal.now_local()
+    day = local_now.date()
+    store = GameStore(Path(db_path))
+    result = store.settle_daily_bets(day, now=local_now)
+    return {
+        "status": result.get("status", "settled"),
+        **result,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m ghost_league.game.jobs",
@@ -164,6 +202,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     decay.add_argument("--db", default=str(DEFAULT_DB_PATH))
     decay.add_argument("--at")
+    rival_auto = sub.add_parser(
+        "rival-auto", help="auto-select rivals for humans without one"
+    )
+    rival_auto.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    rival_auto.add_argument("--at")
+    daily_bets = sub.add_parser(
+        "daily-bets", help="settle today's daily bets at 22:00"
+    )
+    daily_bets.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    daily_bets.add_argument("--at")
     return parser
 
 
@@ -185,6 +233,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.command == "diamond-decay":
         result = run_diamond_decay(args.db, at=args.at)
+    elif args.command == "rival-auto":
+        result = run_auto_assign_rivals(args.db, at=args.at)
+    elif args.command == "daily-bets":
+        result = run_daily_bets(args.db, at=args.at)
     else:  # pragma: no cover - argparse rejects unknown subcommands
         parser.error(f"unknown command: {args.command}")
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))

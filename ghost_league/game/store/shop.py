@@ -231,48 +231,75 @@ class ShopMixin:
             raise ValueError("idempotency_key must be non-empty")
         key = idempotency_key or f"diamond-credit:{uuid.uuid4().hex}"
         local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
-        created_at = cal.iso_ts(local_now)
 
         with self.transaction() as conn:
             self._ensure_diamond_owner_with(conn, player_id)
-            prior = self._ledger_by_key_with(conn, key)
-            if prior is not None:
-                self._require_same_ledger(
-                    prior,
-                    player_id=player_id,
-                    delta=int(amount),
-                    reason=reason,
-                    ref_type=ref_type,
-                    ref_id=ref_id,
-                )
-                return self._ledger_result(prior, duplicate=True)
-
-            row = self._sync_diamond_decay_with(
-                conn, player_id, local_now, create_for_unknown=True
-            )
-            balance = 0 if row is None else int(row["balance"])
-            new_balance = balance + int(amount)
-            self._set_diamond_balance_with(
-                conn, player_id, new_balance, created_at
-            )
-            ledger_id = self._insert_diamond_ledger_with(
+            return self._credit_diamonds_with(
                 conn,
                 player_id=player_id,
-                delta=int(amount),
-                balance_after=new_balance,
+                amount=int(amount),
                 reason=reason,
                 ref_type=ref_type,
                 ref_id=ref_id,
                 idempotency_key=key,
-                created_at=created_at,
+                now=local_now,
             )
-            return {
-                "player_id": player_id,
-                "delta": int(amount),
-                "balance": new_balance,
-                "ledger_id": ledger_id,
-                "duplicate": False,
-            }
+
+    def _credit_diamonds_with(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        player_id: str,
+        amount: int,
+        reason: str,
+        ref_type: str | None,
+        ref_id: str | None,
+        idempotency_key: str,
+        now: datetime,
+    ) -> dict[str, Any]:
+        """Credit inside an existing transaction, keyed for idempotency.
+
+        Settlement code (rival rewards, bet payouts) shares a transaction with
+        its own status update, so it must not open a nested transaction.
+        """
+
+        prior = self._ledger_by_key_with(conn, idempotency_key)
+        if prior is not None:
+            self._require_same_ledger(
+                prior,
+                player_id=player_id,
+                delta=int(amount),
+                reason=reason,
+                ref_type=ref_type,
+                ref_id=ref_id,
+            )
+            return self._ledger_result(prior, duplicate=True)
+
+        created_at = cal.iso_ts(now)
+        row = self._sync_diamond_decay_with(
+            conn, player_id, now, create_for_unknown=True
+        )
+        balance = 0 if row is None else int(row["balance"])
+        new_balance = balance + int(amount)
+        self._set_diamond_balance_with(conn, player_id, new_balance, created_at)
+        ledger_id = self._insert_diamond_ledger_with(
+            conn,
+            player_id=player_id,
+            delta=int(amount),
+            balance_after=new_balance,
+            reason=reason,
+            ref_type=ref_type,
+            ref_id=ref_id,
+            idempotency_key=idempotency_key,
+            created_at=created_at,
+        )
+        return {
+            "player_id": player_id,
+            "delta": int(amount),
+            "balance": new_balance,
+            "ledger_id": ledger_id,
+            "duplicate": False,
+        }
 
     def debit_diamonds(
         self,

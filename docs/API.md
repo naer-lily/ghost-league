@@ -26,6 +26,11 @@ Channel token。`/badge/...`、`/embed/...`、`/health` 和 `/avatars/...` 公�
 | POST | `/v1/me/avatar` | 上传头像 |
 | GET | `/avatars/{user_id}` | 读取头像，无鉴权 |
 | GET | `/v1/me/status` | 助理轮询状态快照 |
+| GET | `/v1/me/rival` | 本周宿敌、选择窗口、下注与上次结果 |
+| GET | `/v1/me/rival/candidates` | 可选择的宿敌候选（跨组） |
+| POST | `/v1/me/rival/select` | 手动选择/改选本周宿敌 |
+| GET | `/v1/me/bets` | 本周周注与当天日注 |
+| POST | `/v1/me/bets` | 下注周注或日注 |
 | GET | `/v1/me/stars/{star_id}/svg` | 自己一颗星的独属 SVG |
 | POST | `/v1/me/increments` | 写入真人活动增量 |
 | POST | `/v1/channels/{channel_id}/roster` | Channel 全量周名单 |
@@ -930,14 +935,148 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 - 普通单星是核心 + 光晕 + 4/6/8 条射线；双星/三合星带 1/2 颗伴星和轨道弧线；
   中子星/脉冲星是细核心 + 双向光束；黑洞遗迹是深色核心 + 吸积环。
 
-## 周约/赌博（尚未实现，仅记录规则）
+## 宿敌与下注
 
-本单不实现周约或赌博代码；未来下注接口必须遵守以下约束：
+宿敌是每周一次的跨组配对，只属于真人；它不参与小组排名，也不会改变 `weekly_scores`
+或升降段。周注和日注都要求本周已有宿敌；本金在下注时立即从 `diamond_balance` 扣除，
+中奖通过 `credit_diamonds()` 的同一本账入账。
 
-- 钻石软上限不拒绝超上限下注；扣款后余额仍可高于上限。
-- 结算后赢来的超出部分按每小时 1% 复利损耗，不硬截断。
-- 下注前可以提示“结算后超出部分会衰减”，但不能拒绝下注或偷偷扣掉超出部分。
-- 玩家可以立刻消费或升级仓库上限，让超出部分进入新上限，从而停止衰减。
+### 时间口径（Asia/Shanghai）
+
+- 选宿敌：周一 `00:05` 开放，周一 `23:59:59` 锁定；窗口内可以改选。
+- 自动选：周二 `00:00` 起，为没有宿敌的真人匹配；之后不能改选。没有合适候选时
+  `rival` 为 `null`，不伪造对手。
+- 周注：周一 `23:59:59` 前可下；下一个周一 `00:05` 的 `settle_week()` 结算。
+- 日注：当天 `20:00` 前可下（`now < 20:00`），`20:00` 锁注，`22:00` 结算。
+- 日注按当天 `22:00` 时的打卡 XP 差判定，不使用 23:59 的最终日 XP。
+
+### `GET /v1/me/rival`
+
+返回当前周的实时状态：
+
+```json
+{
+  "server_now": "2026-11-02T12:00:00+08:00",
+  "week_start": "2026-11-02",
+  "selection": {
+    "open": true,
+    "locks_at": "2026-11-02T23:59:59+08:00",
+    "auto_select_at": "2026-11-03T00:00:00+08:00",
+    "mode": null
+  },
+  "me": {
+    "user_id": "owner",
+    "display_name": "You",
+    "avatar_url": null,
+    "group_no": 1,
+    "tier": "Bronze",
+    "power": 679,
+    "week_xp": 150,
+    "today_xp": 150
+  },
+  "rival": null,
+  "result": null,
+  "bets": {"weekly": null, "daily": null},
+  "bet_windows": {
+    "weekly_locks_at": "2026-11-02T23:59:59+08:00",
+    "daily_locks_at": "2026-11-02T20:00:00+08:00",
+    "daily_settles_at": "2026-11-02T22:00:00+08:00"
+  }
+}
+```
+
+- `selection.open` 只在周一 `00:05–23:59:59` 且没有已锁定 assignment 时为 `true`。
+- `selection.mode` 为 `manual` / `auto` / `null`。
+- `me` / `rival` 只含公开字段；不返回 `kind`、`is_ai`、钱包或钻石余额。
+- `result` 是最近一次已结算宿敌结果（`outcome`、`my_xp`、`rival_xp`、
+  `reward_diamonds`、`settled_at`），没有则为 `null`。
+
+### `GET /v1/me/rival/candidates`
+
+```json
+{
+  "week_start": "2026-11-02",
+  "selection_open": true,
+  "candidates": [
+    {
+      "user_id": "ch-...",
+      "display_name": "AI-1234ABCD",
+      "avatar_url": null,
+      "group_no": 3,
+      "tier": "Bronze",
+      "power": 980,
+      "week_xp": 760,
+      "today_xp": 120
+    }
+  ]
+}
+```
+
+候选必须 active、不是自己、与自己在不同小组、本周有 `weekly_scores` 行。默认按与
+自己的战力差从小到大排序；界面可再过滤“略高于我”。每个候选只出现一次，响应不含
+`kind`、`is_ai`、钱包或钻石。
+
+### `POST /v1/me/rival/select`
+
+```json
+{"rival_id": "ch-...", "request_id": "select-20261102"}
+```
+
+- 仅周一窗口内可调用；窗口关闭或已锁定返回 `409`。
+- 候选不存在（含同组、已无本周分数）返回 `404`；选择自己返回 `422`。
+- 成功返回与 `GET /v1/me/rival` 相同的结构；窗口内重复调用可改选。
+
+### `GET /v1/me/bets`
+
+```json
+{
+  "server_now": "2026-11-02T12:00:00+08:00",
+  "week_start": "2026-11-02",
+  "day": "2026-11-02",
+  "bets": {"weekly": null, "daily": null},
+  "bet_windows": {
+    "weekly_locks_at": "2026-11-02T23:59:59+08:00",
+    "daily_locks_at": "2026-11-02T20:00:00+08:00",
+    "daily_settles_at": "2026-11-02T22:00:00+08:00"
+  }
+}
+```
+
+### `POST /v1/me/bets`
+
+周注：
+
+```json
+{"kind": "weekly", "stake": 20, "request_id": "weekly-20261102"}
+```
+
+- `stake` 只能是 `20` / `40` / `60`，`odds` 固定 `2.0`。
+- 赢：总返 `stake * 2`；平：退本金（`status=void`）；输：失去本金。
+
+日注：
+
+```json
+{"kind": "daily", "target_margin": 50, "request_id": "daily-20261102"}
+```
+
+- 固定本金 `20`；`target_margin` 只能是 `50` / `150` / `300`，对应 `odds`
+  `1.5` / `2.5` / `4.0`，中奖总返 `30` / `50` / `80`。
+- 判定：`my_today_xp - rival_today_xp >= target_margin` 为赢，否则输；没有平局退款。
+- 每週/每天只能一笔；重复 `request_id` 返回原下注，不重复扣款。
+- 成功返回 `{"bet": {...}, "state": {...}}`，`state` 与 `GET /v1/me/rival` 同结构。
+
+宿敌周结算：比较本周最终 `weekly_scores.xp`；真人赢 `+120` 钻石，平 `+40`，输 `0`。
+结算和周注都随下一次 `settle_week()` 执行，幂等，重复结算不会重复发钱。
+
+### 下注错误
+
+- `409`：选择/下注窗口关闭、本周/当天已下注、没有宿敌、钻石不足。
+- `404`：候选不存在。
+- `422`：本金、目标差值或请求体不合法。
+- `401`：缺少或错误的 Bearer token。
+
+钻石软上限不拒绝下注；扣款后余额可以高于上限，超出部分继续按每小时 1% 复利衰减。
+
 
 ## 公开用户与社交
 
@@ -972,15 +1111,16 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 | `200` | 成功 |
 | `204` | 删除/取消关注成功，无响应体 |
 | `401` | Bearer token 缺失或错误 |
-| `404` | 资源/用户/webhook/feed 事件不存在，或 Channel roster 未声明该 player |
-| `409` | 幂等键或 `event_id` 被另一个目标占用 |
+| `404` | 资源/用户/webhook/feed 事件不存在、Channel roster 未声明该 player、宿敌候选不存在 |
+| `409` | 幂等键或 `event_id` 被另一个目标占用；宿敌/下注窗口关闭、已下注、无宿敌、钻石不足 |
 | `413` | 头像超过 2MB |
 | `415` | 头像不是 PNG / JPEG / WebP |
-| `422` | 请求体校验失败、未来时间、资料名不合法、业务规则拒绝 |
+| `422` | 请求体校验失败、未来时间、资料名不合法、宿敌/下注参数或业务规则拒绝 |
 
 ## 边界
 
-- 没有全员列表、没有跨组查询、没有账号管理 HTTP 接口；管理走 CLI。
+- 没有全员列表、没有通用跨组查询、没有账号管理 HTTP 接口；管理走 CLI。宿敌候选是
+  唯一按跨组规则返回的受限列表，且只含公开字段。
 - `/v1/league/standings` 只暴露自己的小组。
 - 不暴露未来周或内部投影参数。
 - `GET /health` 与 `GET /avatars/{user_id}` 无鉴权；生产环境只应通过 HTTPS 反向代理暴露。

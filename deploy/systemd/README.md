@@ -15,6 +15,12 @@
   `python3 -m waka_channel.cli sync-roster`，发送本周全量名单。
 - `ghost-league-settle.timer`：`Mon 00:05`，`Persistent=true`；执行
   `python3 -m ghost_league.game.jobs settle`，只结算上一个本地周，不预建下一周。
+  该次结算同时写入宿敌结果、发放宿敌奖励并结算周注。
+- `ghost-league-rival-auto.timer`：`Tue 00:00`，`Persistent=true`；执行
+  `python3 -m ghost_league.game.jobs rival-auto`，为周一没有选宿敌的真人自动匹配，
+  同一周重复运行不会改选。
+- `ghost-league-daily-bets.timer`：每天 `22:00`，`Persistent=true`；执行
+  `python3 -m ghost_league.game.jobs daily-bets`，按当天 22:00 的打卡 XP 结算日注。
 - `ghost-league-power.timer`：每小时第 5 分钟，`Persistent=true`；执行
   `python3 -m ghost_league.game.jobs power`，刷新当前战力，不写周历史。
 - `ghost-league-waka-tick.timer`：每小时第 1 分钟，`Persistent=true`；执行
@@ -53,12 +59,22 @@ sudo install -m 0644 deploy/systemd/ghost-league-power.service \
   /etc/systemd/system/ghost-league-power.service
 sudo install -m 0644 deploy/systemd/ghost-league-power.timer \
   /etc/systemd/system/ghost-league-power.timer
+sudo install -m 0644 deploy/systemd/ghost-league-rival-auto.service \
+  /etc/systemd/system/ghost-league-rival-auto.service
+sudo install -m 0644 deploy/systemd/ghost-league-rival-auto.timer \
+  /etc/systemd/system/ghost-league-rival-auto.timer
+sudo install -m 0644 deploy/systemd/ghost-league-daily-bets.service \
+  /etc/systemd/system/ghost-league-daily-bets.service
+sudo install -m 0644 deploy/systemd/ghost-league-daily-bets.timer \
+  /etc/systemd/system/ghost-league-daily-bets.timer
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now \
   ghost-league-source-fetch.timer \
   ghost-league-waka-roster.timer \
   ghost-league-settle.timer \
+  ghost-league-rival-auto.timer \
+  ghost-league-daily-bets.timer \
   ghost-league-waka-tick.timer \
   ghost-league-power.timer
 ```
@@ -71,11 +87,15 @@ systemctl status \
   ghost-league-source-fetch.timer \
   ghost-league-waka-roster.timer \
   ghost-league-settle.timer \
+  ghost-league-rival-auto.timer \
+  ghost-league-daily-bets.timer \
   ghost-league-waka-tick.timer \
   ghost-league-power.timer
 journalctl -u ghost-league-source-fetch.service \
   -u ghost-league-waka-roster.service \
   -u ghost-league-settle.service \
+  -u ghost-league-rival-auto.service \
+  -u ghost-league-daily-bets.service \
   -u ghost-league-waka-tick.service \
   -u ghost-league-power.service
 ```
@@ -90,6 +110,8 @@ python3 -m waka_channel.cli sync-roster
 python3 -m waka_channel.cli tick
 python3 -m waka_channel.cli tick --week-start 2026-10-26 --at 2026-10-28T16:00:00+08:00
 python3 -m ghost_league.game.jobs settle
+python3 -m ghost_league.game.jobs rival-auto
+python3 -m ghost_league.game.jobs daily-bets
 ```
 
 `source_fetch.py` 输出包含 `row_count`、`pages`、`source_week_start`、`fetched_at` 和
@@ -222,6 +244,70 @@ Description=Ghost League WakaChannel hourly tick timer
 OnCalendar=*-*-* *:01:00
 Persistent=true
 Unit=ghost-league-waka-tick.service
+
+[Install]
+WantedBy=timers.target
+```
+
+### `ghost-league-rival-auto.service`
+
+```ini
+[Unit]
+Description=Ghost League rival auto-selection
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/ghost-league
+ExecStart=/usr/bin/python3 -m ghost_league.game.jobs rival-auto
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+```
+
+### `ghost-league-rival-auto.timer`
+
+```ini
+[Unit]
+Description=Ghost League rival auto-selection timer
+
+[Timer]
+OnCalendar=Tue *-*-* 00:00:00
+Persistent=true
+Unit=ghost-league-rival-auto.service
+
+[Install]
+WantedBy=timers.target
+```
+
+### `ghost-league-daily-bets.service`
+
+```ini
+[Unit]
+Description=Ghost League daily bet settlement
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/ghost-league
+ExecStart=/usr/bin/python3 -m ghost_league.game.jobs daily-bets
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+```
+
+### `ghost-league-daily-bets.timer`
+
+```ini
+[Unit]
+Description=Ghost League daily bet settlement timer
+
+[Timer]
+OnCalendar=*-*-* 22:00:00
+Persistent=true
+Unit=ghost-league-daily-bets.service
 
 [Install]
 WantedBy=timers.target

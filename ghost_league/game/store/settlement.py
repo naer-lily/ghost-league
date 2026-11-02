@@ -217,6 +217,12 @@ class SettlementMixin:
                 self._sync_weekly_feed_with(
                     conn, week_iso, now=local_now
                 )
+                rivals = self.settle_rivals(  # type: ignore[attr-defined]
+                    week_date, now=local_now, conn=conn
+                )
+                weekly_bets = self.settle_weekly_bets(  # type: ignore[attr-defined]
+                    week_date, now=local_now, conn=conn
+                )
                 results = conn.execute(
                     "SELECT * FROM weekly_results WHERE week_start = ? "
                     "ORDER BY group_id, rank",
@@ -233,6 +239,8 @@ class SettlementMixin:
                         }
                         for row in results
                     ],
+                    "rivals": rivals,
+                    "weekly_bets": weekly_bets,
                 }
 
             groups = conn.execute(
@@ -241,10 +249,20 @@ class SettlementMixin:
             ).fetchall()
             if not groups:
                 # No real group exists: return empty without fabricating a week.
+                # Rival/bet rows are still settled idempotently so a week with
+                # score rows but no group does not leave money stuck.
+                rivals = self.settle_rivals(  # type: ignore[attr-defined]
+                    week_date, now=local_now, conn=conn
+                )
+                weekly_bets = self.settle_weekly_bets(  # type: ignore[attr-defined]
+                    week_date, now=local_now, conn=conn
+                )
                 return {
                     "week_start": week_iso,
                     "already_settled": False,
                     "results": [],
+                    "rivals": rivals,
+                    "weekly_bets": weekly_bets,
                 }
             self._ensure_week_with(conn, week_iso, "locked")
 
@@ -364,10 +382,18 @@ class SettlementMixin:
             self._sync_weekly_feed_with(
                 conn, week_iso, now=local_now
             )
+            rivals = self.settle_rivals(  # type: ignore[attr-defined]
+                week_date, now=local_now, conn=conn
+            )
+            weekly_bets = self.settle_weekly_bets(  # type: ignore[attr-defined]
+                week_date, now=local_now, conn=conn
+            )
             return {
                 "week_start": week_iso,
                 "already_settled": False,
                 "results": results,
+                "rivals": rivals,
+                "weekly_bets": weekly_bets,
             }
 
 

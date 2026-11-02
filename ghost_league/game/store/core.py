@@ -428,6 +428,55 @@ CREATE TABLE IF NOT EXISTS diamond_ledger (
 );
 CREATE INDEX IF NOT EXISTS idx_diamond_ledger_player
     ON diamond_ledger (player_id, id);
+
+CREATE TABLE IF NOT EXISTS rival_assignments (
+    week_start TEXT NOT NULL,
+    player_id TEXT NOT NULL,
+    rival_id TEXT NOT NULL,
+    selection_mode TEXT NOT NULL CHECK (selection_mode IN ('manual', 'auto')),
+    selected_at TEXT NOT NULL,
+    locked_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (week_start, player_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rival_assignments_rival
+    ON rival_assignments (week_start, rival_id);
+
+CREATE TABLE IF NOT EXISTS rival_results (
+    week_start TEXT NOT NULL,
+    player_id TEXT NOT NULL,
+    rival_id TEXT NOT NULL,
+    my_xp INTEGER NOT NULL,
+    rival_xp INTEGER NOT NULL,
+    outcome TEXT NOT NULL CHECK (outcome IN ('win', 'loss', 'draw')),
+    reward_diamonds INTEGER NOT NULL DEFAULT 0,
+    settled_at TEXT NOT NULL,
+    PRIMARY KEY (week_start, player_id)
+);
+
+CREATE TABLE IF NOT EXISTS bets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('weekly', 'daily')),
+    period_key TEXT NOT NULL,
+    rival_id TEXT NOT NULL,
+    stake INTEGER NOT NULL CHECK (stake >= 0),
+    target_margin INTEGER NOT NULL DEFAULT 0,
+    odds REAL NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('placed', 'won', 'lost', 'void')),
+    placed_at TEXT NOT NULL,
+    locked_at TEXT,
+    settled_at TEXT,
+    payout INTEGER NOT NULL DEFAULT 0,
+    result_diff INTEGER,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    UNIQUE (player_id, kind, period_key)
+);
+CREATE INDEX IF NOT EXISTS idx_bets_player_kind_period
+    ON bets (player_id, kind, period_key);
+CREATE INDEX IF NOT EXISTS idx_bets_kind_period_status
+    ON bets (kind, period_key, status);
 """
 
 _TABLE_NAMES = (
@@ -467,6 +516,9 @@ _TABLE_NAMES = (
     "shop_purchase_requests",
     "diamond_balance",
     "diamond_ledger",
+    "rival_assignments",
+    "rival_results",
+    "bets",
 )
 
 

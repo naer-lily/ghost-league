@@ -34,6 +34,15 @@ from .badge import render_badge, render_embed
 from .game import calendar as cal
 from .game.feed import FEED_EMOJIS
 from .game.roster import ensure_all_groups
+from .game.rival import (
+    BetAlreadyPlaced,
+    BetRejected,
+    BetWindowClosed,
+    RivalNotFound,
+    RivalSelectionRejected,
+    RivalUnavailable,
+    RivalWindowClosed,
+)
 from .game.star_svg import render_star_svg
 from .game.rules import (
     CHECKIN_XP,
@@ -142,6 +151,22 @@ class LoadoutPatchRequest(BaseModel):
     frame_id: str | None = None
     backdrop_id: str | None = None
     badge_accent_id: str | None = None
+
+
+class RivalSelectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rival_id: str = Field(min_length=1, max_length=200)
+    request_id: str = Field(min_length=1, max_length=200)
+
+
+class BetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["weekly", "daily"]
+    stake: int | None = Field(default=None, strict=True)
+    target_margin: int | None = Field(default=None, strict=True)
+    request_id: str = Field(min_length=1, max_length=200)
 
 
 class FeedReactionRequest(BaseModel):
@@ -826,6 +851,103 @@ class GameService:
 
     def standings_for(self, account: dict[str, Any]) -> dict[str, Any]:
         return self.league_for(account)
+
+    # -- rival / bets --------------------------------------------------
+    def _attach_rival_avatar(self, payload: dict[str, Any] | None) -> dict[str, Any] | None:
+        if payload is None:
+            return None
+        player_id = str(payload.get("user_id") or "")
+        player = None
+        if player_id:
+            try:
+                player = self.store.get_player(player_id)  # type: ignore[union-attr]
+            except GameError:
+                player = None
+        payload["avatar_url"] = self._avatar_for_player(
+            player_id,
+            is_ai=bool(player is not None and str(player["kind"]) == "ai"),
+        )
+        return payload
+
+    def _rival_payload(
+        self, account: dict[str, Any], now: datetime, week: date
+    ) -> dict[str, Any]:
+        assert self.store is not None
+        state = self.store.rival_state(str(account["user_id"]), now=now)
+        state["server_now"] = _iso(now)
+        self._attach_rival_avatar(state.get("me"))
+        self._attach_rival_avatar(state.get("rival"))
+        return state
+
+    def rival_for(self, account: dict[str, Any]) -> dict[str, Any]:
+        now, week = self._prepare_read(account)
+        return self._rival_payload(account, now, week)
+
+    def rival_candidates_for(self, account: dict[str, Any]) -> dict[str, Any]:
+        now, week = self._prepare_read(account)
+        assert self.store is not None
+        state = self._rival_payload(account, now, week)
+        candidates = self.store.rival_candidates(
+            str(account["user_id"]), now=now
+        )
+        for candidate in candidates:
+            self._attach_rival_avatar(candidate)
+        return {
+            "server_now": _iso(now),
+            "week_start": state["week_start"],
+            "selection_open": bool(state["selection"]["open"]),
+            "candidates": candidates,
+        }
+
+    def select_rival_for(
+        self,
+        account: dict[str, Any],
+        *,
+        rival_id: str,
+        request_id: str,
+    ) -> dict[str, Any]:
+        now, week = self._prepare_read(account)
+        assert self.store is not None
+        self.store.select_rival(
+            str(account["user_id"]),
+            rival_id,
+            now=now,
+            request_id=request_id,
+        )
+        return self._rival_payload(account, now, week)
+
+    def bets_for(self, account: dict[str, Any]) -> dict[str, Any]:
+        now, week = self._prepare_read(account)
+        state = self._rival_payload(account, now, week)
+        return {
+            "server_now": state["server_now"],
+            "week_start": state["week_start"],
+            "day": now.date().isoformat(),
+            "bets": state["bets"],
+            "bet_windows": state["bet_windows"],
+        }
+
+    def place_bet_for(
+        self,
+        account: dict[str, Any],
+        *,
+        kind: str,
+        stake: int | None,
+        target_margin: int | None,
+        request_id: str,
+    ) -> dict[str, Any]:
+        now, week = self._prepare_read(account)
+        assert self.store is not None
+        bet = self.store.place_bet(
+            str(account["user_id"]),
+            kind,
+            stake=stake,
+            target_margin=target_margin,
+            now=now,
+            request_id=request_id,
+        )
+        state = self._rival_payload(account, now, week)
+        return {"bet": bet, "state": state}
 
     def feed_for(self, account: dict[str, Any], *, limit: int = 20) -> dict[str, Any]:
         now, week = self._prepare_read(account)
@@ -1744,6 +1866,46 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc))
         raise exc
 
+    def rival_error_response(exc: Exception) -> Response:
+        """Map rival/bet failures to the documented player-facing codes."""
+
+        if isinstance(exc, RivalNotFound):
+            raise HTTPException(status_code=404, detail="候选不存在")
+        if isinstance(
+            exc,
+            (
+                RivalWindowClosed,
+                BetWindowClosed,
+                BetAlreadyPlaced,
+                RivalUnavailable,
+            ),
+        ):
+            raise HTTPException(status_code=409, detail=str(exc))
+        if isinstance(exc, InsufficientDiamonds):
+            detail = {
+                "code": exc.code,
+                "message": "钻石不足",
+                "balance": exc.balance,
+            }
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": detail,
+                    "code": exc.code,
+                    "message": "钻石不足",
+                    "balance": exc.balance,
+                },
+            )
+        if isinstance(exc, DuplicateIdempotencyKey):
+            raise HTTPException(status_code=409, detail="请求已处理")
+        if isinstance(exc, (RivalSelectionRejected, BetRejected)):
+            detail = {"code": exc.code, "message": str(exc)}
+            return JSONResponse(
+                status_code=422,
+                content={"detail": detail, **detail},
+            )
+        raise exc
+
     @app.get("/health", response_model=HealthResponse)
     def health() -> dict[str, Any]:
         service.initialize()
@@ -1844,6 +2006,62 @@ def create_app(
     @app.get("/v1/me/status")
     def status_snapshot(account: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         return service.status_for(account)
+
+    @app.get("/v1/me/rival")
+    def me_rival(account: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return service.rival_for(account)
+
+    @app.get("/v1/me/rival/candidates")
+    def rival_candidates(account: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return service.rival_candidates_for(account)
+
+    @app.post("/v1/me/rival/select")
+    def select_rival(
+        request: RivalSelectRequest,
+        account: dict[str, Any] = Depends(auth),
+    ) -> dict[str, Any]:
+        try:
+            return service.select_rival_for(
+                account,
+                rival_id=request.rival_id,
+                request_id=request.request_id,
+            )
+        except (
+            RivalNotFound,
+            RivalSelectionRejected,
+            RivalWindowClosed,
+            DuplicateIdempotencyKey,
+            GameError,
+        ) as exc:
+            return rival_error_response(exc)
+
+    @app.get("/v1/me/bets")
+    def me_bets(account: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return service.bets_for(account)
+
+    @app.post("/v1/me/bets")
+    def place_bet(
+        request: BetRequest,
+        account: dict[str, Any] = Depends(auth),
+    ) -> dict[str, Any]:
+        try:
+            return service.place_bet_for(
+                account,
+                kind=request.kind,
+                stake=request.stake,
+                target_margin=request.target_margin,
+                request_id=request.request_id,
+            )
+        except (
+            BetAlreadyPlaced,
+            BetRejected,
+            BetWindowClosed,
+            InsufficientDiamonds,
+            RivalUnavailable,
+            DuplicateIdempotencyKey,
+            GameError,
+        ) as exc:
+            return rival_error_response(exc)
 
     @app.post("/v1/me/increments")
     def increments(
