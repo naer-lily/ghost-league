@@ -1,7 +1,7 @@
 import { Clock3, Diamond, Trophy } from 'lucide-react'
 import { useState } from 'react'
 import { useBets } from '../api/queries'
-import type { Bet, GroupBetOption } from '../api/types'
+import type { GroupMarket, GroupMarketOption } from '../api/types'
 import {
   betReturn,
   betStatusText,
@@ -15,12 +15,9 @@ import { useServerNow } from '../lib/useServerNow'
 import { GroupBetDialog } from './GroupBetDialog'
 import styles from './GroupBetCard.module.css'
 
-interface PlacedGroupBetProps {
-  bet: Bet
-  option: GroupBetOption
-}
-
-function PlacedGroupBet({ bet, option }: PlacedGroupBetProps) {
+function PlacedGroupBet({ option }: { option: GroupMarketOption }) {
+  const bet = option.bet
+  if (!bet) return null
   return (
     <div className={styles.placed} data-testid="group-bet-placed">
       <div className={styles.placedHead}>
@@ -34,13 +31,9 @@ function PlacedGroupBet({ bet, option }: PlacedGroupBetProps) {
         >
           {betStatusText(bet)}
         </span>
-        <span className={styles.placedTitle}>我本人在本组本周排名前三</span>
+        <span className={styles.placedTitle}>{option.label}</span>
       </div>
       <dl className={styles.placedGrid}>
-        <div>
-          <dt>目标名次</dt>
-          <dd>前三</dd>
-        </div>
         <div>
           <dt>赔率</dt>
           <dd>×{formatOdds(bet.odds)}</dd>
@@ -50,53 +43,109 @@ function PlacedGroupBet({ bet, option }: PlacedGroupBetProps) {
           <dd>{formatXp(bet.paid_stake)}</dd>
         </div>
         <div>
-          <dt>免费</dt>
-          <dd>{formatXp(bet.free_stake)}</dd>
-        </div>
-        <div>
-          <dt>总本金</dt>
-          <dd>{formatXp(bet.stake)}</dd>
-        </div>
-        <div>
           <dt>总返</dt>
-          <dd>{formatXp(betReturn(bet.stake, option.odds))}</dd>
+          <dd>{formatXp(betReturn(bet.stake, bet.odds))}</dd>
         </div>
       </dl>
-      <p className={styles.placedCopy}>
-        周期 {bet.period_key} · 周一 23:59:59 截止 · 次周一结算
-      </p>
       {bet.group_rank !== null && bet.group_rank !== undefined ? (
-        <p className={styles.placedCopy}>
-          结算名次：本组第 {bet.group_rank} 名
-        </p>
+        <p className={styles.placedCopy}>结算名次：本组第 {bet.group_rank} 名</p>
       ) : null}
     </div>
   )
 }
 
+function MarketArticle({
+  option,
+  closed,
+  onOpen,
+}: {
+  option: GroupMarketOption
+  closed: boolean
+  onOpen: () => void
+}) {
+  const placed = Boolean(option.bet)
+  const disabled = placed || closed || !option.can_place
+  return (
+    <article
+      className={styles.market}
+      data-testid={`group-market-${option.market}`}
+      data-market={option.market}
+    >
+      <div className={styles.marketHead}>
+        <h3 className={styles.title}>{option.label}</h3>
+        <span
+          className={[
+            styles.chip,
+            betStatusTone(option.bet) === 'placed' ? styles.chipPlaced : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          data-testid={`group-market-status-${option.market}`}
+        >
+          {betStatusText(option.bet)}
+        </span>
+      </div>
+
+      <dl className={styles.stats}>
+        <div>
+          <dt>赔率</dt>
+          <dd data-testid={`group-market-odds-${option.market}`}>
+            {option.odds === null ? '—' : `×${formatOdds(option.odds)}`}
+          </dd>
+        </div>
+        <div>
+          <dt>状态</dt>
+          <dd data-testid={`group-market-taken-${option.market}`}>
+            {placed ? '已下注' : '未下注'}
+          </dd>
+        </div>
+      </dl>
+
+      <PlacedGroupBet option={option} />
+
+      <button
+        type="button"
+        className={styles.button}
+        disabled={disabled}
+        data-testid={`group-bet-open-${option.market}`}
+        aria-label={`${option.label}下注`}
+        onClick={onOpen}
+      >
+        <Diamond size={16} aria-hidden="true" />
+        {placed ? '本期已下注' : closed ? '本周已截止' : '下注'}
+      </button>
+    </article>
+  )
+}
+
 /**
- * Personal top-three group bet entry. It lives on the league group board, not
- * on the rival duel card, and only renders when the server provides a group
- * option for this player.
+ * Three independent group markets (`top3` / `promote` / `no_demote`). The
+ * server decides which markets exist for the tier and supplies each odds;
+ * the card only renders them side by side and submits one market per request.
  */
 export function GroupBetCard() {
   const betsQuery = useBets(true)
   const data = betsQuery.data
   const now = useServerNow(data?.server_now, Boolean(data))
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const [activeMarket, setActiveMarket] = useState<GroupMarket | null>(null)
 
   if (!data) return null
 
-  const option = data.bet_options.group
-  if (!option) return null
+  const markets = (
+    data.bets.groups ??
+    data.groups ??
+    data.bet_options.group?.markets ??
+    []
+  ).filter((market) => market.available !== false)
+  if (markets.length === 0) return null
 
-  const bet = data.bets.group
   const closed = groupLocked(data.bet_windows, now)
+  const active = markets.find((item) => item.market === activeMarket) ?? null
 
   return (
     <section
       className={styles.card}
-      aria-labelledby="group-bet-title"
+      aria-label="组注"
       data-testid="group-bet-card"
     >
       <div className={styles.head}>
@@ -104,72 +153,39 @@ export function GroupBetCard() {
           <Trophy size={18} />
         </span>
         <div className={styles.headText}>
-          <h2 id="group-bet-title" className={styles.title}>
-            押我本人在本组本周排名前三
-          </h2>
-          <p className={styles.copy}>
-            只看你自己在本组的本周 XP 排名，小组总 XP 不参与判定。
-          </p>
+          <h2 className="visually-hidden">组注</h2>
         </div>
-        <span className={styles.chip}>组注</span>
       </div>
 
-      <dl className={styles.stats}>
-        <div>
-          <dt>目标名次</dt>
-          <dd data-testid="group-bet-target-rank">
-            前三（第 {option.target_rank} 名内）
-          </dd>
-        </div>
-        <div>
-          <dt>赔率</dt>
-          <dd data-testid="group-bet-card-odds">
-            ×{formatOdds(option.odds)}
-          </dd>
-        </div>
-        <div>
-          <dt>免费本金</dt>
-          <dd>{formatXp(option.free_stake)}</dd>
-        </div>
-        <div>
-          <dt>自付范围</dt>
-          <dd>
-            {option.min_paid_stake}–{option.max_paid_stake} 钻石
-          </dd>
-        </div>
-      </dl>
-
-      {bet ? <PlacedGroupBet bet={bet} option={option} /> : null}
-
-      <div className={styles.actions}>
-        {bet ? null : (
-          <button
-            type="button"
-            className={styles.button}
-            disabled={closed}
-            data-testid="group-bet-open"
-            onClick={() => setDialogOpen(true)}
-          >
-            <Diamond size={16} aria-hidden="true" />
-            {closed ? '本周的注已截止' : '下注组注'}
-          </button>
-        )}
-        <p className={styles.deadline}>
-          <Clock3 size={14} aria-hidden="true" />
-          {closed
-            ? '本周组注已截止'
-            : `周一 23:59:59 截止 · 剩余 ${formatCountdown(data.bet_windows.weekly_locks_at, now)}`}
-        </p>
+      <div className={styles.markets}>
+        {markets.map((option) => (
+          <MarketArticle
+            key={option.market}
+            option={option}
+            closed={closed}
+            onOpen={() => setActiveMarket(option.market)}
+          />
+        ))}
       </div>
 
-      <GroupBetDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        option={option}
-        bet={bet}
-        windows={data.bet_windows}
-        now={now}
-      />
+      <p className={styles.deadline}>
+        <Clock3 size={14} aria-hidden="true" />
+        {closed
+          ? '本周组注已截止'
+          : `周一 23:59:59 截止 · 剩余 ${formatCountdown(data.bet_windows.weekly_locks_at, now)}`}
+      </p>
+
+      {active ? (
+        <GroupBetDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setActiveMarket(null)
+          }}
+          option={active}
+          windows={data.bet_windows}
+          now={now}
+        />
+      ) : null}
     </section>
   )
 }

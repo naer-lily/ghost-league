@@ -8,6 +8,7 @@ import { apiFetch, ApiError } from './client'
 import type {
   BetKind,
   BetsState,
+  GroupMarket,
   Collection,
   FriendsStandings,
   HistoryFeed,
@@ -161,6 +162,7 @@ export interface PlaceBetVariables {
   kind: BetKind
   paidStake: number
   targetMargin?: number
+  market?: GroupMarket
   requestId: string
 }
 
@@ -235,13 +237,21 @@ export function useSelectRival() {
 export function usePlaceBet() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ kind, paidStake, targetMargin, requestId }: PlaceBetVariables) => {
+    mutationFn: ({
+      kind,
+      paidStake,
+      targetMargin,
+      market,
+      requestId,
+    }: PlaceBetVariables) => {
       const body: Record<string, unknown> = {
         kind,
         paid_stake: paidStake,
         request_id: requestId,
       }
-      if (kind !== 'group' && targetMargin !== undefined) {
+      if (kind === 'group') {
+        if (market !== undefined) body.market = market
+      } else if (targetMargin !== undefined) {
         body.target_margin = targetMargin
       }
       return apiFetch<PlaceBetResult>('/v1/me/bets', {
@@ -260,6 +270,9 @@ export function usePlaceBet() {
               weekly: state.bets.weekly,
               daily: state.bets.daily,
               group: state.bets.group,
+              ...(state.bets.groups
+                ? { groups: state.bets.groups }
+                : {}),
               bets: state.bets,
               bet_options: state.bet_options,
               bet_windows: state.bet_windows,

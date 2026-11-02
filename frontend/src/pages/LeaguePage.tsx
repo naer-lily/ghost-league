@@ -77,6 +77,8 @@ export function LeaguePage() {
 
   const view = buildHomeView(home.data)
   const rows = home.data.standings.standings
+  const promotionQuota = home.data.standings.promotion_quota ?? 0
+  const demotionQuota = home.data.standings.demotion_quota ?? 0
   const myId = home.data.profile.user_id
   const followed = friends.data ? friendRows(friends.data.members, myId) : []
   const isFriends = tab === 'friends'
@@ -180,7 +182,12 @@ export function LeaguePage() {
                 </p>
               </div>
             ) : (
-              <StandingList rows={followed} label="好友榜" showPower={false} />
+              <StandingList
+                rows={followed}
+                label="好友榜"
+                showPower={false}
+                onOpenProfile={setProfileId}
+              />
             )
           ) : rows.length === 0 ? (
             <div className={styles.empty}>
@@ -199,7 +206,15 @@ export function LeaguePage() {
               </button>
             </div>
           ) : (
-            <StandingList rows={rows} label="完整小组榜" />
+            <StandingList
+              rows={rows}
+              label="完整小组榜"
+              showZones
+              groupSize={home.data.standings.group_size}
+              promotionQuota={promotionQuota}
+              demotionQuota={demotionQuota}
+              onOpenProfile={setProfileId}
+            />
           )}
         </section>
       )}

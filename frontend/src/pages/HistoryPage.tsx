@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { useHistory } from '../api/queries'
-import type { HistoryItem, HistoryType } from '../api/types'
+import type { GroupMarket, HistoryItem, HistoryType } from '../api/types'
 import { PullToRefresh } from '../components/PullToRefresh'
 import { describeApiError } from '../lib/home'
 import {
@@ -19,6 +19,7 @@ import {
   HISTORY_TYPE_LABELS,
   type HistoryFilter,
 } from '../lib/history'
+import { groupMarketShortLabel } from '../lib/rival'
 import { formatAbsoluteTime, formatRelativeTime } from '../lib/time'
 import { useUiStore } from '../store/useUiStore'
 import styles from './HistoryPage.module.css'
@@ -34,6 +35,10 @@ const TYPE_ICONS: Record<HistoryType, LucideIcon> = {
 
 function HistoryCard({ item }: { item: HistoryItem }) {
   const Icon = TYPE_ICONS[item.type]
+  const marketShort =
+    item.type === 'group_bet' && typeof item.data.market === 'string'
+      ? groupMarketShortLabel(item.data.market as GroupMarket)
+      : null
   return (
     <li
       className={styles.item}
@@ -46,7 +51,12 @@ function HistoryCard({ item }: { item: HistoryItem }) {
       <article className={styles.card}>
         <div className={styles.cardHead}>
           <h2>{item.title}</h2>
-          <span className={styles.typeTag}>{HISTORY_TYPE_LABELS[item.type]}</span>
+          <span
+            className={styles.typeTag}
+            data-testid={marketShort ? 'history-market' : undefined}
+          >
+            {marketShort ?? HISTORY_TYPE_LABELS[item.type]}
+          </span>
         </div>
         <p className={styles.body}>{item.body}</p>
         <div className={styles.timeRow}>

@@ -66,7 +66,14 @@ describe('MePage rework', () => {
     expect(stages[0]).toHaveAttribute('data-state', 'current')
     expect(stages[0]).toHaveAttribute('aria-current', 'step')
     expect(stages[1]).toHaveAttribute('data-state', 'future')
+    expect(stages[1]).toHaveTextContent('白银')
+    expect(stages[2]).toHaveAttribute('data-state', 'fog')
+    expect(stages[2]).toHaveAttribute('data-fogged', 'true')
+    expect(stages[2]).toHaveAccessibleName('未解锁的后续段位')
+    expect(stages[2]).toHaveTextContent('???')
+    expect(stages[2]).not.toHaveTextContent('黄金')
     expect(screen.getByTestId('tier-progress')).toHaveTextContent('第 1 / 10 阶段')
+    expect(screen.getByTestId('tier-progress')).not.toHaveTextContent('黄金')
 
     const week = screen.getByTestId('me-stat-week')
     const today = screen.getByTestId('me-stat-today')
@@ -107,6 +114,26 @@ describe('MePage rework', () => {
       'href',
       '/history',
     )
+  })
+
+  it('shows no fog below the highest tier', async () => {
+    const snapshot = makeSnapshot({
+      profile: { tier: 'Diamond' },
+      status: { tier: 'Diamond' },
+    })
+    vi.stubGlobal('fetch', mockSnapshot(snapshot))
+
+    renderMe()
+
+    await screen.findByTestId('player-header')
+    const stages = screen.getAllByTestId('tier-stage')
+    expect(stages[9]).toHaveAttribute('data-state', 'current')
+    expect(
+      screen.queryAllByTestId('tier-stage').filter(
+        (stage) => stage.getAttribute('data-state') === 'fog',
+      ),
+    ).toHaveLength(0)
+    expect(screen.getByTestId('tier-progress')).toHaveTextContent('已是最高段位')
   })
 
   it('opens the existing settings dialog from the Me menu', async () => {

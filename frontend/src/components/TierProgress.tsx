@@ -8,7 +8,11 @@ interface TierProgressProps {
   iconTheme: string
 }
 
-/** Horizontal promotion ladder; the current tier is the highlighted node. */
+/**
+ * Horizontal promotion ladder. Completed and current tiers stay readable, the
+ * immediate next tier is the nearby preview, and everything further ahead is
+ * fogged with a question mark so later tier names are never revealed.
+ */
 export function TierProgress({ tierKey, iconTheme }: TierProgressProps) {
   const current =
     TIER_STAGES.find((stage) => stage.key === tierKey) ?? TIER_STAGES[0]!
@@ -32,8 +36,10 @@ export function TierProgress({ tierKey, iconTheme }: TierProgressProps) {
 
       <ol className={styles.stages} aria-label="段位阶段">
         {TIER_STAGES.map((stage) => {
-          const state =
-            stage.order < current.order
+          const fogged = stage.order > current.order + 1
+          const state = fogged
+            ? 'fog'
+            : stage.order < current.order
               ? 'complete'
               : stage.order === current.order
                 ? 'current'
@@ -44,18 +50,39 @@ export function TierProgress({ tierKey, iconTheme }: TierProgressProps) {
               className={styles.stage}
               data-state={state}
               data-testid="tier-stage"
+              data-fogged={fogged ? 'true' : 'false'}
               aria-current={state === 'current' ? 'step' : undefined}
-              aria-label={`${stage.label}段位，${state === 'current' ? '当前阶段' : state === 'complete' ? '已完成' : '未到达'}`}
+              aria-label={
+                fogged
+                  ? '未解锁的后续段位'
+                  : `${stage.label}段位，${state === 'current' ? '当前阶段' : state === 'complete' ? '已完成' : '未到达'}`
+              }
             >
               <span className={styles.node} aria-hidden="true">
-                <TierIcon
-                  tier={stage.key}
-                  theme={iconTheme}
-                  size={22}
-                  decorative
-                />
+                {fogged ? (
+                  <>
+                    <span className={styles.fogIcon}>
+                      <TierIcon
+                        tier={stage.key}
+                        theme={iconTheme}
+                        size={22}
+                        decorative
+                      />
+                    </span>
+                    <span className={styles.fogMark}>?</span>
+                  </>
+                ) : (
+                  <TierIcon
+                    tier={stage.key}
+                    theme={iconTheme}
+                    size={22}
+                    decorative
+                  />
+                )}
               </span>
-              <span className={styles.label}>{stage.label}</span>
+              <span className={styles.label}>
+                {fogged ? '???' : stage.label}
+              </span>
             </li>
           )
         })}

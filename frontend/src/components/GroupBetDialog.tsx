@@ -2,7 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { Clock3, Diamond, X } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 import { createRequestId, usePlaceBet } from '../api/queries'
-import type { Bet, BetWindows, GroupBetOption } from '../api/types'
+import type { BetWindows, GroupMarketOption } from '../api/types'
 import {
   betReturn,
   betStatusText,
@@ -18,8 +18,7 @@ import styles from './RivalBetDialog.module.css'
 interface GroupBetDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  option: GroupBetOption
-  bet: Bet | null
+  option: GroupMarketOption
   windows: BetWindows
   now: Date
 }
@@ -28,7 +27,6 @@ export function GroupBetDialog({
   open,
   onOpenChange,
   option,
-  bet,
   windows,
   now,
 }: GroupBetDialogProps) {
@@ -37,24 +35,26 @@ export function GroupBetDialog({
   const paidInputId = useId()
   const placeBet = usePlaceBet()
   const notify = useUiStore((store) => store.notify)
-  const [paidStake, setPaidStake] = useState(option.min_paid_stake)
+  const [paidStake, setPaidStake] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (open) {
       setError(null)
-      setPaidStake(option.min_paid_stake)
+      setPaidStake(0)
     }
-  }, [open, option.min_paid_stake])
+  }, [open])
 
-  const minPaid = option.min_paid_stake
-  const maxPaid = option.max_paid_stake
-  const freeStake = option.free_stake
+  const minPaid = 0
+  const maxPaid = 500
+  const freeStake = 20
   const paid = Math.min(Math.max(paidStake, minPaid), maxPaid)
   const totalStake = freeStake + paid
-  const payout = betReturn(totalStake, option.odds)
+  const odds = option.odds ?? 0
+  const payout = betReturn(totalStake, odds)
   const closed = groupLocked(windows, now)
-  const submitDisabled = Boolean(bet) || closed || placeBet.isPending
+  const bet = option.bet
+  const submitDisabled = Boolean(bet) || closed || !option.can_place || placeBet.isPending
 
   function handleOpenChange(next: boolean) {
     if (!next) {
@@ -75,18 +75,19 @@ export function GroupBetDialog({
     try {
       await placeBet.mutateAsync({
         kind: 'group',
+        market: option.market,
         paidStake: paid,
         requestId: createRequestId(),
       })
       handleOpenChange(false)
-      notify('组注已下。')
+      notify(`${option.label}已下。`)
     } catch (submitError) {
       setError(describeRivalError(submitError))
     }
   }
 
   const submitLabel = bet
-    ? '本周已下注'
+    ? '本期已下注'
     : closed
       ? '本周的注已截止'
       : placeBet.isPending
@@ -102,25 +103,25 @@ export function GroupBetDialog({
           aria-labelledby={titleId}
           aria-describedby={descriptionId}
           data-testid="group-bet-dialog"
+          data-market={option.market}
         >
           <div className={styles.head}>
             <div>
               <Dialog.Title id={titleId} className={styles.title}>
-                组注
+                {option.label}
               </Dialog.Title>
               <Dialog.Description
                 id={descriptionId}
-                className={styles.description}
+                className="visually-hidden"
               >
-                押我本人在本组本周排名前三。只看个人本周 XP 排名，和小组总 XP
-                无关；每注自带 {freeStake} 免费本金。
+                {option.label}，赔率以服务端为准。
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
               <button
                 type="button"
                 className={styles.close}
-                aria-label="关闭组注对话框"
+                aria-label={`关闭${option.label}对话框`}
               >
                 <X size={20} aria-hidden="true" />
               </button>
@@ -128,21 +129,20 @@ export function GroupBetDialog({
           </div>
 
           <div className={styles.panel}>
-            <h3 className={styles.panelTitle}>
-              押「我本人在本组本周排名前三」
-            </h3>
             <div className={styles.summary}>
               <div>
-                <span>目标名次</span>
-                <strong>前三</strong>
-              </div>
-              <div>
                 <span>赔率</span>
-                <strong>×{formatOdds(option.odds)}</strong>
+                <strong data-testid="group-bet-odds">
+                  ×{formatOdds(odds)}
+                </strong>
               </div>
               <div>
                 <span>免费本金</span>
                 <strong>{formatXp(freeStake)}</strong>
+              </div>
+              <div>
+                <span>状态</span>
+                <strong>{bet ? betStatusText(bet) : '未下注'}</strong>
               </div>
             </div>
 
@@ -200,14 +200,8 @@ export function GroupBetDialog({
 
             <div className={styles.summary} data-testid="group-bet-summary">
               <div>
-                <span>目标名次</span>
-                <strong>前三</strong>
-              </div>
-              <div>
-                <span>赔率</span>
-                <strong data-testid="group-bet-odds">
-                  ×{formatOdds(option.odds)}
-                </strong>
+                <span>盘口</span>
+                <strong>{option.label}</strong>
               </div>
               <div>
                 <span>总返</span>
@@ -227,7 +221,8 @@ export function GroupBetDialog({
 
             {bet ? (
               <p className={styles.closed} role="status">
-                本周组注{betStatusText(bet)}，不能重复提交。
+                {option.label}
+                {betStatusText(bet)}，不能重复提交。
               </p>
             ) : null}
 

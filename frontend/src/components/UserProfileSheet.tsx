@@ -24,6 +24,17 @@ function rankLabel(rank: number | null, groupSize: number): string {
   return groupSize > 0 ? `第 ${rank} / ${groupSize} 名` : `第 ${rank} 名`
 }
 
+function comparisonLeader(
+  leader: 'me' | 'them' | 'tie',
+  diff: number,
+  name: string,
+): string {
+  if (leader === 'tie') return '双方持平'
+  return leader === 'me'
+    ? `我领先 ${formatNumber(Math.abs(diff))} XP`
+    : `${name}领先 ${formatNumber(Math.abs(diff))} XP`
+}
+
 export function UserProfileSheet({ userId, onOpenChange }: UserProfileSheetProps) {
   const open = Boolean(userId)
   const profile = useUserProfile(userId)
@@ -163,6 +174,61 @@ export function UserProfileSheet({ userId, onOpenChange }: UserProfileSheetProps
                   </dd>
                 </div>
               </dl>
+
+              {data.comparison ? (
+                <section
+                  className={styles.comparison}
+                  aria-labelledby="profile-comparison-title"
+                  data-testid="profile-comparison"
+                >
+                  <div className={styles.comparisonHead}>
+                    <h3
+                      id="profile-comparison-title"
+                      className={styles.comparisonTitle}
+                    >
+                      我和他的本周对比
+                    </h3>
+                    <span
+                      className={styles.comparisonLeader}
+                      data-testid="profile-comparison-leader"
+                    >
+                      {comparisonLeader(
+                        data.comparison.leader,
+                        data.comparison.xp_diff,
+                        data.display_name,
+                      )}
+                    </span>
+                  </div>
+                  <div className={styles.comparisonGrid}>
+                    <div>
+                      <small>我</small>
+                      <strong data-testid="profile-comparison-me">
+                        {formatNumber(data.comparison.viewer_xp)}
+                      </strong>
+                      <span>XP</span>
+                    </div>
+                    <div>
+                      <small>差值</small>
+                      <strong data-testid="profile-comparison-diff">
+                        {data.comparison.xp_diff > 0
+                          ? '+'
+                          : data.comparison.xp_diff < 0
+                            ? '-'
+                            : ''}
+                        {formatNumber(Math.abs(data.comparison.xp_diff))}
+                      </strong>
+                      <span>XP</span>
+                    </div>
+                    <div>
+                      <small>{data.display_name}</small>
+                      <strong data-testid="profile-comparison-them">
+                        {formatNumber(data.comparison.target_xp)}
+                      </strong>
+                      <span>XP</span>
+                    </div>
+                  </div>
+                </section>
+              ) : null}
 
               {follow.error ? (
                 <p className={styles.error} role="alert">

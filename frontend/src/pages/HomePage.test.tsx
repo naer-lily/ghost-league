@@ -88,6 +88,40 @@ function rivalState(overrides: Partial<RivalState> = {}): RivalState {
   }
 }
 
+const PUBLIC_USER = {
+  user_id: 'ch-rival',
+  display_name: '林间',
+  avatar_url: null,
+  activity_label: '绘画',
+  tier: 'Bronze',
+  group_id: 7,
+  week_start: '2026-10-26',
+  xp: 760,
+  rank: 4,
+  group_size: 15,
+  checkin: 'verified',
+  streak: 2,
+  equipped_title: null,
+  frame: null,
+  backdrop: null,
+  badge_accent: null,
+  is_following: false,
+  following_count: 2,
+  followers_count: 1,
+  comparison: {
+    viewer_id: 'naer-lily',
+    target_id: 'ch-rival',
+    viewer_xp: 524,
+    target_xp: 760,
+    viewer_rank: 10,
+    target_rank: 4,
+    viewer_group_size: 15,
+    target_group_size: 15,
+    xp_diff: -236,
+    leader: 'them',
+  },
+}
+
 function renderHome() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -138,6 +172,7 @@ function mockApi(options: MockOptions = {}) {
         bet_windows: rival.bet_windows,
       })
     }
+    if (url.includes('/v1/users/')) return response(PUBLIC_USER)
     if (url.includes('/v1/me/profile')) return response(snapshot.profile)
     if (url.includes('/v1/me/status')) return response(snapshot.status)
     if (url.includes('/v1/league/standings')) return response(snapshot.standings)
@@ -164,14 +199,22 @@ describe('HomePage rework', () => {
     expect(screen.getByTestId('rival-me-xp')).toHaveTextContent('524 XP')
     expect(screen.getByTestId('rival-rival-xp')).toHaveTextContent('760 XP')
     expect(screen.getByTestId('rival-gap')).toHaveTextContent('落后 236 XP')
-    expect(screen.getByTestId('rival-bet-status-周注')).toHaveTextContent(
-      '周注 · 已下注',
+    expect(screen.getByTestId('rival-bet-status-日注')).toHaveTextContent(
+      '日注 · 未下注',
     )
+    expect(
+      screen.queryByTestId('rival-bet-status-周注'),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByTestId('rival-week-countdown')).not.toBeInTheDocument()
+    expect(screen.getByTestId('rival-daily-countdown')).toBeVisible()
+    expect(card).not.toHaveTextContent('周注')
     expect(screen.getByRole('button', { name: '下注' })).toBeVisible()
     expect(
       screen.queryByTestId('rival-bet-status-组注'),
     ).not.toBeInTheDocument()
     expect(card).not.toHaveTextContent('组注')
+    expect(card).not.toHaveTextContent('今日 +')
+    expect(card).not.toHaveTextContent('战力')
 
     expect(screen.queryByText('小组榜')).not.toBeInTheDocument()
     expect(screen.queryByText(/G01|我的组|组号/)).not.toBeInTheDocument()
@@ -181,7 +224,7 @@ describe('HomePage rework', () => {
     expect(screen.queryByTestId('today-current-tier')).not.toBeInTheDocument()
   })
 
-  it('opens the home bet dialog with only weekly/daily tabs', async () => {
+  it('opens a daily-only bet dialog from the home button', async () => {
     const user = userEvent.setup()
     vi.stubGlobal('fetch', mockApi())
 
@@ -189,18 +232,41 @@ describe('HomePage rework', () => {
 
     await user.click(await screen.findByRole('button', { name: '下注' }))
     const dialog = await screen.findByTestId('rival-bet-dialog')
+    expect(within(dialog).queryByRole('tab')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('tabpanel')).toHaveAttribute(
+      'data-kind',
+      'daily',
+    )
     expect(
-      within(dialog).getByRole('tab', { name: /周注/ }),
+      within(dialog).getByText('押「今天我比宿敌多多少 XP」'),
     ).toBeInTheDocument()
+    expect(within(dialog).getByTestId('rival-target-50')).toBeInTheDocument()
     expect(
-      within(dialog).getByRole('tab', { name: /日注/ }),
-    ).toBeInTheDocument()
-    expect(
-      within(dialog).queryByRole('tab', { name: /组注/ }),
+      within(dialog).queryByText('押「我本周最终 XP 比宿敌高多少」'),
     ).not.toBeInTheDocument()
+    expect(within(dialog).queryByTestId('rival-target-150')).not.toBeInTheDocument()
+  })
+
+  it('opens the rival public profile from the duel avatar and shows the week comparison', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', mockApi())
+
+    renderHome()
+
+    const card = await screen.findByTestId('rival-duel-card')
+    const avatars = within(card).getAllByTestId('rival-avatar-profile')
+    await user.click(avatars[1]!)
+
+    const sheet = await screen.findByTestId('user-profile-sheet')
+    expect(within(sheet).getByTestId('profile-comparison')).toHaveTextContent(
+      '我和他的本周对比',
+    )
     expect(
-      within(dialog).getByText('押「我本周最终 XP 比宿敌高多少」'),
-    ).toBeInTheDocument()
+      within(sheet).getByTestId('profile-comparison-leader'),
+    ).toHaveTextContent('林间领先 236 XP')
+    expect(within(sheet).getByTestId('profile-follow')).toBeVisible()
+    expect(within(sheet).queryByTestId('me-diamonds')).not.toBeInTheDocument()
+    expect(within(sheet).queryByText('720')).not.toBeInTheDocument()
   })
 
   it('shows an inline selection entry when no rival is selected', async () => {

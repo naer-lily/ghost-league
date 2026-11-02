@@ -18,6 +18,7 @@ import { PageError, PageLoading } from '../components/PageState'
 import { RivalBetDialog } from '../components/RivalBetDialog'
 import { RivalCandidatePicker } from '../components/RivalCandidatePicker'
 import { RivalDuelCard } from '../components/RivalDuelCard'
+import { UserProfileSheet } from '../components/UserProfileSheet'
 import { describeApiError } from '../lib/home'
 import {
   describeRivalError,
@@ -140,6 +141,7 @@ export function RivalPage() {
   const notify = useUiStore((state) => state.notify)
   const [showSelection, setShowSelection] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [profileId, setProfileId] = useState<string | null>(null)
 
   const data = rivalQuery.data
   const selectionOpen = Boolean(data?.selection.open)
@@ -215,6 +217,7 @@ export function RivalPage() {
           <RivalDuelCard
             state={data}
             now={now}
+            onOpenProfile={setProfileId}
             onOpenBets={() => setDialogOpen(true)}
           />
 
@@ -227,6 +230,13 @@ export function RivalPage() {
           onOpenChange={setDialogOpen}
           state={data}
           now={now}
+          initialTab="weekly"
+        />
+        <UserProfileSheet
+          userId={profileId}
+          onOpenChange={(open) => {
+            if (!open) setProfileId(null)
+          }}
         />
       </>
     )

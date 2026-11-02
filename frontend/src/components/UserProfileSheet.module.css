@@ -253,3 +253,73 @@
     }
   }
 }
+
+.comparison {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: rgba(13, 23, 28, 0.42);
+}
+
+.comparisonHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.comparisonTitle {
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.comparisonLeader {
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--cyan-soft);
+  color: var(--cyan);
+  font-size: 0.62rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.comparisonGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.comparisonGrid div {
+  min-width: 0;
+  padding: 7px 6px;
+  border-radius: 9px;
+  background: rgba(13, 23, 28, 0.5);
+  text-align: center;
+}
+
+.comparisonGrid small {
+  display: block;
+  overflow: hidden;
+  color: var(--muted-2);
+  font-size: 0.56rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comparisonGrid strong {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 0.86rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.comparisonGrid span {
+  margin-left: 2px;
+  color: var(--muted);
+  font-size: 0.56rem;
+  font-weight: 800;
+}

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
-import type { FeedItem, FriendSummary } from '../api/types'
+import type { FeedItem, FriendSummary, UserSummary } from '../api/types'
 import { makeSnapshot } from '../test/fixtures'
 import { LeaguePage } from './LeaguePage'
 
@@ -37,6 +37,24 @@ function friendSummary(following: boolean): FriendSummary {
     is_following: following,
     following_count: 3,
     followers_count: following ? 1 : 0,
+  }
+}
+
+function publicProfile(following: boolean): UserSummary {
+  return {
+    ...friendSummary(following),
+    comparison: {
+      viewer_id: 'naer-lily',
+      target_id: 'friend-a',
+      viewer_xp: 524,
+      target_xp: 900,
+      viewer_rank: 10,
+      target_rank: 4,
+      viewer_group_size: 15,
+      target_group_size: 15,
+      xp_diff: -376,
+      leader: 'them',
+    },
   }
 }
 
@@ -103,7 +121,7 @@ describe('League feed and public profile', () => {
           })
         }
         if (url.includes('/v1/users/friend-a')) {
-          return response(friendSummary(followed))
+          return response(publicProfile(followed))
         }
         if (url.includes('/v1/me/follows/friend-a')) {
           if (method === 'POST') {
@@ -160,6 +178,19 @@ describe('League feed and public profile', () => {
     expect(within(sheet).getByTestId('profile-following')).toHaveTextContent('3')
     expect(within(sheet).getByTestId('profile-followers')).toHaveTextContent('0')
     expect(within(sheet).queryByText('720')).not.toBeInTheDocument()
+    const comparison = within(sheet).getByTestId('profile-comparison')
+    expect(within(comparison).getByTestId('profile-comparison-me')).toHaveTextContent(
+      '524',
+    )
+    expect(
+      within(comparison).getByTestId('profile-comparison-them'),
+    ).toHaveTextContent('900')
+    expect(
+      within(comparison).getByTestId('profile-comparison-diff'),
+    ).toHaveTextContent('-376')
+    expect(
+      within(comparison).getByTestId('profile-comparison-leader'),
+    ).toHaveTextContent('阿岚领先 376 XP')
 
     const followButton = within(sheet).getByTestId('profile-follow')
     expect(followButton).toHaveAttribute('aria-pressed', 'false')

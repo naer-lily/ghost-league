@@ -263,3 +263,36 @@
     font-size: 0.62rem;
   }
 }
+
+.avatarButton {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.avatarButton:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.zone {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 0.56rem;
+  font-weight: 900;
+  line-height: 1.5;
+  vertical-align: 1px;
+}
+
+.zone[data-zone="promote"] {
+  background: rgba(127, 255, 212, 0.14);
+  color: #7fffd4;
+}
+
+.zone[data-zone="demote"] {
+  background: rgba(255, 157, 157, 0.14);
+  color: #ff9d9d;
+}

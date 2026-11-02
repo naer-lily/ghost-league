@@ -79,22 +79,24 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
   - 周注/日注请求体只发送 `kind`、`target_margin`、`paid_stake`、`request_id`；
     `stake`（`free_stake + paid_stake`）和赔率都由服务端返回，前端只读
     `bet_options` 的 `target_options` 档位与赔率。
-  - 首页显示双方本周 XP/今日增量、对撞条、差距和**周注/日注**状态与下注入口；
-    未选宿敌时直接给内联选择入口。`/rival` 保留为深链，复用同一套
-    `RivalDuelCard` / `RivalCandidatePicker` 组件。
+  - 首页 `RivalDuelCard` 用 `variant="summary"`：只显示双方本周 XP、差距、日注倒计时和
+    日注状态；首页下注按钮固定打开 `onlyKind="daily"` 的 dialog。`/rival` 保留完整卡和
+    周注/日注切换，复用同一套 `RivalDuelCard` / `RivalCandidatePicker` 组件。
 - 小组/好友榜：
   - 小组：`GET /v1/league/standings`
   - 好友：`GET /v1/me/friends/standings`，前端过滤掉自己，只显示已关注的人；
     没有关注时显示空状态，不伪造行。
-  - 组注：`GET /v1/me/bets` 的 `bet_options.group` 与本周 `bets.group`；只在
-    「小组」tab 显示 `GroupBetCard`，文案是“押我本人在本组本周排名前三”。没有小组或
-    `bet_options.group` 为 `null` 时不显示，不伪造。组注 dialog 只输入自付钻石，
-    请求体发送 `{kind: "group", paid_stake, request_id}`。
+  - 组注：`GET /v1/me/bets` 的 `bets.groups`（或 `groups` / `bet_options.group.markets`）
+    按服务端返回的可用盘口渲染 `top3` / `promote` / `no_demote` 三个独立卡片；Bronze
+    不出现“押不降段”，Diamond 不出现“押升段”。只在「小组」tab 显示；没有小组或没有
+    可用盘口时不显示，不伪造。每张卡独立下注，请求体发送
+    `{kind: "group", market, paid_stake, request_id}`。
 - 动态与他人资料：
   - `GET /v1/league/feed?limit=20`：只读 feed，渲染作者、正文、时间、reactions 和 tags；
     不提供自由发帖。
-  - 点击作者头像/名字/卡片读取 `GET /v1/users/{user_id}`，底部显示公开资料卡；不显示
-    他人钻石、下注或私有数据。
+  - 点击动态、榜单或宿敌对比卡的头像读取 `GET /v1/users/{user_id}`，底部显示公开资料卡；
+    查看他人时增加“我和他的本周对比”（双方本周 XP、差值和领先方，数据来自后端
+    `comparison`），看自己时 `comparison=null` 不渲染重复块；不显示他人钻石、下注或私有数据。
   - 「关注 / 已关注」调用 `POST/DELETE /v1/me/follows/{user_id}`；成功后刷新 feed、
     资料卡和好友榜，失败显示真实错误。
 - 历史：
@@ -115,28 +117,31 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
 - **首页**：删除了小组排行榜和小组号展示；今日进度不再显示“第 N 档 X 分钟”。更新标记
   按 `status.last_activity_at` 计算，超过 1 小时不显示“刚刚更新”。顶部没有刷新按钮，
   页面容器支持 touch 下拉刷新（调用真实 refetch）。未选宿敌时显示内联候选；选好后首页
-  直接显示双方对撞条、本周 XP/今日增量、差距和**周注/日注**状态。
+  只显示双方本周 XP、对撞条、差距、日注倒计时和日注状态，下注按钮只进入日注。
 - **周注/日注 dialog**：目标差值只从服务端 `bet_options[tab].target_options` 渲染，
   显示 `+margin XP` 与该档赔率；自付钻石用数字输入 + `0–500` 滑杆，总本金为
   `free_stake + paid_stake`，总返为 `round(stake × 服务端赔率)`。自付 0 合法，默认只
   使用免费 20；周注截止周一 `23:59:59`，日注 `21:00` 锁注、`22:30` 结算。
 - **小组/好友榜**：顶部只有结算倒计时，不显示小组人数。`小组 / 好友 / 动态` 分段切换。
-  好友榜按关注关系读真实数据，排除自己，按 XP 排名，没有关注时给空状态。小组榜下方的
-  `GroupBetCard` 显示个人前三组注（目标名次、赔率、免费 20、押注 0–500 和已下注状态），
-  好友/动态 tab 不显示组注。
-- **动态与他人资料**：动态只来自真实服务端事件；点击卡片打开 `UserProfileSheet`，
-  显示段位、本周 XP、组内排名、连胜、关注/粉丝数。关注或取消关注后立即刷新 feed、
-  资料卡和好友榜；没有动态或关注时给真实空态。
+  好友榜按关注关系读真实数据，排除自己，按 XP 排名，没有关注时给空状态。小组榜使用后端
+  `promotion_quota` / `demotion_quota` 和每行 `promoted` / `demoted`，只给前 N 行标“晋升”、
+  后 N 行标“下降”，按实际组人数计算；好友榜、动态和资料卡不显示这些标识。小组榜下方
+  `GroupBetCard` 并排显示服务端允许的“押前三 / 押升段 / 押不降段”，各自赔率、已下注状态和
+  下注按钮，互不合并；好友/动态 tab 不显示组注。
+- **动态与他人资料**：动态只来自真实服务端事件；点击动态、榜单或宿敌对比卡的头像打开
+  `UserProfileSheet`，显示段位、本周 XP、组内排名、连胜、关注/粉丝数和“我和他的本周对比”。
+  关注或取消关注后立即刷新 feed、资料卡和好友榜；没有动态或关注时给真实空态。
 - **历史**：`历史` tab 打开真实时间线；筛选 chips 单选，`group_bet` 归入「下注」；
   计数随筛选更新；时间同时显示相对时间和绝对日期；无记录时不伪造示例。
 - **物品栏**：页面标题和导航都叫“物品栏”。分类为星星 / 边框 / 称号 / 其他；
   星星分类下保留抽卡、概率、稀有度和独属 SVG，其他分类来自 `collection` 和真实库存。
   每类都有加载、错误和空状态。
-- **我的**：顶部显示钻石和连胜；横向 10 段段位进度条高亮当前阶段；本周 XP、今日 XP、
-  本周排名、当前/最长连胜；物品栏、历史、设置入口。设置和音量从顶栏移到这里，
-  音量在现有 `SettingsDialog` 内；页面支持下拉刷新。
-- **宿敌深链 `/rival`**：三态（选候选 / 已有宿敌 / 锁定空态）与周注/日注 dialog；
-  组注不再出现在宿敌卡或宿敌 dialog，只在 `/league` 的小组 tab。
+- **我的**：顶部显示钻石和连胜；横向 10 段段位进度条高亮当前阶段，已完成的段位正常显示，
+  紧邻的下一段位作为预览保留，再往后的未到达段位用迷雾/问号遮住名称；到达最高段位时不再
+  有迷雾。本周 XP、今日 XP、本周排名、当前/最长连胜；物品栏、历史、设置入口。设置和音量
+  从顶栏移到这里，音量在现有 `SettingsDialog` 内；页面支持下拉刷新。
+- **宿敌深链 `/rival`**：三态（选候选 / 已有宿敌 / 锁定空态）与周注/日注 dialog；周注仍
+  只在宿敌页和日注并列出现。组注不出现在宿敌卡或宿敌 dialog，只在 `/league` 的小组 tab。
 
 ## PWA shell
 
@@ -172,11 +177,12 @@ PYTHONPATH=. pytest -q tests/test_api.py
 PYTHONPATH=. pytest -q tests/test_pwa.py tests/test_pwa_design.py tests/test_pwa_next.py
 ```
 
-前端单测覆盖：首页有/无宿敌、周注/日注状态、真实更新时间、下拉刷新、周注/日注目标档位、
-自付 0/500 与总返、组注卡片（仅小组 tab）、组注 `paid_stake` payload、小组/好友切换和空态、
-动态 tab、作者资料、关注后好友榜更新、历史六类筛选/计数/空态/错误重试、相对与绝对时间、
-物品栏四类、空态与购买、我的横向段位、钻石/连胜、设置入口、导航和顶栏收敛。
-`e2e/home.spec.ts` 用真实 token 在 390×844 与 1440×1000 走一遍首页、周/日注 dialog、无宿敌、
+前端单测覆盖：首页有/无宿敌、首页仅日注状态与日注 dialog、宿敌页保留周注、真实更新时间、
+下拉刷新、周注/日注目标档位、自付 0/500 与总返、15 人小组前 4/后 4 晋升/下降标识、组注三盘口
+独立显示与 `market` payload、小组/好友切换和空态、动态 tab、作者/榜单/对比卡头像资料、
+本周对比与关注后好友榜更新、历史盘口简称与六类筛选、物品栏四类、我的段位迷雾、钻石/连胜、
+设置入口、导航和顶栏收敛。
+`e2e/home.spec.ts` 用真实 token 在 390×844 与 1440×1000 走一遍首页、日注 dialog、无宿敌、
 下拉刷新、小组组注与好友榜、无组注空态、物品栏分类、我的与设置，并把截图写到
 `artifacts/ghost-ui-group1/`。历史与动态/关注走查截图在 `artifacts/ghost-history-feed/`。
 

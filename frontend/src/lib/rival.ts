@@ -1,5 +1,11 @@
 import { ApiError } from '../api/client'
-import type { Bet, BetKind, BetWindows, RivalOutcome } from '../api/types'
+import type {
+  Bet,
+  BetKind,
+  BetWindows,
+  GroupMarket,
+  RivalOutcome,
+} from '../api/types'
 
 const numberFormat = new Intl.NumberFormat('zh-CN')
 
@@ -117,10 +123,48 @@ export function betStatusTone(
   return bet.status === 'placed' ? 'placed' : 'settled'
 }
 
-export function betKindLabel(kind: BetKind): string {
+export const GROUP_MARKETS: readonly GroupMarket[] = [
+  'top3',
+  'promote',
+  'no_demote',
+]
+
+export const GROUP_MARKET_LABELS: Record<GroupMarket, string> = {
+  top3: '押前三',
+  promote: '押升段',
+  no_demote: '押不降段',
+}
+
+export const GROUP_MARKET_SHORT_LABELS: Record<GroupMarket, string> = {
+  top3: '前三',
+  promote: '升段',
+  no_demote: '不降段',
+}
+
+export function groupMarketLabel(
+  market: GroupMarket | null | undefined,
+): string | null {
+  if (!market) return null
+  return GROUP_MARKET_LABELS[market] ?? null
+}
+
+/** Compact market tag used by bet cards and the history timeline. */
+export function groupMarketShortLabel(
+  market: GroupMarket | null | undefined,
+): string | null {
+  if (!market) return null
+  return GROUP_MARKET_SHORT_LABELS[market] ?? null
+}
+
+export function betKindLabel(kind: BetKind, market?: GroupMarket | null): string {
   if (kind === 'weekly') return '周注'
   if (kind === 'daily') return '日注'
-  return '组注'
+  return groupMarketLabel(market) ?? '组注'
+}
+
+export function betMarketShortLabel(bet: Bet | null | undefined): string | null {
+  if (!bet || bet.kind !== 'group') return null
+  return groupMarketShortLabel(bet.market)
 }
 
 export function betPeriodLabel(bet: Bet): string {
@@ -175,6 +219,7 @@ export function describeRivalError(error: unknown): string {
   if (code === 'already_placed') return '本期已经下过注了，下个周期再来。'
   if (code === 'no_rival') return '本周还没有宿敌，暂时不能下注。'
   if (code === 'insufficient_diamonds') return '钻石不足，先补足自付部分再下注。'
+  if (code === 'market_unavailable') return '当前段位不能下这个盘口。'
   if (error.status === 409 || error.status === 422) {
     return error.message || '这个操作现在不能完成，请刷新后再试。'
   }

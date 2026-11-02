@@ -1,5 +1,6 @@
 import type {
   BetOptions,
+  GroupMarketOption,
   HomeSnapshot,
   Profile,
   StandingRow,
@@ -7,6 +8,55 @@ import type {
   Star,
   Status,
 } from '../api/types'
+
+export function makeGroupMarkets(
+  overrides: Partial<Record<GroupMarketOption['market'], Partial<GroupMarketOption>>> = {},
+): GroupMarketOption[] {
+  const base: GroupMarketOption[] = [
+    {
+      market: 'top3',
+      label: '押前三',
+      available: true,
+      can_place: true,
+      reason: null,
+      target_rank: 3,
+      promotion_quota: 4,
+      demotion_quota: 4,
+      odds: 5.13,
+      status: 'open',
+      bet: null,
+    },
+    {
+      market: 'promote',
+      label: '押升段',
+      available: true,
+      can_place: true,
+      reason: null,
+      target_rank: 4,
+      promotion_quota: 4,
+      demotion_quota: 4,
+      odds: 4.19,
+      status: 'open',
+      bet: null,
+    },
+    {
+      market: 'no_demote',
+      label: '押不降段',
+      available: true,
+      can_place: true,
+      reason: null,
+      target_rank: 12,
+      promotion_quota: 4,
+      demotion_quota: 4,
+      odds: 1.62,
+      status: 'open',
+      bet: null,
+    },
+  ]
+  return base
+    .filter((entry) => overrides[entry.market] !== null)
+    .map((entry) => ({ ...entry, ...(overrides[entry.market] ?? {}) }))
+}
 
 export function makeBetOptions(
   overrides: Partial<BetOptions> = {},
@@ -46,7 +96,8 @@ export function makeBetOptions(
       min_paid_stake: 0,
       max_paid_stake: 500,
       free_stake: 20,
-      odds: 2,
+      odds: 5.13,
+      markets: makeGroupMarkets(),
     },
     ...overrides,
   }
@@ -177,7 +228,7 @@ function row(
 }
 
 export function makeStandings(overrides: Partial<Standings> = {}): Standings {
-  return {
+  const base: Standings = {
     week_start: '2026-10-26',
     group: {
       id: 1,
@@ -188,6 +239,8 @@ export function makeStandings(overrides: Partial<Standings> = {}): Standings {
     },
     group_id: 1,
     group_size: 15,
+    promotion_quota: 4,
+    demotion_quota: 4,
     me: { rank: 10, xp: 524 },
     standings: [
       row(1, 'ch-xkein', '@Xkein', 8019),
@@ -206,7 +259,25 @@ export function makeStandings(overrides: Partial<Standings> = {}): Standings {
       row(14, 'ch-qdmxy', 'qdmxy', 182, false, null, 1),
       row(15, 'ch-ao', '@aoaostar', 59, false, null, 0, null),
     ],
+  }
+  const group = 'group' in overrides ? overrides.group : base.group
+  const groupSize =
+    overrides.group_size ?? group?.size ?? base.group_size
+  const tier = group?.tier ?? 'Bronze'
+  const quota = Math.max(1, Math.floor((groupSize * 3) / 10))
+  const rows = (overrides.standings ?? base.standings).map((entry) => ({
+    ...entry,
+    promoted: tier !== 'Diamond' && entry.rank <= quota,
+    demoted: tier !== 'Bronze' && entry.rank > groupSize - quota,
+  }))
+  return {
+    ...base,
     ...overrides,
+    group,
+    group_size: groupSize,
+    promotion_quota: quota,
+    demotion_quota: quota,
+    standings: rows,
   }
 }
 

@@ -138,8 +138,10 @@ for (const viewport of VIEWPORTS) {
     const rivalCard = page.getByTestId('rival-duel-card')
     if (await rivalCard.count()) {
       await expect(rivalCard).toBeVisible()
-      await expect(page.getByTestId('rival-bet-status-周注')).toBeVisible()
       await expect(page.getByTestId('rival-bet-status-日注')).toBeVisible()
+      await expect(page.getByTestId('rival-bet-status-周注')).toHaveCount(0)
+      await expect(page.getByTestId('rival-week-countdown')).toHaveCount(0)
+      await expect(page.getByTestId('rival-daily-countdown')).toBeVisible()
       await expect(page.getByTestId('rival-bet-status-组注')).toHaveCount(0)
       await expect(rivalCard).not.toContainText('组注')
       const openBets = page.getByRole('button', { name: '下注' })
@@ -147,12 +149,12 @@ for (const viewport of VIEWPORTS) {
       await openBets.click()
       const betDialog = page.getByTestId('rival-bet-dialog')
       await expect(betDialog).toBeVisible()
-      await expect(betDialog.getByRole('tab', { name: /周注/ })).toBeVisible()
-      await expect(betDialog.getByRole('tab', { name: /日注/ })).toBeVisible()
-      await expect(betDialog.getByRole('tab', { name: /组注/ })).toHaveCount(0)
+      await expect(betDialog.getByRole('tab')).toHaveCount(0)
       await expect(
-        betDialog.getByText('押「我本周最终 XP 比宿敌高多少」'),
+        betDialog.getByText('押「今天我比宿敌多多少 XP」'),
       ).toBeVisible()
+      await expect(betDialog.getByTestId('rival-target-50')).toBeVisible()
+      await expect(betDialog.getByTestId('rival-target-150')).toHaveCount(0)
       await expect(betDialog.getByTestId('rival-bet-paid-input')).toBeVisible()
       await page.screenshot({
         path: path.join(OUT_DIR, `home-bet-dialog-${viewport.name}.png`),
@@ -215,27 +217,29 @@ for (const viewport of VIEWPORTS) {
     await expect(page.getByRole('list', { name: '完整小组榜' })).toBeVisible()
     const groupCard = page.getByTestId('group-bet-card')
     if (await groupCard.count()) {
-      await expect(groupCard).toContainText('押我本人在本组本周排名前三')
-      await expect(groupCard).not.toContainText('我们组进前三')
-      await expect(groupCard.getByTestId('group-bet-target-rank')).toContainText(
-        '前三',
-      )
-      await expect(groupCard.getByTestId('group-bet-card-odds')).toBeVisible()
+      await expect(groupCard).toContainText('押前三')
+      await expect(groupCard).toContainText('押升段')
+      await expect(groupCard).not.toContainText('小组总 XP')
+      await expect(
+        groupCard.getByTestId('group-market-odds-top3'),
+      ).toBeVisible()
       await page.screenshot({
         path: path.join(OUT_DIR, `league-group-${viewport.name}.png`),
         fullPage: true,
       })
-      await groupCard.getByTestId('group-bet-open').click()
+      await groupCard.getByTestId('group-bet-open-top3').click()
       const groupDialog = page.getByTestId('group-bet-dialog')
       await expect(groupDialog).toBeVisible()
-      await expect(groupDialog).toContainText('押「我本人在本组本周排名前三」')
+      await expect(
+        groupDialog.getByRole('heading', { name: '押前三' }),
+      ).toBeVisible()
       await expect(groupDialog.getByTestId('group-bet-paid-input')).toBeVisible()
       await page.evaluate(() => window.scrollTo(0, 0))
       await page.screenshot({
         path: path.join(OUT_DIR, `league-group-dialog-${viewport.name}.png`),
         fullPage: true,
       })
-      await groupDialog.getByRole('button', { name: '关闭组注对话框' }).click()
+      await groupDialog.getByRole('button', { name: '关闭押前三对话框' }).click()
     } else {
       await page.screenshot({
         path: path.join(OUT_DIR, `league-group-${viewport.name}.png`),
@@ -269,7 +273,8 @@ for (const viewport of VIEWPORTS) {
         body: JSON.stringify({
           ...liveBets,
           group: null,
-          bets: { ...liveBets.bets, group: null },
+          groups: [],
+          bets: { ...liveBets.bets, group: null, groups: [] },
           bet_options: { ...liveBets.bet_options, group: null },
         }),
       })
@@ -308,6 +313,16 @@ for (const viewport of VIEWPORTS) {
       '[data-testid="tier-stage"][data-state="current"]',
     )
     await expect(currentStage).toHaveCount(1)
+    const currentIndex = await page
+      .locator('[data-testid="tier-stage"]')
+      .evaluateAll((nodes) =>
+        nodes.findIndex((node) => node.getAttribute('data-state') === 'current'),
+      )
+    if (currentIndex < 8) {
+      await expect(
+        page.locator('[data-testid="tier-stage"][data-state="fog"]').first(),
+      ).toBeVisible()
+    }
     await expect(page.getByTestId('player-diamonds')).toBeVisible()
     await expect(page.getByTestId('streak-badge')).toBeVisible()
     await expect(page.getByTestId('me-stat-week')).toBeVisible()

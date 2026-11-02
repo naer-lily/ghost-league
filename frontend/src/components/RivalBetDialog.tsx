@@ -131,6 +131,10 @@ interface RivalBetDialogProps {
   onOpenChange: (open: boolean) => void
   state: RivalState
   now: Date
+  /** Open on this tab; the rival page uses weekly. */
+  initialTab?: RivalBetTab
+  /** Lock the dialog to one kind, used by the home daily-only entry. */
+  onlyKind?: RivalBetTab
 }
 
 export function RivalBetDialog({
@@ -138,6 +142,8 @@ export function RivalBetDialog({
   onOpenChange,
   state,
   now,
+  initialTab,
+  onlyKind,
 }: RivalBetDialogProps) {
   const titleId = useId()
   const descriptionId = useId()
@@ -145,7 +151,9 @@ export function RivalBetDialog({
   const betsQuery = useBets(open)
   const placeBet = usePlaceBet()
   const notify = useUiStore((store) => store.notify)
-  const [tab, setTab] = useState<RivalBetTab>('weekly')
+  const [tab, setTab] = useState<RivalBetTab>(
+    onlyKind ?? initialTab ?? 'weekly',
+  )
   const [targets, setTargets] = useState<Record<RivalBetTab, number>>({
     weekly: 0,
     daily: 0,
@@ -156,9 +164,15 @@ export function RivalBetDialog({
   })
   const [error, setError] = useState<string | null>(null)
 
+  const tabs = onlyKind
+    ? BET_TABS.filter((item) => item.kind === onlyKind)
+    : BET_TABS
+
   useEffect(() => {
-    if (open) setError(null)
-  }, [open])
+    if (!open) return
+    setError(null)
+    setTab(onlyKind ?? initialTab ?? 'weekly')
+  }, [open, onlyKind, initialTab])
 
   const bets = betsQuery.data?.bets ?? state.bets
   const betOptions = betsQuery.data?.bet_options ?? state.bet_options
@@ -224,6 +238,7 @@ export function RivalBetDialog({
         : '确认下注'
 
   const isDaily = tab === 'daily'
+  const lockedTab = onlyKind ?? null
 
   return (
     <Dialog.Root open={open} onOpenChange={handleOpenChange}>
@@ -260,41 +275,46 @@ export function RivalBetDialog({
             </Dialog.Close>
           </div>
 
-          <div className={styles.tabs} role="tablist" aria-label="下注类型">
-            {BET_TABS.map((item) => {
-              const active = item.kind === tab
-              const placed = Boolean(bets[item.kind])
-              return (
-                <button
-                  key={item.kind}
-                  type="button"
-                  role="tab"
-                  id={`rival-bet-tab-${item.kind}`}
-                  aria-selected={active}
-                  aria-controls={`rival-bet-panel-${item.kind}`}
-                  tabIndex={active ? 0 : -1}
-                  className={[styles.tab, active ? styles.tabActive : '']
-                    .filter(Boolean)
-                    .join(' ')}
-                  onClick={() => {
-                    setTab(item.kind)
-                    setError(null)
-                  }}
-                >
-                  <span>{item.label}</span>
-                  {placed ? (
-                    <span className={styles.tabDot} aria-label="已下注" />
-                  ) : null}
-                </button>
-              )
-            })}
-          </div>
+          {lockedTab ? null : (
+            <div className={styles.tabs} role="tablist" aria-label="下注类型">
+              {tabs.map((item) => {
+                const active = item.kind === tab
+                const placed = Boolean(bets[item.kind])
+                return (
+                  <button
+                    key={item.kind}
+                    type="button"
+                    role="tab"
+                    id={`rival-bet-tab-${item.kind}`}
+                    aria-selected={active}
+                    aria-controls={`rival-bet-panel-${item.kind}`}
+                    tabIndex={active ? 0 : -1}
+                    className={[styles.tab, active ? styles.tabActive : '']
+                      .filter(Boolean)
+                      .join(' ')}
+                    onClick={() => {
+                      setTab(item.kind)
+                      setError(null)
+                    }}
+                  >
+                    <span>{item.label}</span>
+                    {placed ? (
+                      <span className={styles.tabDot} aria-label="已下注" />
+                    ) : null}
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
           <div
             className={styles.panel}
             role="tabpanel"
             id={`rival-bet-panel-${tab}`}
-            aria-labelledby={`rival-bet-tab-${tab}`}
+            aria-labelledby={
+              lockedTab ? undefined : `rival-bet-tab-${tab}`
+            }
+            data-kind={tab}
           >
             {betsQuery.isFetching ? (
               <p className={styles.sync} aria-live="polite">
@@ -462,8 +482,9 @@ export function RivalBetDialog({
               多少就扣多少钻石；赢按总本金 × 赔率派彩。
             </p>
             <p className={styles.note}>
-              本周剩余 {formatCountdown(windows.weekly_locks_at, now)} · 日注锁注{' '}
-              {formatCountdown(windows.daily_locks_at, now)}
+              {lockedTab === 'daily'
+                ? `日注锁注 ${formatCountdown(windows.daily_locks_at, now)}`
+                : `本周剩余 ${formatCountdown(windows.weekly_locks_at, now)} · 日注锁注 ${formatCountdown(windows.daily_locks_at, now)}`}
             </p>
           </div>
         </Dialog.Content>

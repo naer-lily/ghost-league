@@ -139,6 +139,8 @@ export interface StandingRow {
   power: number | null
   checkin: string | null
   streak: number
+  promoted?: boolean
+  demoted?: boolean
   title: string | null
   frame: string | null
   frame_id: string | null
@@ -150,6 +152,8 @@ export interface Standings {
   group: LeagueGroup | null
   group_id: number | null
   group_size: number
+  promotion_quota?: number
+  demotion_quota?: number
   me: { rank: number; xp: number } | null
   standings: StandingRow[]
 }
@@ -170,6 +174,8 @@ export type RivalOutcome = 'win' | 'loss' | 'draw'
 export type BetKind = 'weekly' | 'daily' | 'group'
 
 export type BetStatus = 'placed' | 'won' | 'lost' | 'void'
+
+export type GroupMarket = 'top3' | 'promote' | 'no_demote'
 
 export interface RivalPlayer {
   user_id: string
@@ -215,15 +221,35 @@ export interface Bet {
   settled_at: string | null
   payout: number
   result_diff: number | null
-  target_rank?: number
+  market?: GroupMarket
+  market_label?: string
+  target_rank?: number | null
   group_id?: number
+  group_size?: number | null
+  promotion_quota?: number | null
+  demotion_quota?: number | null
   group_rank?: number | null
+}
+
+export interface GroupMarketOption {
+  market: GroupMarket
+  label: string
+  available: boolean
+  can_place: boolean
+  reason: string | null
+  target_rank: number | null
+  promotion_quota: number
+  demotion_quota: number
+  odds: number | null
+  status: string
+  bet: Bet | null
 }
 
 export interface RivalBets {
   weekly: Bet | null
   daily: Bet | null
   group: Bet | null
+  groups?: GroupMarketOption[]
 }
 
 export interface BetWindows {
@@ -253,7 +279,8 @@ export interface GroupBetOption {
   min_paid_stake: number
   max_paid_stake: number
   free_stake: number
-  odds: number
+  odds: number | null
+  markets?: GroupMarketOption[]
 }
 
 export interface BetOptions {
@@ -296,6 +323,7 @@ export interface BetsState {
   weekly: Bet | null
   daily: Bet | null
   group: Bet | null
+  groups?: GroupMarketOption[]
   bets: RivalBets
   bet_options: BetOptions
   bet_windows: BetWindows
@@ -368,7 +396,22 @@ export interface FriendsStandings {
   members: FriendSummary[]
 }
 
-export type UserSummary = FriendSummary
+export interface UserComparison {
+  viewer_id: string
+  target_id: string
+  viewer_xp: number
+  target_xp: number
+  viewer_rank: number | null
+  target_rank: number | null
+  viewer_group_size: number
+  target_group_size: number
+  xp_diff: number
+  leader: 'me' | 'them' | 'tie'
+}
+
+export interface UserSummary extends FriendSummary {
+  comparison?: UserComparison | null
+}
 
 export type HistoryType =
   | 'checkin'

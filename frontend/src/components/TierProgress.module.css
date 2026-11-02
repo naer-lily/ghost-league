@@ -138,3 +138,35 @@
     font-size: 0.6rem;
   }
 }
+
+.stage[data-state="fog"] .node {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(148, 163, 184, 0.24);
+  background:
+    radial-gradient(circle at 50% 40%, rgba(148, 163, 184, 0.18), transparent 65%),
+    var(--bg-deep);
+}
+
+.stage[data-state="fog"] .label {
+  color: rgba(148, 163, 184, 0.7);
+  letter-spacing: 0.08em;
+}
+
+.fogIcon {
+  display: grid;
+  place-items: center;
+  opacity: 0.42;
+  filter: blur(3px) grayscale(0.8);
+}
+
+.fogMark {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(203, 213, 225, 0.92);
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-shadow: 0 0 8px rgba(2, 6, 10, 0.9);
+}

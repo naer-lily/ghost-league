@@ -16,6 +16,7 @@ import { RivalBetDialog } from '../components/RivalBetDialog'
 import { RivalCandidatePicker } from '../components/RivalCandidatePicker'
 import { RivalDuelCard } from '../components/RivalDuelCard'
 import { TodayProgress } from '../components/TodayProgress'
+import { UserProfileSheet } from '../components/UserProfileSheet'
 import {
   buildHomeView,
   describeApiError,
@@ -33,6 +34,7 @@ export function HomePage() {
   const notify = useUiStore((state) => state.notify)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [profileId, setProfileId] = useState<string | null>(null)
 
   const data = rivalQuery.data
   const now = useServerNow(data?.server_now, Boolean(data))
@@ -163,7 +165,8 @@ export function HomePage() {
               <RivalDuelCard
                 state={data}
                 now={now}
-                showTimers={false}
+                variant="summary"
+                onOpenProfile={setProfileId}
                 onOpenBets={() => setDialogOpen(true)}
               />
               {pickerOpen && selectionOpen ? (
@@ -251,8 +254,17 @@ export function HomePage() {
           onOpenChange={setDialogOpen}
           state={data}
           now={now}
+          initialTab="daily"
+          onlyKind="daily"
         />
       ) : null}
+
+      <UserProfileSheet
+        userId={profileId}
+        onOpenChange={(open) => {
+          if (!open) setProfileId(null)
+        }}
+      />
     </PullToRefresh>
   )
 }

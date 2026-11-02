@@ -49,8 +49,9 @@ const ITEMS: HistoryItem[] = [
   }),
   historyItem('group_bet:2', 'group_bet', {
     at: minutesAgo(30),
-    title: '组内下注',
-    body: '组内第 3 名 · 赔率 ×2 · 已赢 · 派彩 440',
+    title: '押升段',
+    body: '组内第 3 名 · 赔率 ×4.19 · 已赢 · 派彩 440',
+    data: { market: 'promote', market_label: '押升段', target_rank: 4 },
   }),
   historyItem('rival:2026-10-19', 'rival', {
     at: minutesAgo(60),
@@ -116,6 +117,10 @@ describe('HistoryPage', () => {
     expect(rows[0]).toHaveTextContent('5 分钟前')
     expect(rows[0]).toHaveTextContent(formatAbsoluteTime(ITEMS[0]!.at))
     expect(rows[0]).not.toHaveTextContent(ITEMS[0]!.at)
+    expect(rows[2]).toHaveTextContent('押升段')
+    expect(within(rows[2]!).getByTestId('history-market')).toHaveTextContent(
+      '升段',
+    )
     expect(screen.queryByText('还没有历史记录')).not.toBeInTheDocument()
   })
 
