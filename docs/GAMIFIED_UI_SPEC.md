@@ -1478,7 +1478,7 @@ TopBar 72
 | 好友榜 | `#league-tab-friends` | 切换好友榜 | `click` → `loadFriendsStandings()`；GET `/v1/me/friends/standings` | 常显 | 可改标签；空态见 7.3 |
 | 查看成员 | `#league-standings` 行按钮 | 打开成员资料 | 行内 `click` → `openUserDetail()`；GET `/v1/users/{id}` | 有数据时 | 可改行样式；领奖台是设计目标 |
 | 浏览段位 | `#league-tier-slots` | 横向滚动查看段位 | `wheel` 监听 + 原生滚动；无 API | 有段位数据时 | 可改图标；不得把滑轨做成“升级”按钮 |
-| 返回首页 | `#feed-back-button` | 回首页 | `click` → `showPage('home')` | 常显 | 可改文案/图标 |
+| 返回首页 | `#feed-back-button` | 回首页 | `click` → `goBack('home')`；系统返回键沿页面历史回退 | 常显 | 可改文案/图标 |
 
 #### 8.2.4 个人页、用户详情、附近的人与集成
 
@@ -1493,7 +1493,7 @@ TopBar 72
 | 附近的人 | `#nearby-people-row` | 切到附近的人页 | `click` → `showPage('people')` + `loadPeople()`；GET `/v1/discover/people` | 常显 | 可改标签/图标；不得承诺精确地理位置 |
 | 声音开关 | `#sound-toggle-row` | 开关音效 + toast | `click`；`localStorage` | 常显 | 可改标签；同步 `aria-checked` |
 | 轻触反馈 | `#haptics-toggle-row` | 开关触觉 + toast | `click`；`localStorage`；`vibrate()` | 常显；设备可能无效果 | 可改标签；不得承诺所有设备振动 |
-| 返回来源页 | `#user-back-button` / `#people-back-button` / `#integration-back-button` | 回上一页 | `click` → `showPage(...)` | 常显 | 可改文案；不得丢失来源页 |
+| 返回来源页 | `#user-back-button` / `#people-back-button` / `#integration-back-button` | 回上一页 | `click` → `goBack(...)`；系统返回键沿页面历史回退 | 常显 | 可改文案；不得丢失来源页 |
 | 关注/取关 | `#user-follow-button`、`.follow-button` | 关注或取关 | `click` → `setFollowState()`；POST/DELETE `/v1/me/follows/{id}` | `#user-follow-button` 在 `is_me` 时隐藏；列表按钮常显 | 可改文案（≤6 字）；不得自动关注 |
 | 复制代码 | `[data-copy-code]` | 复制示例代码 | `click` → clipboard；无 API | 常显 | 可改文案；保留“已复制”反馈 |
 | 显示/复制令牌 | `#integration-token-reveal` / `#integration-token-copy` | 显示或复制个人令牌 | `click` → 切换 `type` / clipboard；无 API | 常显 | 可改文案；不得默认明文显示 |
