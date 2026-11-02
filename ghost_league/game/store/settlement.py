@@ -38,6 +38,7 @@ class SettlementMixin:
                 group_id = int(row["id"])
             rows = conn.execute(
                 "SELECT gm.player_id, gm.is_human, p.kind, p.display_name, "
+                "p.power AS power, "
                 "COALESCE(ws.seconds, 0) AS seconds, COALESCE(ws.xp, 0) AS xp "
                 "FROM group_members gm JOIN players p ON p.id = gm.player_id "
                 "LEFT JOIN weekly_scores ws ON ws.week_start = ? "
@@ -80,6 +81,11 @@ class SettlementMixin:
                         "is_ai": str(row["kind"]) == "ai",
                         "seconds": int(row["seconds"]),
                         "xp": int(row["xp"]),
+                        "power": (
+                            int(row["power"])
+                            if row["power"] is not None
+                            else None
+                        ),
                         "checkin": str(checkin["source"]) if checkin else None,
                         "streak": int(streak["current"]) if streak else 0,
                     }
@@ -202,6 +208,9 @@ class SettlementMixin:
                 "SELECT * FROM weeks WHERE week_start = ?", (week_iso,)
             ).fetchone()
             if week_row is not None and week_row["status"] == "settled":
+                self.write_power_history(
+                    week_iso, now=local_now, conn=conn
+                )
                 self._apply_weekly_progression_with(
                     conn, week_iso, now=local_now
                 )
@@ -345,6 +354,9 @@ class SettlementMixin:
                 "UPDATE weeks SET status = 'settled', settled_at = ? "
                 "WHERE week_start = ?",
                 (settled_at, week_iso),
+            )
+            self.write_power_history(
+                week_iso, now=local_now, conn=conn
             )
             self._apply_weekly_progression_with(
                 conn, week_iso, now=local_now

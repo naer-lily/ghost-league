@@ -342,7 +342,9 @@ class StandingsTests(GameAPITestBase):
             self.assertEqual(len(standings), 15)
             self.assertEqual(standings[0]["is_me"], True)
             self.assertEqual(standings[0]["rank"], 1)
-            self.assertEqual(league["me"], {"rank": 1, "xp": 83333})
+            self.assertEqual(
+                league["me"], {"rank": 1, "xp": 83333, "power": None}
+            )
             xp_values = [row["xp"] for row in standings]
             self.assertEqual(xp_values, sorted(xp_values, reverse=True))
             self.assertEqual(

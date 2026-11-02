@@ -40,6 +40,13 @@ from .core import (
 from .feed import FeedMixin
 from .groups import GroupsMixin
 from .players import PlayersMixin
+from .power import (
+    POWER_WEIGHTS,
+    POWER_WINDOW_WEEKS,
+    PowerMixin,
+    compute_power_snapshot,
+    power_from_percentile,
+)
 from .progression import (
     CATALOG_ITEMS,
     CATALOG_TITLES,
@@ -60,6 +67,7 @@ class GameStore(
     FeedMixin,
     ProgressionMixin,
     SettlementMixin,
+    PowerMixin,
 ):
     """Transactional access to one ``league.db`` file."""
 
@@ -72,6 +80,8 @@ __all__ = [
     "DEFAULT_DB_PATH",
     "GROUP_SIZE",
     "ITEM_BY_ID",
+    "POWER_WEIGHTS",
+    "POWER_WINDOW_WEEKS",
     "PROGRESSION_START_META",
     "SCHEMA_VERSION",
     "SOURCE_AI",
@@ -86,11 +96,13 @@ __all__ = [
     "ScoreRowLike",
     "WeekLocked",
     "balanced_group_sizes",
+    "compute_power_snapshot",
     "earned_embers_for_week",
     "ember_grant_amount",
     "group_movement",
     "is_valid_repair_day",
     "next_tier",
+    "power_from_percentile",
     "rank_scores",
     "xp_for_seconds",
 ]

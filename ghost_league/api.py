@@ -216,6 +216,22 @@ def _week_start(value: date | datetime | str) -> date:
     return cal.week_start(value)
 
 
+def _power_fields(player: dict[str, Any]) -> dict[str, Any]:
+    """Project the stored power columns without inventing a fallback rating."""
+
+    power = player.get("power")
+    percentile = player.get("power_percentile")
+    return {
+        "power": int(power) if power is not None else None,
+        "power_percentile": (
+            float(percentile) if percentile is not None else None
+        ),
+        "power_week": player.get("power_week"),
+        "power_updated_at": player.get("power_updated_at"),
+        "power_provisional": bool(player.get("power_provisional", 1)),
+    }
+
+
 def _account_joined_week(account: dict[str, Any], fallback: date) -> date:
     raw = account.get("created_at")
     if isinstance(raw, str):
@@ -584,6 +600,7 @@ class GameService:
             "seconds": week_seconds,
             "xp": int(snapshot.get("xp") or 0),
             "rank": snapshot.get("rank"),
+            **_power_fields(snapshot.get("player") or {}),
             "today_seconds": int(snapshot.get("today_seconds") or 0),
             "today_xp": int(snapshot.get("today_xp") or 0),
             "required_xp": CHECKIN_XP,
@@ -665,6 +682,7 @@ class GameService:
             "seconds": week_seconds,
             "xp": int(snapshot.get("xp") or 0),
             "rank": snapshot.get("rank"),
+            **_power_fields(snapshot.get("player") or {}),
             "today_seconds": int(snapshot.get("today_seconds") or 0),
             "today_xp": int(snapshot.get("today_xp") or 0),
             "required_xp": CHECKIN_XP,
@@ -727,6 +745,9 @@ class GameService:
                     ),
                     "is_me": player_id == user_id,
                     "xp": int(row["xp"]),
+                    "power": (
+                        int(row["power"]) if row["power"] is not None else None
+                    ),
                     "checkin": row.get("checkin"),
                     "streak": int(row.get("streak") or 0),
                     "title": loadout["title"],
@@ -744,7 +765,11 @@ class GameService:
             "group_id": int(group["id"]),
             "group_size": len(standings),
             "me": (
-                {"rank": int(me["rank"]), "xp": int(me["xp"])}
+                {
+                    "rank": int(me["rank"]),
+                    "xp": int(me["xp"]),
+                    "power": me["power"],
+                }
                 if me is not None
                 else None
             ),

@@ -319,7 +319,7 @@ API 启动只初始化账号、social 和 `league.db`，确保本地真人存在
   "group": {"id": 12, "no": 1, "tier": "Bronze", "week_start": "2026-10-26", "size": 15},
   "group_id": 12,
   "group_size": 15,
-  "me": {"rank": 1, "xp": 1234},
+  "me": {"rank": 1, "xp": 1234, "power": 421},
   "standings": [
     {
       "rank": 1,
@@ -328,6 +328,7 @@ API 启动只初始化账号、social 和 `league.db`，确保本地真人存在
       "avatar_url": "/avatars/owner",
       "is_me": true,
       "xp": 1234,
+      "power": 421,
       "checkin": "verified",
       "streak": 3,
       "title": "点火",
@@ -338,8 +339,10 @@ API 启动只初始化账号、social 和 `league.db`，确保本地真人存在
 }
 ```
 
-榜单每行只返回展示用 `title`、`frame`、`backdrop`；不返回内部 `kind`、`is_ai`、
-target、source key、channel_id 或原始秒数。成员按 XP 降序排名。
+榜单每行返回展示用 `title`、`frame`、`backdrop` 和 `power`；`me` 对象也带
+`power`。`power` 为 `null` 表示该玩家还没有任何可用周，不伪造 1000。榜单不返回
+内部 `kind`、`is_ai`、target、source key、channel_id 或原始秒数。成员按 XP 降序排名。
+战力只是派生展示字段，不改变排名、分组、升降级或结算。
 
 ### `GET /v1/league/history`
 
@@ -601,6 +604,11 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
   "seconds": 1234,
   "xp": 205,
   "rank": 8,
+  "power": 421,
+  "power_percentile": 0.2107,
+  "power_week": "2026-10-26",
+  "power_updated_at": "2026-11-02T15:05:00+08:00",
+  "power_provisional": false,
   "today_seconds": 137,
   "today_xp": 22,
   "required_xp": 100,
@@ -628,6 +636,17 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 - `gems` 由该玩家 `weekly_scores` 的累计 `SUM(xp) // 10` 派生，每累计 10 XP 得 1 个
   宝石；不按本周 XP 重置，也没有独立 ledger 表。`status_for_user`（badge/widget 快照）
   返回同一派生值。
+- `power` 是 0–2000 的派生展示战力。计算窗口为最近 4 个自然周（含当前未结束周），
+  权重从新到旧为 `0.4 / 0.3 / 0.2 / 0.1`，只按该玩家实际有 `weekly_scores` 行的周
+  重新归一化；每周百分位 `p = (less_count + equal_count / 2) / total_count`，
+  `P = sum(weight * p) / sum(weight)`，`power = round(1000 + 1000 * (2P - 1))`
+  并裁剪到 0–2000。`power_percentile` 保存加权后的 `P`，`power_week` 是计算窗口的
+  当前周。
+- 只有完全没有可用周时 `power` 才为 `null`，此时 `power_provisional=true`；有 1 周
+  及以上就已经正式定级，`power_provisional=false`，不会显示“定级中”。
+- 战力由外部 timer 每小时执行一次 `python3 -m ghost_league.game.jobs power` 刷新
+  `players` 当前值；该命令不写周历史、不结算。周结算在 `weekly_results` 落库后写
+  `player_power_history` 最终值。`status_for_user` 返回同一组战力字段。
 - 轮询方可以比较 `updated_at`、`xp`、`rank` 和 `next_settlement_at`；重复 `event_id`
   不会推进 `updated_at`。
 - 没有 `version` 字段；当前也不实现推送。

@@ -67,24 +67,48 @@ def run_weekly_settlement(
     }
 
 
+def run_power_refresh(
+    db_path: str | Path,
+    *,
+    at: datetime | str | None = None,
+) -> dict[str, Any]:
+    """Refresh every player's current power without writing weekly history.
+
+    The hourly timer may run this as often as it likes; the operation is a
+    deterministic projection of ``weekly_scores`` and is safe to repeat.
+    """
+
+    local_now = cal.parse_datetime(at) if at is not None else cal.now_local()
+    store = GameStore(Path(db_path))
+    return store.recompute_power(now=local_now)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m ghost_league.game.jobs",
-        description="Run the Ghost League weekly settlement job once.",
+        description="Run one Ghost League background job.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     settle = sub.add_parser("settle", help="settle only the previous local week")
     settle.add_argument("--db", default=str(DEFAULT_DB_PATH))
     settle.add_argument("--at")
+    power = sub.add_parser(
+        "power", help="refresh current player power from recent weekly XP"
+    )
+    power.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    power.add_argument("--at")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command != "settle":  # pragma: no cover - argparse rejects others
+    if args.command == "settle":
+        result = run_weekly_settlement(args.db, at=args.at)
+    elif args.command == "power":
+        result = run_power_refresh(args.db, at=args.at)
+    else:  # pragma: no cover - argparse rejects unknown subcommands
         parser.error(f"unknown command: {args.command}")
-    result = run_weekly_settlement(args.db, at=args.at)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0
 

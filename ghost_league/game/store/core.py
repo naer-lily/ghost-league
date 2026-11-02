@@ -42,7 +42,23 @@ CREATE TABLE IF NOT EXISTS players (
     joined_week TEXT NOT NULL,
     last_seen_week TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
-    is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    power INTEGER,
+    power_percentile REAL,
+    power_week TEXT,
+    power_updated_at TEXT,
+    power_provisional INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS player_power_history (
+    week_start TEXT NOT NULL,
+    player_id TEXT NOT NULL,
+    power INTEGER NOT NULL,
+    percentile REAL NOT NULL,
+    raw_xp INTEGER NOT NULL,
+    weeks_used INTEGER NOT NULL,
+    computed_at TEXT NOT NULL,
+    PRIMARY KEY (week_start, player_id)
 );
 
 CREATE TABLE IF NOT EXISTS sources (
@@ -314,6 +330,7 @@ _TABLE_NAMES = (
     "meta",
     "epochs",
     "players",
+    "player_power_history",
     "sources",
     "opponent_week_plan",
     "channel_players",
@@ -527,11 +544,12 @@ class CoreMixin:
 
     @staticmethod
     def _migrate_players(conn: sqlite3.Connection) -> None:
-        """Add the weekly roster freshness marker to an older database.
+        """Add roster freshness and power columns to an older database.
 
         Existing AI players keep their history.  Their first ``last_seen_week``
         is backfilled from the latest locked weekly plan, falling back to the
-        week they joined when no plan exists.
+        week they joined when no plan exists.  Power columns start NULL with
+        ``power_provisional = 1`` until the first refresh runs.
         """
 
         columns = {
@@ -542,6 +560,23 @@ class CoreMixin:
             conn.execute(
                 "ALTER TABLE players ADD COLUMN last_seen_week TEXT "
                 "NOT NULL DEFAULT ''"
+            )
+        if "power" not in columns:
+            conn.execute("ALTER TABLE players ADD COLUMN power INTEGER")
+        if "power_percentile" not in columns:
+            conn.execute(
+                "ALTER TABLE players ADD COLUMN power_percentile REAL"
+            )
+        if "power_week" not in columns:
+            conn.execute("ALTER TABLE players ADD COLUMN power_week TEXT")
+        if "power_updated_at" not in columns:
+            conn.execute(
+                "ALTER TABLE players ADD COLUMN power_updated_at TEXT"
+            )
+        if "power_provisional" not in columns:
+            conn.execute(
+                "ALTER TABLE players ADD COLUMN power_provisional INTEGER "
+                "NOT NULL DEFAULT 1"
             )
         conn.execute(
             "UPDATE players SET last_seen_week = COALESCE("
