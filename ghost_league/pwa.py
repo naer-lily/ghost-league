@@ -47,6 +47,17 @@ def mount_web(app: FastAPI, web_root: str | Path = WEB_ROOT) -> FastAPI:
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
 
+    # Widget Studio remains at its documented URL while the main app advances.
+    # Its static files live in the legacy ``web/`` tree, so keep serving them
+    # from there instead of rewriting the editor into the React build.
+    widget_root = (WEB_ROOT / "widget-studio").resolve()
+    if widget_root.is_dir():
+        app.mount(
+            "/widget-studio",
+            StaticFiles(directory=widget_root, html=True),
+            name="widget-studio",
+        )
+
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa_fallback(full_path: str) -> FileResponse:
         """Serve real files and fall back to ``index.html`` for SPA deep links.

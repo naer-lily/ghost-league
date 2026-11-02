@@ -54,6 +54,18 @@ class PWANextFallbackTests(unittest.TestCase):
                 self.assertEqual(missing_api.status_code, 404)
                 self.assertNotIn("下一个星图", missing_api.text)
 
+    def test_widget_studio_remains_available(self) -> None:
+        widget_index = WEB_ROOT / "widget-studio" / "index.html"
+        if not widget_index.is_file():
+            self.skipTest("legacy widget studio is not present")
+
+        app = FastAPI()
+        mount_web(app, WEB_ROOT)
+        with TestClient(app) as client:
+            response = client.get("/widget-studio/")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Widget Studio", response.text)
+
     def test_built_web_next_root_when_present(self) -> None:
         build_index = NEXT_BUILD_ROOT / "index.html"
         if not build_index.is_file():
