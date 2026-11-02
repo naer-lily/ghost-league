@@ -1,0 +1,140 @@
+.section {
+  min-width: 0;
+  padding: 14px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-card);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.title {
+  font-size: 0.94rem;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+.step {
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.stages {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 0;
+}
+
+.stages::before {
+  content: "";
+  position: absolute;
+  top: 14px;
+  right: 5%;
+  left: 5%;
+  height: 2px;
+  background: var(--border);
+}
+
+.stage {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.node {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-deep);
+}
+
+.stage[data-state="complete"] .node {
+  border-color: color-mix(in srgb, var(--tier-color) 52%, transparent);
+  background: color-mix(in srgb, var(--tier-color) 16%, var(--bg-deep));
+}
+
+.stage[data-state="current"] .node {
+  border-color: var(--tier-color);
+  background: color-mix(in srgb, var(--tier-color) 24%, var(--bg-deep));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--tier-color) 18%, transparent),
+    0 0 16px color-mix(in srgb, var(--tier-color) 38%, transparent);
+}
+
+.stage[data-state="future"] .node {
+  opacity: 0.55;
+}
+
+.stage[data-state="future"] :global(img) {
+  filter: grayscale(0.7);
+}
+
+.label {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted-2);
+  font-size: 0.52rem;
+  font-weight: 800;
+  line-height: 1.1;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage[data-state="complete"] .label {
+  color: var(--muted);
+}
+
+.stage[data-state="current"] .label {
+  color: var(--text);
+  font-weight: 900;
+}
+
+.currentLine {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.currentLine strong {
+  color: var(--tier-color);
+  font-weight: 900;
+}
+
+@media (min-width: 720px) {
+  .section {
+    padding: 18px 16px 14px;
+  }
+
+  .node {
+    width: 34px;
+    height: 34px;
+  }
+
+  .stages::before {
+    top: 16px;
+  }
+
+  .label {
+    font-size: 0.6rem;
+  }
+}

@@ -1,0 +1,302 @@
+.card {
+  --rival-mint: #7fffd4;
+  --rival-mint-ink: #062a24;
+  --rival-mint-shadow: #3aa88c;
+  --rival-purple: #c7a5ff;
+  --rival-orange: #ffc46b;
+
+  width: 100%;
+  min-width: 0;
+}
+
+.playerGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 6px;
+}
+
+.playerCard {
+  min-width: 0;
+  padding: 10px 7px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: rgba(13, 23, 28, 0.45);
+  text-align: center;
+}
+
+.playerMe {
+  border-color: rgba(127, 255, 212, 0.38);
+  background: radial-gradient(
+    circle at 50% 22%,
+    rgba(127, 255, 212, 0.18),
+    transparent 68%
+  );
+}
+
+.playerRival {
+  border-color: rgba(199, 165, 255, 0.38);
+  background: radial-gradient(
+    circle at 50% 22%,
+    rgba(199, 165, 255, 0.18),
+    transparent 68%
+  );
+}
+
+.playerTag {
+  display: block;
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+}
+
+.avatarWrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.playerName {
+  margin-top: 6px;
+  overflow: hidden;
+  font-size: 0.82rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playerXp {
+  margin-top: 3px;
+  color: var(--rival-mint);
+  font-size: clamp(1rem, 4.2vw, 1.3rem);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.playerRival .playerXp {
+  color: var(--rival-purple);
+}
+
+.playerXp small {
+  color: var(--muted);
+  font-size: 0.55rem;
+  font-weight: 900;
+}
+
+.playerToday {
+  margin-top: 2px;
+  color: var(--rival-purple);
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.playerMe .playerToday {
+  color: var(--rival-mint);
+}
+
+.playerPower {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.6rem;
+  font-weight: 700;
+}
+
+.vsColumn {
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+}
+
+.vs {
+  color: var(--rival-purple);
+  font-size: 1.05rem;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 18px rgba(199, 165, 255, 0.55);
+}
+
+.clash {
+  position: relative;
+  display: flex;
+  height: 16px;
+  margin-top: 16px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: #15353b;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.clashMe {
+  height: 100%;
+  background: linear-gradient(90deg, #3dd9a5, #a4ffe2);
+  box-shadow: 0 0 16px rgba(127, 255, 212, 0.35);
+  transition: width 0.45s var(--ease-spring);
+}
+
+.clashRival {
+  height: 100%;
+  background: linear-gradient(90deg, #b58cff, #ff9edb);
+  box-shadow: 0 0 16px rgba(199, 165, 255, 0.35);
+  transition: width 0.45s var(--ease-spring);
+}
+
+.clashSpark {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow:
+    0 0 10px #fff,
+    0 0 20px var(--rival-mint);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.barLabels {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.7rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.barMine {
+  color: var(--rival-mint);
+}
+
+.barRival {
+  color: var(--rival-purple);
+}
+
+.gapLine {
+  margin-top: 14px;
+  text-align: center;
+  font-size: 0.96rem;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.gapValue {
+  color: var(--rival-orange);
+  font-size: 1.08rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.timePanel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.timeItem {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(13, 23, 28, 0.45);
+}
+
+.timeLabel {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 900;
+}
+
+.timeValue {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeHint {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-2);
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
+.betBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.betStatuses {
+  display: flex;
+  flex: 1 1 220px;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.betChip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.betChipDone {
+  border-color: rgba(127, 255, 212, 0.38);
+  background: rgba(127, 255, 212, 0.08);
+  color: var(--rival-mint);
+}
+
+.betChipSettled {
+  border-color: rgba(255, 196, 107, 0.38);
+  background: rgba(255, 196, 107, 0.08);
+  color: var(--rival-orange);
+}
+
+.betButton {
+  flex: 0 0 auto;
+  min-height: 44px;
+  margin-left: auto;
+  padding: 0 22px;
+  border-radius: 13px;
+  background: var(--rival-mint);
+  color: var(--rival-mint-ink);
+  font-size: 0.9rem;
+  font-weight: 900;
+  box-shadow: 0 4px 0 var(--rival-mint-shadow);
+}
+
+.betButton:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 var(--rival-mint-shadow);
+}
+
+@media (min-width: 720px) {
+  .playerCard {
+    padding: 14px 11px;
+  }
+
+  .playerName {
+    font-size: 0.95rem;
+  }
+}

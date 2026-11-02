@@ -6,24 +6,15 @@ import {
   Flame,
   History,
   Home,
-  RefreshCw,
-  Settings,
-  Sparkles,
-  Swords,
+  Package,
   Trophy,
   User,
-  Volume2,
-  VolumeX,
 } from 'lucide-react'
-import { type CSSProperties, type ReactNode, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useHomeSnapshot } from '../api/queries'
 import type { HomeSnapshot } from '../api/types'
-import {
-  buildHomeView,
-  describeApiError,
-  formatNumber,
-} from '../lib/home'
+import { buildHomeView, formatNumber } from '../lib/home'
 import { playClick } from '../lib/sound'
 import { useUnauthorizedSignOut } from '../store/useSession'
 import { useUiStore } from '../store/useUiStore'
@@ -50,17 +41,9 @@ const NAV_ITEMS = [
     soft: 'rgba(255, 200, 0, 0.16)',
   },
   {
-    to: '/rival',
-    label: '宿敌',
-    icon: Swords,
-    end: false,
-    color: '#ce82ff',
-    soft: 'rgba(206, 130, 255, 0.16)',
-  },
-  {
-    to: '/shop',
-    label: '星图',
-    icon: Sparkles,
+    to: '/inventory',
+    label: '物品栏',
+    icon: Package,
     end: false,
     color: '#ce82ff',
     soft: 'rgba(206, 130, 255, 0.16)',
@@ -85,83 +68,9 @@ const NAV_ITEMS = [
 
 type NavItemConfig = (typeof NAV_ITEMS)[number]
 
-interface IconActionProps {
-  label: string
-  tooltip: string
-  onClick: () => void
-  children: ReactNode
-  pressed?: boolean
-  disabled?: boolean
-}
-
-function IconAction({
-  label,
-  tooltip,
-  onClick,
-  children,
-  pressed,
-  disabled,
-}: IconActionProps) {
-  return (
-    <Tooltip.Root>
-      <Tooltip.Trigger asChild>
-        <button
-          type="button"
-          className={styles.iconAction}
-          aria-label={label}
-          aria-pressed={pressed}
-          onClick={onClick}
-          disabled={disabled}
-        >
-          {children}
-        </button>
-      </Tooltip.Trigger>
-      <Tooltip.Portal>
-        <Tooltip.Content
-          className={styles.tooltip}
-          side="bottom"
-          sideOffset={7}
-        >
-          {tooltip}
-          <Tooltip.Arrow className={styles.tooltipArrow} />
-        </Tooltip.Content>
-      </Tooltip.Portal>
-    </Tooltip.Root>
-  )
-}
-
-function TopBar({
-  home,
-}: {
-  home: UseQueryResult<HomeSnapshot, Error>
-}) {
-  const soundEnabled = useUiStore((state) => state.soundEnabled)
-  const toggleSound = useUiStore((state) => state.toggleSound)
-  const notify = useUiStore((state) => state.notify)
-  const setSettingsOpen = useUiStore((state) => state.setSettingsOpen)
-  const [refreshing, setRefreshing] = useState(false)
-
+function TopBar({ home }: { home: UseQueryResult<HomeSnapshot, Error> }) {
   const view = home.data ? buildHomeView(home.data) : null
   const diamonds = view?.diamonds ?? 0
-
-  async function handleRefresh() {
-    if (refreshing) return
-    playClick(soundEnabled, 720)
-    setRefreshing(true)
-    const result = await home.refetch()
-    setRefreshing(false)
-    if (result.error) {
-      notify(describeApiError(result.error), 'error')
-    } else {
-      notify('联赛数据已刷新。')
-    }
-  }
-
-  function handleSound() {
-    const next = toggleSound()
-    playClick(next, 820)
-    notify(next ? '声音已开启。' : '声音已关闭。')
-  }
 
   return (
     <header className={styles.topbar}>
@@ -175,7 +84,7 @@ function TopBar({
         <div className={styles.topActions}>
           <Link
             className={styles.diamondBalance}
-            to="/shop"
+            to="/inventory"
             data-testid="diamond-balance"
             aria-label={`钻石 ${diamonds}`}
           >
@@ -184,40 +93,6 @@ function TopBar({
               {formatNumber(diamonds)}
             </span>
           </Link>
-          <IconAction
-            label="刷新联赛数据"
-            tooltip="刷新"
-            onClick={() => void handleRefresh()}
-            disabled={refreshing}
-          >
-            <RefreshCw
-              size={19}
-              className={refreshing ? styles.spinning : undefined}
-              aria-hidden="true"
-            />
-          </IconAction>
-          <IconAction
-            label={soundEnabled ? '关闭声音' : '开启声音'}
-            tooltip={soundEnabled ? '关闭声音' : '开启声音'}
-            onClick={handleSound}
-            pressed={soundEnabled}
-          >
-            {soundEnabled ? (
-              <Volume2 size={19} aria-hidden="true" />
-            ) : (
-              <VolumeX size={19} aria-hidden="true" />
-            )}
-          </IconAction>
-          <IconAction
-            label="打开设置"
-            tooltip="设置"
-            onClick={() => {
-              playClick(soundEnabled, 760)
-              setSettingsOpen(true)
-            }}
-          >
-            <Settings size={19} aria-hidden="true" />
-          </IconAction>
           <Link className={styles.avatarButton} to="/me" aria-label="个人页">
             <Avatar
               src={view?.avatarUrl ?? null}

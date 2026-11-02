@@ -1,15 +1,39 @@
 .page {
+  display: grid;
+  gap: 14px;
   width: 100%;
   max-width: 620px;
   margin: 0 auto;
 }
 
-.stats {
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+
+.sectionHead h2 {
+  font-size: 0.94rem;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+.stats,
+.streak {
+  min-width: 0;
+  padding: 13px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-card);
+}
+
+.statGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  padding: 16px 0 18px;
-  border-bottom: 1px solid var(--border);
 }
 
 .stat {
@@ -18,7 +42,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 6px;
+  gap: 5px;
   text-align: center;
 }
 
@@ -26,12 +50,12 @@
   color: var(--green);
 }
 
-.rankIcon {
-  color: var(--yellow);
+.todayIcon {
+  color: var(--orange);
 }
 
-.emberIcon {
-  color: var(--orange);
+.rankIcon {
+  color: var(--yellow);
 }
 
 .statValue {
@@ -39,7 +63,7 @@
   align-items: baseline;
   gap: 2px;
   color: var(--text);
-  font-size: 1.5rem;
+  font-size: 1.4rem;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
@@ -48,7 +72,7 @@
 
 .statValue small {
   color: var(--muted);
-  font-size: 0.58rem;
+  font-size: 0.56rem;
   font-weight: 900;
 }
 
@@ -58,17 +82,58 @@
 
 .statLabel {
   color: var(--muted);
-  font-size: 0.66rem;
+  font-size: 0.64rem;
+  font-weight: 800;
+}
+
+.streakGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.streakItem {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 4px;
+  border-radius: 12px;
+  background: rgba(13, 23, 28, 0.4);
+  text-align: center;
+}
+
+.streakIcon {
+  display: grid;
+  place-items: center;
+  color: var(--orange);
+}
+
+.streakItem strong {
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.streakItem small {
+  color: var(--muted);
+  font-size: 0.6rem;
   font-weight: 800;
 }
 
 .resourceRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
   align-items: center;
   gap: 8px;
-  min-height: 54px;
-  padding: 9px 2px;
-  border-bottom: 1px solid var(--border);
+  min-height: 58px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-tile);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-card);
 }
 
 .resource {
@@ -76,11 +141,6 @@
   min-width: 0;
   align-items: center;
   gap: 6px;
-}
-
-.resource + .resource {
-  padding-left: 8px;
-  border-left: 1px solid rgba(55, 70, 79, 0.72);
 }
 
 .resourceIcon {
@@ -124,89 +184,79 @@
 
 .resourceChevron {
   flex: none;
-  margin-left: auto;
   color: var(--muted-2);
 }
 
-.resourceRow:hover .resourceText strong,
 .resourceRow:hover .resourceChevron {
   color: var(--cyan);
 }
 
-.goal {
+.menu {
   display: grid;
-  place-items: center;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--border);
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-tile);
+  background: var(--border);
 }
 
-.rankRow {
+.menuItem {
   display: flex;
   align-items: center;
   gap: 9px;
-  min-height: 52px;
-  padding: 0 2px;
+  width: 100%;
+  min-height: 54px;
+  padding: 0 12px;
+  background: var(--surface-2);
   color: var(--muted);
   font-size: 0.8rem;
   font-weight: 800;
+  text-align: left;
 }
 
-.rankRow > svg:first-child {
+.menuItem:hover {
+  background: var(--surface-3);
+}
+
+.menuIcon {
+  display: grid;
   flex: none;
-  color: var(--yellow);
+  place-items: center;
+  color: var(--purple);
 }
 
-.rankRow > svg:last-child {
-  flex: none;
-  color: var(--muted-2);
-}
-
-.rankLabel {
+.menuLabel {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.rankValue {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 1px;
-  color: var(--text);
-  font-size: 1rem;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
+.menuValue {
+  flex: none;
+  color: var(--muted-2);
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
-.rankValue small {
-  color: var(--muted);
-  font-size: 0.66rem;
-  font-weight: 900;
-}
-
-.rankRow:hover .rankLabel {
-  color: var(--text);
+.menuItem > svg:last-child {
+  flex: none;
+  color: var(--muted-2);
 }
 
 @media (min-width: 720px) {
-  .stats {
-    padding: 20px 0 22px;
+  .page {
+    gap: 16px;
   }
 
   .statValue {
-    font-size: 1.8rem;
+    font-size: 1.7rem;
   }
 
   .statLabel {
-    font-size: 0.72rem;
-  }
-
-  .goal {
-    padding: 20px 0;
-  }
-
-  .rankRow {
-    font-size: 0.86rem;
+    font-size: 0.7rem;
   }
 }

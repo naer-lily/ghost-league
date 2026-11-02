@@ -75,6 +75,7 @@ export function makeStatus(overrides: Partial<Status> = {}): Status {
     power_provisional: false,
     today_seconds: 779,
     today_xp: 129,
+    last_activity_at: '2026-10-31T09:06:34+08:00',
     required_xp: 100,
     checkin: 'verified',
     streak: {

@@ -8,7 +8,6 @@ import {
   formatSettlement,
   formatSettlementShort,
   formatWeekStart,
-  groupLabel,
   tierMeta,
 } from './home'
 
@@ -20,7 +19,6 @@ describe('home mapping', () => {
     )
 
     expect(view.tier.label).toBe('青铜')
-    expect(view.groupLabel).toBe('青铜 · G01')
     expect(view.displayName).toBe('那尔')
     expect(view.todayXp).toBe(129)
     expect(view.goalXp).toBe(100)
@@ -29,7 +27,6 @@ describe('home mapping', () => {
     expect(view.checkedIn).toBe(true)
     expect(view.weekXp).toBe(524)
     expect(view.rank).toBe(10)
-    expect(view.groupSize).toBe(15)
     expect(view.streak).toBe(2)
     expect(view.gems).toBe(128)
     expect(view.diamonds).toBe(720)
@@ -54,6 +51,8 @@ describe('home mapping', () => {
     expect(view.nextRankXpGap).toBe(225)
     expect(view.nextRank).toBe(9)
     expect(view.leaderXp).toBe(8019)
+    expect(view.todayUpdatedAt).toBe('2026-10-31T09:06:34+08:00')
+    expect(view.todayHasActivity).toBe(true)
     expect(view.weekStartLabel).toBe('10月26日')
     expect(view.settlementLabel).toBe('1 天 15 小时后结算')
   })
@@ -91,7 +90,6 @@ describe('home mapping', () => {
     expect(view.rank).toBeNull()
     expect(view.topThree).toEqual([])
     expect(view.selfRow).toBeNull()
-    expect(view.groupLabel).toBe('待分入小组')
   })
 
   it('uses the board row when the current player is in the top three', () => {
@@ -141,7 +139,6 @@ describe('formatting', () => {
   it('formats numbers and week starts for zh-CN', () => {
     expect(formatNumber(8019)).toBe('8,019')
     expect(formatWeekStart('2026-10-26')).toBe('10月26日')
-    expect(groupLabel(null)).toBe('待分入小组')
   })
 
   it('formats settlement windows without inventing data', () => {

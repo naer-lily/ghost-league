@@ -65,13 +65,13 @@ export function SettingsDialog({ home }: SettingsDialogProps) {
             </Dialog.Close>
           </div>
           <Dialog.Description className={styles.description}>
-            这些选项沿用现有账号能力，不会改动联赛数据。
+            音量、外观和账号都在这里；这些选项沿用现有账号能力。
           </Dialog.Description>
 
           <section className={styles.section} aria-labelledby="setting-sound">
             <div className={styles.sectionHead}>
               <div>
-                <h3 id="setting-sound">声音</h3>
+                <h3 id="setting-sound">音量</h3>
                 <p>按钮和刷新时的轻提示音。</p>
               </div>
               <button
@@ -135,15 +135,6 @@ export function SettingsDialog({ home }: SettingsDialogProps) {
                 {describeApiError(updateTheme.error)}
               </p>
             ) : null}
-          </section>
-
-          <section className={styles.section} aria-labelledby="setting-data">
-            <div className={styles.sectionHead}>
-              <div>
-                <h3 id="setting-data">数据</h3>
-                <p>首页每 30 秒自动更新，也可以点顶栏刷新。</p>
-              </div>
-            </div>
           </section>
 
           <section className={styles.section} aria-labelledby="setting-account">

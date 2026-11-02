@@ -8,6 +8,8 @@ import { apiFetch, ApiError } from './client'
 import type {
   BetKind,
   BetsState,
+  Collection,
+  FriendsStandings,
   HomeSnapshot,
   PlaceBetResult,
   Profile,
@@ -21,6 +23,8 @@ import type {
 
 export const homeQueryKey: QueryKey = ['home', 'snapshot']
 export const shopQueryKey: QueryKey = ['shop', 'catalog']
+export const collectionQueryKey: QueryKey = ['collection']
+export const friendsQueryKey: QueryKey = ['friends', 'standings']
 
 export interface PurchaseShopItemVariables {
   itemId: string
@@ -56,6 +60,37 @@ export function useHomeSnapshot() {
   })
 }
 
+export function useCollection(enabled = true) {
+  return useQuery({
+    queryKey: collectionQueryKey,
+    queryFn: ({ signal }) =>
+      apiFetch<Collection>('/v1/me/collection', signal ? { signal } : {}),
+    enabled,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    retry: (count, error) =>
+      !(error instanceof ApiError && error.status === 401) && count < 1,
+  })
+}
+
+export function useFriendsStandings(enabled = true) {
+  return useQuery({
+    queryKey: friendsQueryKey,
+    queryFn: ({ signal }) =>
+      apiFetch<FriendsStandings>(
+        '/v1/me/friends/standings',
+        signal ? { signal } : {},
+      ),
+    enabled,
+    staleTime: 15_000,
+    refetchInterval: enabled ? 30_000 : false,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
+    retry: (count, error) =>
+      !(error instanceof ApiError && error.status === 401) && count < 1,
+  })
+}
+
 export function useShopCatalog() {
   return useQuery({
     queryKey: shopQueryKey,
@@ -82,6 +117,7 @@ export function usePurchaseShopItem() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: homeQueryKey }),
         queryClient.invalidateQueries({ queryKey: shopQueryKey }),
+        queryClient.invalidateQueries({ queryKey: collectionQueryKey }),
       ])
     },
   })

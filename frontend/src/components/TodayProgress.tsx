@@ -1,11 +1,6 @@
 import { motion, useReducedMotion } from 'framer-motion'
 import { Flame } from 'lucide-react'
-import {
-  type CSSProperties,
-  useEffect,
-  useRef,
-  useState,
-} from 'react'
+import { type CSSProperties, useEffect, useState } from 'react'
 import { tierStyleVars, type TierMeta } from '../lib/home'
 import {
   buildTodayProgress,
@@ -36,27 +31,6 @@ function useClock(fixed?: Date): Date {
   return fixed ?? now
 }
 
-/**
- * `status.updated_at` currently moves on every status request, so using it
- * directly would make the fire badge permanent. Freeze the timestamp until XP
- * actually increases; an XP decrease (for example a new day) clears it.
- */
-function useLastXpUpdate(todayXp: number, updatedAt: string): string {
-  const [lastXpAt, setLastXpAt] = useState(updatedAt)
-  const previousXp = useRef(todayXp)
-
-  useEffect(() => {
-    if (todayXp > previousXp.current) {
-      setLastXpAt(updatedAt)
-    } else if (todayXp < previousXp.current) {
-      setLastXpAt('')
-    }
-    previousXp.current = todayXp
-  }, [todayXp, updatedAt])
-
-  return lastXpAt
-}
-
 export function TodayProgress({
   todayXp,
   todaySeconds,
@@ -66,9 +40,8 @@ export function TodayProgress({
 }: TodayProgressProps) {
   const reducedMotion = useReducedMotion()
   const now = useClock(fixedNow)
-  const lastXpAt = useLastXpUpdate(todayXp, updatedAt)
   const view = buildTodayProgress(
-    { todayXp, todaySeconds, updatedAt: lastXpAt },
+    { todayXp, todaySeconds, updatedAt },
     now,
   )
   const style = tierStyleVars(tier) as CSSProperties
@@ -86,11 +59,11 @@ export function TodayProgress({
             今日进度
           </h2>
 
-          {view.recentlyUpdated ? (
+          {view.updateLabel ? (
             <motion.span
               className={styles.recent}
               data-testid="recent-update"
-              aria-label="最近 10 分钟内有 XP 更新"
+              aria-label="最近 1 小时内有 XP 更新"
               initial={
                 reducedMotion ? false : { opacity: 0, scale: 0.82, y: 2 }
               }
@@ -107,7 +80,7 @@ export function TodayProgress({
                 fill="currentColor"
                 aria-hidden="true"
               />
-              <span>刚刚更新</span>
+              <span>{view.updateLabel}</span>
             </motion.span>
           ) : null}
         </div>
@@ -212,9 +185,6 @@ export function TodayProgress({
       </div>
 
       <div className={styles.footer}>
-        <span className={styles.tierNow} data-testid="today-current-tier">
-          第 {view.currentIndex + 1} 档 · {view.currentTier.minutes} 分钟
-        </span>
         <span
           className={styles.remaining}
           data-testid="today-remaining"

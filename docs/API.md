@@ -619,6 +619,7 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
   "power_provisional": false,
   "today_seconds": 137,
   "today_xp": 22,
+  "last_activity_at": "2026-10-26T16:30:00+08:00",
   "required_xp": 100,
   "checkin": null,
   "streak": {
@@ -664,6 +665,9 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 ```
 
 - 该接口只读当前 token 的账号，不提供全员状态。
+- `last_activity_at` 是本周最后一条 `activity_events.occurred_at`，没有活动时为 `null`。
+  前端用它计算“刚刚更新/N 分钟前更新”，超过 1 小时不再显示“刚刚更新”；`updated_at`
+  仍是响应生成时间，两者语义不同。
 - `gems` 继续是原来的展示值，由该玩家 `weekly_scores` 的累计 `SUM(xp) // 10` 派生，
   每累计 10 XP 得 1 个宝石；不按本周 XP 重置，也没有独立 ledger 表。`gems` 不是钻石，
   不会因为商店消费而变化。

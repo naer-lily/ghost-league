@@ -518,3 +518,144 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+
+/* --------------------------------------------------------------- tabs */
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0 0 16px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 44px;
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.tabActive {
+  background: var(--surface-3);
+  color: var(--purple);
+  box-shadow: inset 0 0 0 1px rgba(206, 130, 255, 0.3);
+}
+
+.tabPanel {
+  min-width: 0;
+}
+
+.collectionList {
+  display: grid;
+  gap: 8px;
+}
+
+.collectionRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(13, 23, 28, 0.45);
+}
+
+.collectionRow[data-equipped="true"] {
+  border-color: rgba(206, 130, 255, 0.4);
+}
+
+.collectionText {
+  min-width: 0;
+}
+
+.collectionText strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.collectionText p {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.collectionText small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted-2);
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.equippedTag {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background: rgba(206, 130, 255, 0.12);
+  color: var(--purple);
+  font-size: 0.6rem;
+  font-weight: 900;
+}
+
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  padding: 28px 12px 8px;
+  text-align: center;
+}
+
+.emptyIcon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--muted);
+}
+
+.emptyTitle {
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.emptyCopy {
+  max-width: 34ch;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.collectionSkeleton {
+  display: grid;
+  gap: 8px;
+}
+
+.skeletonRow {
+  height: 62px;
+  border-radius: 12px;
+  background: linear-gradient(
+    100deg,
+    rgba(43, 61, 69, 0.5) 20%,
+    rgba(74, 93, 103, 0.42) 45%,
+    rgba(43, 61, 69, 0.5) 70%
+  );
+  background-size: 220% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}

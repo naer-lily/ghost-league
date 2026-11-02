@@ -84,32 +84,6 @@
   text-overflow: ellipsis;
 }
 
-.iconAction {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  color: var(--muted);
-  transition:
-    background-color 0.15s ease,
-    color 0.15s ease,
-    transform 0.1s ease;
-}
-
-.iconAction:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
-}
-
-.iconAction:active {
-  transform: scale(0.94);
-}
-
-.iconAction[aria-pressed="true"] {
-  color: var(--green);
-}
-
 .avatarButton {
   display: grid;
   place-items: center;
@@ -120,16 +94,6 @@
 
 .avatarButton:hover {
   background: rgba(255, 255, 255, 0.06);
-}
-
-.spinning {
-  animation: spin 0.9s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .tooltip {
@@ -176,7 +140,7 @@
   left: 0;
   z-index: 70;
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   height: calc(var(--bottom-nav) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   border-top: 1px solid var(--border);
@@ -233,7 +197,6 @@
 }
 
 .app[data-icon-theme="material"] .bottomItem svg,
-.app[data-icon-theme="material"] .iconAction svg,
 .app[data-icon-theme="material"] .railItem svg {
   fill: rgba(255, 255, 255, 0.08);
   stroke-width: 2.6;

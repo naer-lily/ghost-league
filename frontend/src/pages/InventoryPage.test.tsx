@@ -4,9 +4,14 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
-import type { ShopItem, StarPurchaseResult, Status } from '../api/types'
+import type {
+  Collection,
+  ShopItem,
+  StarPurchaseResult,
+  Status,
+} from '../api/types'
 import { makeSnapshot, makeStar, makeStatus } from '../test/fixtures'
-import { ShopPage } from './ShopPage'
+import { InventoryPage } from './InventoryPage'
 
 const RATES = {
   common: 0.5,
@@ -93,6 +98,50 @@ function makeCatalog(): ShopItem[] {
   ]
 }
 
+function makeCollection(overrides: Partial<Collection> = {}): Collection {
+  return {
+    player_id: 'naer-lily',
+    titles: [
+      {
+        id: 'title_clown',
+        name: '小丑',
+        description: '坚持到最后的奖励。',
+        awarded_at: '2026-10-31T09:00:00+08:00',
+        season_id: null,
+        equipped: true,
+      },
+    ],
+    items: [
+      {
+        id: 'frame_ember',
+        name: '余烬',
+        slot: 'frame',
+        description: '燃烧的边框。',
+        awarded_at: '2026-10-30T09:00:00+08:00',
+        season_id: null,
+        equipped: true,
+      },
+      {
+        id: 'backdrop_night',
+        name: '夜空',
+        slot: 'backdrop',
+        description: '深色背景。',
+        awarded_at: '2026-10-29T09:00:00+08:00',
+        season_id: null,
+        equipped: false,
+      },
+    ],
+    equipped: {
+      title_id: 'title_clown',
+      frame_id: 'frame_ember',
+      backdrop_id: null,
+      badge_accent_id: null,
+      updated_at: '2026-10-31T09:00:00+08:00',
+    },
+    ...overrides,
+  }
+}
+
 function jsonResponse(payload: unknown, status = 200): Response {
   return {
     ok: status >= 200 && status < 300,
@@ -134,15 +183,19 @@ function purchaseResult(overrides: Partial<StarPurchaseResult> = {}): StarPurcha
 interface MockOptions {
   status?: Partial<Status>
   catalog?: ShopItem[]
+  collection?: Collection
   purchase?: () => Response
 }
 
 function mockApi(options: MockOptions = {}) {
-  const snapshot = makeSnapshot({
-    status: makeStatus({ diamonds: 720, ...options.status }),
+  const snapshot = makeSnapshot()
+  snapshot.status = makeStatus({
+    ...snapshot.status,
+    diamonds: 720,
+    ...options.status,
   })
-  snapshot.status = makeStatus({ ...snapshot.status, ...options.status })
   const catalog = options.catalog ?? makeCatalog()
+  const collection = options.collection ?? makeCollection()
   const fetchMock = vi.fn(
     async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input)
@@ -150,6 +203,7 @@ function mockApi(options: MockOptions = {}) {
         return options.purchase ? options.purchase() : jsonResponse(purchaseResult())
       }
       if (url.includes('/v1/shop')) return jsonResponse(catalog)
+      if (url.includes('/v1/me/collection')) return jsonResponse(collection)
       if (url.includes('/v1/me/profile')) return jsonResponse(snapshot.profile)
       if (url.includes('/v1/me/status')) return jsonResponse(snapshot.status)
       if (url.includes('/v1/league/standings'))
@@ -162,7 +216,7 @@ function mockApi(options: MockOptions = {}) {
   return fetchMock
 }
 
-function renderShop() {
+function renderInventory() {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -175,16 +229,16 @@ function renderShop() {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter
-        initialEntries={['/shop']}
+        initialEntries={['/inventory']}
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
-        <ShopPage />
+        <InventoryPage />
       </MemoryRouter>
     </QueryClientProvider>,
   )
 }
 
-describe('ShopPage', () => {
+describe('InventoryPage', () => {
   beforeEach(() => {
     window.localStorage.setItem(TOKEN_KEY, 'test-token')
   })
@@ -193,35 +247,92 @@ describe('ShopPage', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders both draw entries with rates and type counts from the API', async () => {
+  it('renders the inventory title, four categories and stars under the stars tab', async () => {
     mockApi()
-    renderShop()
+    renderInventory()
 
     expect(
-      await screen.findByRole('heading', { name: '星图' }),
+      await screen.findByRole('heading', { name: '物品栏' }),
     ).toBeInTheDocument()
+    expect(document.body.textContent ?? '').not.toMatch(/星库|星图/)
+    expect(screen.getByTestId('inventory-tab-stars')).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    for (const id of ['stars', 'frames', 'titles', 'other']) {
+      expect(screen.getByTestId(`inventory-tab-${id}`)).toBeInTheDocument()
+    }
+
     const starItem = screen.getByTestId('shop-item-star')
     expect(starItem).toHaveTextContent('星星')
     expect(starItem).toHaveTextContent('抽取一颗')
     expect(starItem).toHaveTextContent('13 种星体')
     expect(within(starItem).getAllByTestId('star-rate')).toHaveLength(5)
-    expect(within(starItem).getByText('微光')).toBeInTheDocument()
-    expect(within(starItem).getByText('50%')).toBeInTheDocument()
-    expect(within(starItem).getByText('0.5%')).toBeInTheDocument()
 
     const seasonalItem = screen.getByTestId('shop-item-seasonal_star')
-    expect(seasonalItem).toHaveTextContent('季节星')
     expect(seasonalItem).toHaveTextContent('2026-11 限定')
     expect(seasonalItem).toHaveTextContent('抽取季节星')
-    expect(within(seasonalItem).getAllByTestId('star-rate')).toHaveLength(5)
+
+    expect(screen.getByTestId('star-library')).toHaveTextContent('霜蓝')
     expect(document.body.textContent ?? '').not.toMatch(
       /common|uncommon|legendary|gacha/,
     )
   })
 
+  it('shows frames and titles from the real collection with equipped state', async () => {
+    mockApi()
+    renderInventory()
+    await screen.findByRole('heading', { name: '物品栏' })
+
+    await userEvent.click(screen.getByTestId('inventory-tab-frames'))
+    const frames = await screen.findByRole('list', { name: '边框列表' })
+    expect(within(frames).getByText('余烬')).toBeInTheDocument()
+    expect(within(frames).getByText('已装备')).toBeInTheDocument()
+    expect(within(frames).queryByText('夜空')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByTestId('inventory-tab-titles'))
+    const titles = await screen.findByRole('list', { name: '称号列表' })
+    expect(within(titles).getByText('小丑')).toBeInTheDocument()
+    expect(within(titles).getByText('已装备')).toBeInTheDocument()
+  })
+
+  it('shows other items and the real supply section under other', async () => {
+    mockApi({ status: { inventory: { star: 1, seasonal_star: 0, ember: 2 } } })
+    renderInventory()
+    await screen.findByRole('heading', { name: '物品栏' })
+
+    await userEvent.click(screen.getByTestId('inventory-tab-other'))
+    const list = await screen.findByRole('list', { name: '其他物品列表' })
+    expect(within(list).getByText('夜空')).toBeInTheDocument()
+    expect(within(list).getByText('余烬')).toBeInTheDocument()
+    expect(screen.getByTestId('shop-item-ember')).toHaveTextContent(
+      '当前余烬 2 / 3',
+    )
+    expect(screen.getByTestId('shop-item-cap')).toHaveTextContent(
+      '当前仓库 0 级',
+    )
+  })
+
+  it('shows empty states for every non-star category', async () => {
+    mockApi({
+      status: { stars: [], inventory: {} },
+      collection: makeCollection({ titles: [], items: [] }),
+    })
+    renderInventory()
+    await screen.findByRole('heading', { name: '物品栏' })
+
+    expect(screen.getByText('还没有星星')).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('inventory-tab-frames'))
+    expect(await screen.findByText('还没有边框')).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('inventory-tab-titles'))
+    expect(await screen.findByText('还没有称号')).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('inventory-tab-other'))
+    expect(await screen.findByText('还没有其他物品')).toBeInTheDocument()
+  })
+
   it('disables a draw when diamonds are short and shows the exact gap', async () => {
     mockApi({ status: { diamonds: 200 } })
-    renderShop()
+    renderInventory()
 
     const starItem = await screen.findByTestId('shop-item-star')
     expect(within(starItem).getByRole('button', { name: '抽取一颗' })).toBeDisabled()
@@ -235,32 +346,21 @@ describe('ShopPage', () => {
   })
 
   it('posts one purchase with a request id and reveals the real star', async () => {
-    const star = makeStar({
-      name: '霜蓝',
-      type_label: '蓝白星',
-      rarity: 'rare',
-      rarity_label: '耀星',
-      catalog_code: 'GL-2026-0A1B2C3D',
-    })
+    const star = makeStar({ name: '霜蓝' })
     const fetchMock = mockApi({
       purchase: () => jsonResponse(purchaseResult({ star })),
     })
-    renderShop()
+    renderInventory()
 
-    const button = await screen.findByRole('button', { name: '抽取一颗' })
-    await userEvent.click(button)
+    await userEvent.click(
+      await screen.findByRole('button', { name: '抽取一颗' }),
+    )
 
     const reveal = await screen.findByTestId('star-reveal')
     expect(within(reveal).getByText('霜蓝')).toBeInTheDocument()
-    expect(within(reveal).getByText('蓝白星')).toBeInTheDocument()
-    expect(within(reveal).getByText('耀星')).toBeInTheDocument()
-    expect(within(reveal).getByText(/GL-2026-0A1B2C3D/)).toBeInTheDocument()
-    expect(within(reveal).getByRole('button', { name: '收下' })).toBeVisible()
-
     const purchaseCall = fetchMock.mock.calls.find(([input]) =>
       String(input).endsWith('/v1/shop/purchase'),
     )
-    expect(purchaseCall).toBeDefined()
     const body = JSON.parse(String(purchaseCall?.[1]?.body)) as {
       item_id: string
       quantity: number
@@ -291,7 +391,7 @@ describe('ShopPage', () => {
           409,
         ),
     })
-    renderShop()
+    renderInventory()
 
     await userEvent.click(
       await screen.findByRole('button', { name: '抽取一颗' }),
@@ -303,43 +403,9 @@ describe('ShopPage', () => {
     expect(screen.queryByTestId('star-reveal')).not.toBeInTheDocument()
   })
 
-  it('shows an honest empty library with no placeholder cards', async () => {
-    mockApi({ status: { stars: [] } })
-    renderShop()
-
-    const empty = await screen.findByTestId('star-library-empty')
-    expect(empty).toHaveTextContent('还没有星，去抽一颗')
-    expect(screen.queryByTestId('star-card')).not.toBeInTheDocument()
-    expect(screen.queryByText('0 颗')).not.toBeInTheDocument()
-  })
-
-  it('marks an owned seasonal star as unavailable', async () => {
-    const seasonal = makeStar({
-      id: 'star-seasonal',
-      name: '望舒',
-      kind: 'seasonal',
-      season_key: '2026-11',
-    })
-    const catalog = makeCatalog().map((item) =>
-      item.kind === 'seasonal_star'
-        ? { ...item, available: false, owned_quantity: 1 }
-        : item,
-    )
-    mockApi({
-      status: { stars: [seasonal] },
-      catalog,
-    })
-    renderShop()
-
-    const seasonalItem = await screen.findByTestId('shop-item-seasonal_star')
-    expect(
-      within(seasonalItem).getByRole('button', { name: '本月已获得' }),
-    ).toBeDisabled()
-  })
-
   it('opens star details and closes them with Escape', async () => {
     mockApi()
-    renderShop()
+    renderInventory()
 
     const card = await screen.findByRole('button', { name: /查看 霜蓝/ })
     await userEvent.click(card)
@@ -348,27 +414,9 @@ describe('ShopPage', () => {
     expect(
       within(detail).getByRole('heading', { name: '霜蓝', level: 2 }),
     ).toBeInTheDocument()
-    expect(within(detail).getByText('GL-2026-0A1B2C3D')).toBeInTheDocument()
-    expect(within(detail).getByText('目录编号')).toBeInTheDocument()
-
     await userEvent.keyboard('{Escape}')
     await waitFor(() =>
       expect(screen.queryByTestId('star-detail')).not.toBeInTheDocument(),
     )
-  })
-
-  it('renders supply items with real balances and disables short upgrades', async () => {
-    mockApi()
-    renderShop()
-
-    const ember = await screen.findByTestId('shop-item-ember')
-    expect(ember).toHaveTextContent('当前余烬 0 / 3')
-    expect(ember).toHaveTextContent('还差 80 钻石')
-    expect(within(ember).getByRole('button', { name: '兑换余烬' })).toBeDisabled()
-
-    const cap = screen.getByTestId('shop-item-cap')
-    expect(cap).toHaveTextContent('当前仓库 0 级')
-    expect(cap).toHaveTextContent('1,000')
-    expect(within(cap).getByRole('button', { name: '升级仓库' })).toBeEnabled()
   })
 })

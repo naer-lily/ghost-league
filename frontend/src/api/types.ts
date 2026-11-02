@@ -107,6 +107,7 @@ export interface Status {
   power_provisional: boolean
   today_seconds: number
   today_xp: number
+  last_activity_at: string | null
   required_xp: number
   checkin: string | null
   streak: Streak
@@ -270,4 +271,66 @@ export interface BetsState {
 export interface PlaceBetResult {
   bet: Bet
   state: RivalState
+}
+
+
+export interface CollectionTitle {
+  id: string
+  name: string
+  description: string
+  awarded_at: string
+  season_id: number | null
+  equipped: boolean
+}
+
+export interface CollectionItem {
+  id: string
+  name: string
+  slot: 'frame' | 'backdrop' | 'badge_accent' | string
+  description: string
+  awarded_at: string
+  season_id: number | null
+  equipped: boolean
+}
+
+export interface CollectionEquipped {
+  title_id: string | null
+  frame_id: string | null
+  backdrop_id: string | null
+  badge_accent_id: string | null
+  updated_at: string | null
+}
+
+export interface Collection {
+  player_id: string
+  titles: CollectionTitle[]
+  items: CollectionItem[]
+  equipped: CollectionEquipped
+}
+
+export interface FriendSummary {
+  user_id: string
+  display_name: string
+  avatar_url: string | null
+  activity_label: string | null
+  tier: string | null
+  group_id: number | null
+  week_start: string
+  xp: number
+  rank: number | null
+  group_size: number
+  checkin: string | null
+  streak: number
+  equipped_title: string | null
+  frame: string | null
+  backdrop: string | null
+  badge_accent: string | null
+  is_following: boolean
+  following_count: number
+  followers_count: number
+}
+
+export interface FriendsStandings {
+  week_start: string
+  members: FriendSummary[]
 }

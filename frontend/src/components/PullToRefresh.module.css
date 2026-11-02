@@ -1,0 +1,61 @@
+.wrap {
+  width: 100%;
+  min-width: 0;
+  touch-action: pan-y;
+}
+
+.indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  transition:
+    height 0.16s ease,
+    opacity 0.16s ease;
+}
+
+.indicator[data-ready="true"] {
+  color: var(--green);
+}
+
+.indicator[data-refreshing="true"] {
+  color: var(--cyan);
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+}
+
+.spinner[data-spinning="true"] {
+  animation: spin 0.8s linear infinite;
+}
+
+.error {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 75, 75, 0.42);
+  border-radius: 10px;
+  background: var(--red-soft);
+  color: #ffb0b0;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.content {
+  min-width: 0;
+  will-change: transform;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

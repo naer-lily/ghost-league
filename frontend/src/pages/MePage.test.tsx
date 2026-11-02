@@ -1,9 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
 import { makeSnapshot } from '../test/fixtures'
+import { useUiStore } from '../store/useUiStore'
 import { MePage } from './MePage'
 
 function response(payload: unknown, status = 200): Response {
@@ -37,69 +39,82 @@ function mockSnapshot(snapshot = makeSnapshot()) {
   })
 }
 
-describe('MePage', () => {
+describe('MePage rework', () => {
   beforeEach(() => {
     window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    useUiStore.setState({ settingsOpen: false })
   })
 
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it('renders one player row, a flat stat trio, a small ring and my rank row', async () => {
+  it('renders diamonds, streak, weekly stats, horizontal tiers and menu entries', async () => {
     vi.stubGlobal('fetch', mockSnapshot())
 
     renderMe()
 
     const header = await screen.findByTestId('player-header')
-    expect(header.children).toHaveLength(4)
-    expect(screen.getAllByTestId('tier-icon')).toHaveLength(1)
-    expect(
-      screen.getByTestId('tier-icon').querySelector('img')?.getAttribute('src'),
-    ).toBe('/assets/tiers/material/bronze.png')
-    expect(
-      screen
-        .getAllByTestId('streak-badge')
-        .some(
-          (badge) =>
-            badge.getAttribute('aria-label') === '连续 2 天，今天已打卡',
-        ),
-    ).toBe(true)
+    expect(header.children).toHaveLength(5)
+    expect(screen.getByTestId('player-diamonds')).toHaveTextContent('720')
+    expect(screen.getByTestId('player-tier')).toHaveTextContent('青铜')
+    expect(screen.getByTestId('player-tier')).not.toHaveTextContent('G01')
+    expect(screen.getByTestId('streak-badge')).toHaveTextContent('2')
+
+    const stages = screen.getAllByTestId('tier-stage')
+    expect(stages).toHaveLength(10)
+    expect(stages[0]).toHaveAttribute('data-state', 'current')
+    expect(stages[0]).toHaveAttribute('aria-current', 'step')
+    expect(stages[1]).toHaveAttribute('data-state', 'future')
+    expect(screen.getByTestId('tier-progress')).toHaveTextContent('第 1 / 10 阶段')
 
     const week = screen.getByTestId('me-stat-week')
+    const today = screen.getByTestId('me-stat-today')
     const rank = screen.getByTestId('me-stat-rank')
-    const embers = screen.getByTestId('me-stat-embers')
-    expect(week).toHaveTextContent('本周')
-    expect(week).toHaveTextContent('524 XP')
-    expect(week.querySelectorAll('small')).toHaveLength(1)
-    expect(week.querySelector('small')).toHaveTextContent('XP')
-    expect(rank).toHaveTextContent('排名')
+    expect(week).toHaveTextContent('本周 XP')
+    expect(week).toHaveTextContent('524')
+    expect(today).toHaveTextContent('今日 XP')
+    expect(today).toHaveTextContent('129')
+    expect(rank).toHaveTextContent('本周排名')
     expect(rank).toHaveTextContent('10')
-    expect(embers).toHaveTextContent('余烬')
-    expect(embers).toHaveTextContent('0')
+    expect(rank).not.toHaveTextContent('/15')
 
-    const ring = screen.getByRole('progressbar', { name: '今日 XP 目标' })
-    expect(ring).toHaveAttribute('aria-valuenow', '100')
-    expect(ring).toHaveStyle({ width: '68px', height: '68px' })
+    expect(screen.getByTestId('me-streak-current')).toHaveTextContent('2')
+    expect(screen.getByTestId('me-streak-longest')).toHaveTextContent('2')
+    expect(screen.getByTestId('me-streak-checkin')).toHaveTextContent('已打卡')
 
     const resources = screen.getByTestId('me-resource-row')
-    expect(resources).toHaveAttribute('href', '/shop')
+    expect(resources).toHaveAttribute('href', '/inventory')
     expect(resources).toHaveTextContent('钻石')
+    expect(resources).toHaveTextContent('星星')
+    expect(resources).not.toHaveTextContent('星图')
     expect(within(resources).getByTestId('me-diamonds')).toHaveTextContent('720')
     expect(within(resources).getByTestId('me-stars')).toHaveTextContent('1')
-    expect(resources).toHaveTextContent('星图')
-    expect(within(resources).getByTestId('me-power')).toHaveTextContent(
-      '1,667',
+    expect(within(resources).getByTestId('me-power')).toHaveTextContent('1,667')
+
+    expect(
+      screen.queryByRole('link', { name: '我的榜单位置，第 10 名' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/G01|我的组|组号/)).not.toBeInTheDocument()
+    expect(screen.getByTestId('pull-to-refresh')).toBeInTheDocument()
+
+    const menu = screen.getByRole('navigation', { name: '我的菜单' })
+    expect(within(menu).getByRole('link', { name: /物品栏/ })).toHaveAttribute(
+      'href',
+      '/inventory',
     )
+    expect(within(menu).getByRole('link', { name: /历史/ })).toHaveAttribute(
+      'href',
+      '/history',
+    )
+  })
 
-    const rankRow = screen.getByRole('link', {
-      name: '我的榜单位置，第 10 名',
-    })
-    expect(rankRow).toHaveAttribute('href', '/league')
-    expect(rankRow).toHaveTextContent('我的榜单位置')
-    expect(rankRow).toHaveTextContent('10')
+  it('opens the existing settings dialog from the Me menu', async () => {
+    vi.stubGlobal('fetch', mockSnapshot())
+    renderMe()
 
-    expect(document.querySelectorAll('[class*="card"]')).toHaveLength(0)
-    expect(document.body.textContent ?? '').not.toMatch(/连胜|连续|已打卡/)
+    await screen.findByTestId('player-header')
+    await userEvent.click(screen.getByRole('button', { name: /设置/ }))
+    expect(useUiStore.getState().settingsOpen).toBe(true)
   })
 })

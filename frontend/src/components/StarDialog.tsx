@@ -43,7 +43,7 @@ export function StarDialog({ reveal, detail, onClose }: StarDialogProps) {
             <div className={styles.head}>
               <div className={styles.headText}>
                 <p className="eyebrow">
-                  {mode === 'reveal' ? '抽取结果' : '星库详情'}
+                  {mode === 'reveal' ? '抽取结果' : '星星详情'}
                 </p>
                 <Dialog.Title id={titleId} className={styles.title}>
                   {mode === 'reveal' ? '获得新星' : star.name}
@@ -62,7 +62,7 @@ export function StarDialog({ reveal, detail, onClose }: StarDialogProps) {
 
             <Dialog.Description id={descriptionId} className={styles.description}>
               {mode === 'reveal'
-                ? '这颗星已经放进星库，收下后可以随时查看。'
+                ? '这颗星已经放进物品栏，收下后可以随时查看。'
                 : `${star.type_label} · ${star.rarity_label}`}
             </Dialog.Description>
 

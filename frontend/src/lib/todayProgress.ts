@@ -19,8 +19,11 @@ export const TODAY_GOAL_TIERS: readonly TodayGoalTier[] = [
 
 export const TODAY_GOAL_MAX_XP = TODAY_GOAL_TIERS[TODAY_GOAL_TIERS.length - 1]!.xp
 
-/** The fire marker is only for a recent status update, never permanent. */
-export const RECENT_UPDATE_WINDOW_MS = 10 * 60 * 1000
+/**
+ * The fire marker is only for a real recent activity timestamp. Anything older
+ * than one hour is stale and must not say "刚刚更新".
+ */
+export const RECENT_UPDATE_WINDOW_MS = 60 * 60 * 1000
 
 export type TodayTierState = 'complete' | 'current' | 'future'
 
@@ -50,6 +53,7 @@ export interface TodayProgressView {
   percent: number
   allComplete: boolean
   recentlyUpdated: boolean
+  updateLabel: string
   valueText: string
 }
 
@@ -64,21 +68,32 @@ function clamp01(value: number): number {
 }
 
 /**
- * `status.updated_at` is the API's current status timestamp. It is compared
- * directly with `now` for the 0–10 minute fire window; the component freezes
- * the timestamp until XP actually changes so a polling refresh cannot make the
- * marker permanent.
+ * Compare the API's real last-activity timestamp with the current clock. A
+ * missing, invalid, future or older-than-one-hour timestamp never qualifies.
  */
 export function isRecentlyUpdated(
   updatedAt: string,
   now: Date = new Date(),
   windowMs: number = RECENT_UPDATE_WINDOW_MS,
 ): boolean {
+  if (!updatedAt) return false
   const updated = new Date(updatedAt)
   const time = updated.getTime()
   if (Number.isNaN(time)) return false
   const delta = now.getTime() - time
   return delta >= 0 && delta <= windowMs
+}
+
+/** Human copy for the badge, or empty when the update is older than one hour. */
+export function relativeUpdateLabel(
+  updatedAt: string,
+  now: Date = new Date(),
+  windowMs: number = RECENT_UPDATE_WINDOW_MS,
+): string {
+  if (!isRecentlyUpdated(updatedAt, now, windowMs)) return ''
+  const delta = now.getTime() - new Date(updatedAt).getTime()
+  if (delta < 60_000) return '刚刚更新'
+  return `${Math.max(1, Math.floor(delta / 60_000))} 分钟前更新`
 }
 
 export function buildTodayProgress(
@@ -128,7 +143,7 @@ export function buildTodayProgress(
 
   const valueText = allComplete
     ? `${todayXp} XP，六档目标全部达成`
-    : `${todayXp} XP，第 ${currentIndex + 1} 档 ${currentTier.minutes} 分钟，还差 ${remainingXp} XP`
+    : `${todayXp} XP，还差 ${remainingXp} XP`
 
   return {
     todayXp,
@@ -144,6 +159,7 @@ export function buildTodayProgress(
     percent: Math.round(progress * 100),
     allComplete,
     recentlyUpdated: isRecentlyUpdated(updatedAt, now),
+    updateLabel: relativeUpdateLabel(updatedAt, now),
     valueText,
   }
 }

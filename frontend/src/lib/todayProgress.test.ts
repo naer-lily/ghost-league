@@ -3,12 +3,13 @@ import {
   buildTodayProgress,
   isRecentlyUpdated,
   RECENT_UPDATE_WINDOW_MS,
+  relativeUpdateLabel,
   TODAY_GOAL_TIERS,
 } from './todayProgress'
 
 const NOW = new Date('2026-10-31T09:10:00+08:00')
 const RECENT = '2026-10-31T09:05:00+08:00'
-const STALE = '2026-10-31T08:55:00+08:00'
+const STALE = '2026-10-31T07:55:00+08:00'
 
 function input(overrides: Partial<Parameters<typeof buildTodayProgress>[0]> = {}) {
   return {
@@ -31,7 +32,7 @@ describe('today goal tiers', () => {
 })
 
 describe('buildTodayProgress', () => {
-  it('marks completed, current and future tiers and the XP gap to the next tier', () => {
+  it('marks completed, current and future tiers and the XP gap', () => {
     const view = buildTodayProgress(input(), NOW)
 
     expect(view.todayXp).toBe(129)
@@ -50,10 +51,10 @@ describe('buildTodayProgress', () => {
       'future',
       'future',
     ])
-    // 1 completed segment + 29/200 of the current segment, over six equal parts.
     expect(view.progress).toBeCloseTo((1 + 29 / 200) / 6, 10)
     expect(view.percent).toBe(19)
-    expect(view.valueText).toBe('129 XP，第 2 档 30 分钟，还差 171 XP')
+    expect(view.valueText).toBe('129 XP，还差 171 XP')
+    expect(view.updateLabel).toBe('5 分钟前更新')
   })
 
   it('treats an exact tier target as completed and advances the current tier', () => {
@@ -124,10 +125,14 @@ describe('buildTodayProgress', () => {
 })
 
 describe('isRecentlyUpdated', () => {
-  it('shows the marker for 0–10 minutes and hides it outside the window', () => {
+  it('uses a one-hour window and compares against the real timestamp', () => {
+    expect(RECENT_UPDATE_WINDOW_MS).toBe(60 * 60 * 1000)
     expect(isRecentlyUpdated(RECENT, NOW)).toBe(true)
     expect(
-      isRecentlyUpdated('2026-10-31T09:00:00+08:00', NOW),
+      isRecentlyUpdated(
+        new Date(NOW.getTime() - RECENT_UPDATE_WINDOW_MS + 1000).toISOString(),
+        NOW,
+      ),
     ).toBe(true)
     expect(
       isRecentlyUpdated(
@@ -138,9 +143,19 @@ describe('isRecentlyUpdated', () => {
     expect(isRecentlyUpdated(STALE, NOW)).toBe(false)
   })
 
-  it('rejects future and invalid timestamps', () => {
+  it('rejects future, empty and invalid timestamps', () => {
     expect(isRecentlyUpdated('2026-10-31T09:20:00+08:00', NOW)).toBe(false)
     expect(isRecentlyUpdated('not-a-date', NOW)).toBe(false)
     expect(isRecentlyUpdated('', NOW)).toBe(false)
+  })
+
+  it('formats "刚刚更新" only inside the first minute', () => {
+    expect(relativeUpdateLabel('2026-10-31T09:09:30+08:00', NOW)).toBe(
+      '刚刚更新',
+    )
+    expect(relativeUpdateLabel('2026-10-31T09:05:00+08:00', NOW)).toBe(
+      '5 分钟前更新',
+    )
+    expect(relativeUpdateLabel(STALE, NOW)).toBe('')
   })
 })

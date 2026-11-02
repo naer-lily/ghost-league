@@ -1,11 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
+import type { RivalPlayer, RivalState } from '../api/types'
 import { makeSnapshot } from '../test/fixtures'
 import { HomePage } from './HomePage'
+
+const HOUR = 3_600_000
 
 function response(payload: unknown, status = 200): Response {
   return {
@@ -15,13 +18,79 @@ function response(payload: unknown, status = 200): Response {
   } as Response
 }
 
+function futureIso(hours: number): string {
+  return new Date(Date.now() + hours * HOUR).toISOString()
+}
+
+function player(overrides: Partial<RivalPlayer> = {}): RivalPlayer {
+  return {
+    user_id: 'naer-lily',
+    display_name: '那尔',
+    avatar_url: null,
+    group_no: 1,
+    tier: 'Bronze',
+    power: 1667,
+    week_xp: 524,
+    today_xp: 129,
+    ...overrides,
+  }
+}
+
+function rivalState(overrides: Partial<RivalState> = {}): RivalState {
+  return {
+    server_now: new Date().toISOString(),
+    week_start: '2026-10-26',
+    selection: {
+      open: true,
+      locks_at: futureIso(4),
+      auto_select_at: futureIso(28),
+      mode: null,
+    },
+    me: player(),
+    rival: player({
+      user_id: 'ch-rival',
+      display_name: '林间',
+      group_no: 7,
+      power: 980,
+      week_xp: 760,
+      today_xp: 120,
+    }),
+    result: null,
+    bets: {
+      weekly: {
+        id: 1,
+        kind: 'weekly',
+        period_key: '2026-10-26',
+        rival_id: 'ch-rival',
+        stake: 40,
+        free_stake: 20,
+        paid_stake: 20,
+        target_margin: 0,
+        odds: 2,
+        status: 'placed',
+        placed_at: new Date().toISOString(),
+        locked_at: null,
+        settled_at: null,
+        payout: 0,
+        result_diff: null,
+      },
+      daily: null,
+      group: null,
+    },
+    projection: null,
+    bet_windows: {
+      weekly_locks_at: futureIso(4),
+      daily_locks_at: futureIso(2),
+      daily_settles_at: futureIso(3),
+    },
+    ...overrides,
+  }
+}
+
 function renderHome() {
   const queryClient = new QueryClient({
     defaultOptions: {
-      queries: {
-        gcTime: 0,
-        refetchOnWindowFocus: false,
-      },
+      queries: { gcTime: 0, retry: false, refetchOnWindowFocus: false },
     },
   })
   return render(
@@ -33,9 +102,28 @@ function renderHome() {
   )
 }
 
-function mockSnapshot(snapshot = makeSnapshot()) {
+interface MockOptions {
+  snapshot?: ReturnType<typeof makeSnapshot>
+  rival?: RivalState
+  candidates?: RivalPlayer[]
+  homeFails?: () => boolean
+}
+
+function mockApi(options: MockOptions = {}) {
+  const snapshot = options.snapshot ?? makeSnapshot()
+  const rival = options.rival ?? rivalState()
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
+    if (options.homeFails?.()) return response({ detail: 'unauthorized' }, 401)
+    if (url.includes('/v1/me/rival/candidates')) {
+      return response({
+        server_now: rival.server_now,
+        week_start: rival.week_start,
+        selection_open: rival.selection.open,
+        candidates: options.candidates ?? [],
+      })
+    }
+    if (url.includes('/v1/me/rival')) return response(rival)
     if (url.includes('/v1/me/profile')) return response(snapshot.profile)
     if (url.includes('/v1/me/status')) return response(snapshot.status)
     if (url.includes('/v1/league/standings')) return response(snapshot.standings)
@@ -43,12 +131,7 @@ function mockSnapshot(snapshot = makeSnapshot()) {
   })
 }
 
-function assertNoVisibleStreakCopy() {
-  const text = document.body.textContent ?? ''
-  expect(text).not.toMatch(/连胜|连续|已打卡/)
-}
-
-describe('HomePage real data', () => {
+describe('HomePage rework', () => {
   beforeEach(() => {
     window.localStorage.setItem(TOKEN_KEY, 'test-token')
   })
@@ -57,158 +140,69 @@ describe('HomePage real data', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders one player row, the six-tier progress bar and a five-row flat board', async () => {
-    const snapshot = makeSnapshot()
-    snapshot.standings.standings[0]!.avatar_url = '/avatars/ch-xkein'
-    vi.stubGlobal('fetch', mockSnapshot(snapshot))
+  it('shows the duel card and drops the home group board and group label', async () => {
+    vi.stubGlobal('fetch', mockApi())
 
     renderHome()
 
-    expect(await screen.findByText('小组榜')).toBeInTheDocument()
-    const header = screen.getByTestId('player-header')
-    expect(header.children).toHaveLength(4)
-    expect(header.children[0]).toBe(screen.getByTestId('player-avatar'))
-    expect(header.children[1]).toBe(screen.getByTestId('player-name'))
-    expect(header.children[2]).toBe(screen.getByTestId('player-tier'))
-    expect(header.children[3]).toHaveAttribute('data-testid', 'streak-badge')
-
-    expect(screen.getAllByTestId('tier-icon')).toHaveLength(1)
-    expect(
-      screen.getByTestId('tier-icon').querySelector('img')?.getAttribute('src'),
-    ).toBe('/assets/tiers/material/bronze.png')
-    expect(screen.getByText('129')).toBeInTheDocument()
-    expect(screen.getByText('今日进度')).toBeInTheDocument()
-    expect(screen.getByText('今日 XP')).toBeInTheDocument()
-    expect(screen.getByText('今日分钟')).toBeInTheDocument()
-    expect(screen.getByText('12', { selector: 'span' })).toBeInTheDocument()
-    expect(screen.getByText('第 2 档 · 30 分钟')).toBeInTheDocument()
-    expect(screen.getByText('还差 171 XP')).toBeInTheDocument()
-    const tiers = screen.getAllByTestId('today-tier')
-    expect(tiers.map((tier) => tier.getAttribute('data-minutes'))).toEqual([
-      '10',
-      '30',
-      '60',
-      '120',
-      '180',
-      '240',
-    ])
-    expect(tiers[0]).toHaveAttribute('data-state', 'complete')
-    expect(tiers[1]).toHaveAttribute('data-state', 'current')
-    expect(tiers[5]).toHaveAttribute('data-state', 'future')
-    expect(screen.getByLabelText('本周名次 第 10 名')).toBeInTheDocument()
-    expect(screen.getByTestId('board-rank')).toHaveTextContent('10/15')
-    expect(screen.getAllByText('524').length).toBeGreaterThan(0)
-    expect(screen.getByText('8,019')).toBeInTheDocument()
-    expect(screen.getByText('@Xkein')).toBeInTheDocument()
-    expect(screen.getByText('JiPai')).toBeInTheDocument()
-    expect(screen.queryByText('我的位置')).not.toBeInTheDocument()
-    expect(screen.getAllByText('那尔').length).toBe(1)
-
-    const board = screen.getByRole('list', { name: '小组榜前五名' })
-    const rows = within(board).getAllByRole('listitem')
-    expect(rows).toHaveLength(5)
-    expect(rows[0]).toHaveAccessibleName(/@Xkein，第 1 名/)
-    expect(rows[4]).toHaveAccessibleName(/JiPai，第 5 名/)
-    expect(screen.getByRole('link', { name: '查看完整小组榜' })).toHaveAttribute(
-      'href',
-      '/league',
+    const card = await screen.findByTestId('rival-duel-card')
+    expect(card).toHaveTextContent('林间')
+    expect(screen.getByTestId('rival-me-xp')).toHaveTextContent('524 XP')
+    expect(screen.getByTestId('rival-rival-xp')).toHaveTextContent('760 XP')
+    expect(screen.getByTestId('rival-gap')).toHaveTextContent('落后 236 XP')
+    expect(screen.getByTestId('rival-bet-status-周注')).toHaveTextContent(
+      '周注 · 已下注',
     )
+    expect(screen.getByRole('button', { name: '下注' })).toBeVisible()
 
-    const badges = screen.getAllByTestId('streak-badge')
-    expect(badges.length).toBe(6)
-    for (const badge of badges) {
-      expect(badge.textContent).toMatch(/^\d+$/)
-    }
-    const heroBadge = badges.find(
-      (badge) => badge.getAttribute('aria-label') === '连续 2 天，今天已打卡',
-    )
-    expect(heroBadge).toBeDefined()
-
-    const progressbar = screen.getByRole('progressbar', {
-      name: '今日 XP 目标',
-    })
-    expect(progressbar).toHaveAttribute('aria-valuemin', '0')
-    expect(progressbar).toHaveAttribute('aria-valuemax', '2400')
-    expect(progressbar).toHaveAttribute('aria-valuenow', '129')
-    expect(progressbar.getAttribute('aria-valuetext')).toBe(
-      '129 XP，第 2 档 30 分钟，还差 171 XP',
-    )
-    expect(
-      screen.queryByRole('heading', { name: '今日 XP' }),
-    ).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '排名' })).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('本周概览')).not.toBeInTheDocument()
-    expect(document.querySelectorAll('[class*="card"]')).toHaveLength(0)
-    assertNoVisibleStreakCopy()
-
-    const calls = vi.mocked(fetch).mock.calls.map(([input]) => String(input))
-    expect(calls).toContain('/v1/me/profile')
-    expect(calls).toContain('/v1/me/status')
-    expect(calls).toContain('/v1/league/standings')
+    expect(screen.queryByText('小组榜')).not.toBeInTheDocument()
+    expect(screen.queryByText(/G01|我的组|组号/)).not.toBeInTheDocument()
+    expect(screen.queryByText('本周追一个对手，实时对撞。')).not.toBeInTheDocument()
+    expect(screen.getByTestId('player-tier')).toHaveTextContent('青铜')
+    expect(screen.getByTestId('today-progress')).toBeVisible()
+    expect(screen.queryByTestId('today-current-tier')).not.toBeInTheDocument()
   })
 
-  it('shows an explicit empty state with no invented numbers', async () => {
-    const empty = makeSnapshot({
-      status: {
-        group: null,
-        group_id: null,
-        group_size: 0,
-        rank: null,
-        xp: 0,
-        today_xp: 0,
-        checkin: null,
-        streak: {
-          current: 0,
-          longest: 0,
-          clean_current: 0,
-          last_checked_date: null,
-        },
-      },
-      standings: {
-        group: null,
-        group_id: null,
-        group_size: 0,
-        me: null,
-        standings: [],
-      },
-    })
-    vi.stubGlobal('fetch', mockSnapshot(empty))
+  it('shows an inline selection entry when no rival is selected', async () => {
+    const rival = rivalState({ rival: null })
+    const candidates = [player({ user_id: 'ch-mid', display_name: '清风与梦' })]
+    vi.stubGlobal('fetch', mockApi({ rival, candidates }))
 
     renderHome()
 
-    expect(await screen.findByText('本周还没有小组')).toBeInTheDocument()
-    expect(screen.getByTestId('player-tier')).toHaveTextContent('待分入')
-    expect(screen.getByLabelText('本周名次 第 — 名')).toBeInTheDocument()
-    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
-    assertNoVisibleStreakCopy()
+    expect(await screen.findByText('还没有宿敌')).toBeInTheDocument()
+    expect(screen.queryByText('本周追一个对手，实时对撞。')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '选择宿敌' }))
+
+    expect(await screen.findByText('清风与梦')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /选择 清风与梦 作为本周宿敌/ })).toBeVisible()
   })
 
-  it('shows the error state and retries into real data', async () => {
+  it('uses the real last activity timestamp for the update marker', async () => {
+    const snapshot = makeSnapshot({
+      status: { last_activity_at: '2026-10-31T09:06:34+08:00' },
+    })
+    vi.stubGlobal('fetch', mockApi({ snapshot }))
+
+    renderHome()
+
+    await screen.findByTestId('today-progress')
+    expect(screen.queryByTestId('recent-update')).not.toBeInTheDocument()
+  })
+
+  it('shows home errors with a real retry path', async () => {
     let failing = true
-    const snapshot = makeSnapshot()
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (failing) return response({ detail: 'unauthorized' }, 401)
-      const url = String(input)
-      if (url.includes('/v1/me/profile')) return response(snapshot.profile)
-      if (url.includes('/v1/me/status')) return response(snapshot.status)
-      return response(snapshot.standings)
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', mockApi({ homeFails: () => failing }))
 
     renderHome()
 
     expect(await screen.findByText('数据没有加载出来')).toBeInTheDocument()
-    expect(document.querySelectorAll('[class*="card"]')).toHaveLength(0)
-    expect(
-      screen.getByText('登录已失效，请重新输入令牌。'),
-    ).toBeInTheDocument()
-    expect(screen.queryByText('8,019')).not.toBeInTheDocument()
+    expect(screen.getByText('登录已失效，请重新输入令牌。')).toBeInTheDocument()
 
     failing = false
     await userEvent.click(screen.getByRole('button', { name: '重试' }))
 
-    expect(await screen.findByText('8,019')).toBeInTheDocument()
-    expect(screen.getAllByTestId('tier-icon').length).toBeGreaterThan(0)
+    expect(await screen.findByTestId('rival-duel-card')).toBeInTheDocument()
   })
 
   it('renders a loading state before the first snapshot arrives', () => {
@@ -220,7 +214,15 @@ describe('HomePage real data', () => {
     renderHome()
 
     expect(screen.getByText('正在读取本周联赛…')).toBeInTheDocument()
-    expect(screen.getByText('正在读取本周联赛…').closest('[aria-busy]')).not.toBeNull()
-    expect(document.querySelectorAll('[class*="card"]')).toHaveLength(0)
+  })
+
+  it('wraps the page in a pull-to-refresh container', async () => {
+    vi.stubGlobal('fetch', mockApi())
+
+    renderHome()
+
+    await waitFor(() =>
+      expect(screen.getByTestId('pull-to-refresh')).toBeInTheDocument(),
+    )
   })
 })

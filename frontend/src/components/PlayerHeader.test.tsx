@@ -4,9 +4,9 @@ import { buildHomeView } from '../lib/home'
 import { makeSnapshot } from '../test/fixtures'
 import { PlayerHeader } from './PlayerHeader'
 
-function renderHeader() {
+function renderHeader(diamonds?: number) {
   const view = buildHomeView(makeSnapshot())
-  return render(<PlayerHeader view={view} />)
+  return render(<PlayerHeader view={view} diamonds={diamonds} />)
 }
 
 describe('PlayerHeader', () => {
@@ -23,7 +23,7 @@ describe('PlayerHeader', () => {
     expect(header.children[0]).toBe(screen.getByTestId('player-avatar'))
     expect(header.children[1]).toBe(screen.getByTestId('player-name'))
     expect(header.children[2]).toBe(screen.getByTestId('player-tier'))
-    expect(header.children[3]).toBe(screen.getByTestId('streak-badge'))
+    expect(header.children[3]).toHaveAttribute('data-testid', 'streak-badge')
 
     const avatar = screen
       .getByTestId('player-avatar')
@@ -33,12 +33,21 @@ describe('PlayerHeader', () => {
     expect(tierIcon.style.getPropertyValue('--tier-icon-size')).toBe('20px')
 
     expect(screen.getByTestId('player-name')).toHaveTextContent('那尔')
-    expect(screen.getByTestId('player-tier')).toHaveTextContent('青铜G01')
+    expect(screen.getByTestId('player-tier')).toHaveTextContent('青铜')
+    expect(screen.getByTestId('player-tier')).not.toHaveTextContent('G01')
     expect(screen.getByTestId('streak-badge')).toHaveTextContent('2')
     expect(screen.getByTestId('streak-badge')).toHaveAttribute(
       'aria-label',
       '连续 2 天，今天已打卡',
     )
+    expect(screen.queryByTestId('player-diamonds')).not.toBeInTheDocument()
+  })
+
+  it('can show the diamond balance at the top for the Me page', () => {
+    renderHeader(720)
+
+    expect(screen.getByTestId('player-header').children).toHaveLength(5)
+    expect(screen.getByTestId('player-diamonds')).toHaveTextContent('720')
   })
 
   it('uses no card wrapper around the identity row', () => {

@@ -48,7 +48,7 @@ describe('AppShell navigation', () => {
     vi.unstubAllGlobals()
   })
 
-  it('shows icon-only navigation with accessible labels and an active block', () => {
+  it('shows five icon-only nav entries with the inventory label', () => {
     renderShell()
 
     const navs = Array.from(
@@ -58,7 +58,7 @@ describe('AppShell navigation', () => {
 
     const bottom = navs[1]!
     const bottomLinks = within(bottom).getAllByRole('link')
-    expect(bottomLinks).toHaveLength(6)
+    expect(bottomLinks).toHaveLength(5)
     for (const link of bottomLinks) {
       expect(link.textContent).toBe('')
       expect(link.getAttribute('aria-label')).toBeTruthy()
@@ -68,40 +68,42 @@ describe('AppShell navigation', () => {
     expect(bottomLinks.map((link) => link.getAttribute('aria-label'))).toEqual([
       '首页',
       '小组',
-      '宿敌',
-      '星图',
+      '物品栏',
       '历史',
       '我的',
     ])
     expect(bottomLinks.map((link) => link.getAttribute('href'))).toEqual([
       '/',
       '/league',
-      '/rival',
-      '/shop',
+      '/inventory',
       '/history',
       '/me',
     ])
     expect(
-      within(bottom).queryByRole('link', { name: '余烬' }),
+      within(bottom).queryByRole('link', { name: '宿敌' }),
     ).not.toBeInTheDocument()
-
-    for (const link of document.querySelectorAll<HTMLAnchorElement>(
-      'nav[aria-label="主导航"] a',
-    )) {
-      expect(link.textContent).toBe('')
-      expect(link.getAttribute('aria-label')).toBeTruthy()
-    }
+    expect(
+      within(bottom).queryByRole('link', { name: '星图' }),
+    ).not.toBeInTheDocument()
   })
 
-  it('shows diamonds, not gems, in the top bar and links to the star map', async () => {
+  it('keeps only diamonds and the avatar in the top bar', async () => {
     renderShell()
 
     const diamonds = await screen.findByLabelText('钻石 720')
     expect(diamonds).toHaveAttribute('data-testid', 'diamond-balance')
-    expect(diamonds).toHaveAttribute('href', '/shop')
+    expect(diamonds).toHaveAttribute('href', '/inventory')
     expect(diamonds).toHaveTextContent('720')
     expect(diamonds.textContent).not.toMatch(/钻石/)
     expect(diamonds.querySelector('svg')).not.toBeNull()
     expect(screen.queryByTestId('gem-balance')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('打开设置')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('开启声音')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('关闭声音')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('刷新联赛数据')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '个人页' })).toHaveAttribute(
+      'href',
+      '/me',
+    )
   })
 })

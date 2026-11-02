@@ -42,10 +42,22 @@
   color: var(--tier-color);
 }
 
-.group {
-  color: var(--muted-2);
-  font-size: 0.7rem;
-  letter-spacing: 0.02em;
+.diamonds {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--purple);
+  font-size: 0.78rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.diamonds svg {
+  flex: none;
+  filter: drop-shadow(0 0 6px rgba(206, 130, 255, 0.35));
 }
 
 .streak {
@@ -65,9 +77,5 @@
 
   .tier {
     font-size: 0.84rem;
-  }
-
-  .group {
-    font-size: 0.76rem;
   }
 }

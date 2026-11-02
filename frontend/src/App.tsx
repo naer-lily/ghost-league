@@ -6,7 +6,7 @@ import { LoginPage } from './pages/LoginPage'
 import { MePage } from './pages/MePage'
 import { HistoryPage, NotFoundPage } from './pages/Placeholders'
 import { RivalPage } from './pages/RivalPage'
-import { ShopPage } from './pages/ShopPage'
+import { InventoryPage } from './pages/InventoryPage'
 import { useUiStore } from './store/useUiStore'
 
 export default function App() {
@@ -20,8 +20,9 @@ export default function App() {
         <Route index element={<HomePage />} />
         <Route path="league" element={<LeaguePage />} />
         <Route path="rival" element={<RivalPage />} />
-        <Route path="shop" element={<ShopPage />} />
-        <Route path="embers" element={<Navigate to="/shop" replace />} />
+        <Route path="inventory" element={<InventoryPage />} />
+        <Route path="shop" element={<Navigate to="/inventory" replace />} />
+        <Route path="embers" element={<Navigate to="/inventory" replace />} />
         <Route path="history" element={<HistoryPage />} />
         <Route path="me" element={<MePage />} />
         <Route path="*" element={<NotFoundPage />} />

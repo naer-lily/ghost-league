@@ -102,6 +102,11 @@ const TIERS: Record<string, TierMeta> = {
 
 const FALLBACK_TIER = TIERS.Bronze as TierMeta
 
+/** All tiers in promotion order for the horizontal stage progress bar. */
+export const TIER_STAGES: readonly TierMeta[] = Object.values(TIERS).sort(
+  (left, right) => left.order - right.order,
+)
+
 export function tierMeta(tier: string | null | undefined): TierMeta {
   return (tier && TIERS[tier]) || FALLBACK_TIER
 }
@@ -161,12 +166,6 @@ export function formatSettlementShort(
   return rest ? `${days} 天 ${rest} 小时` : `${days} 天`
 }
 
-export function groupLabel(group: LeagueGroup | null): string {
-  if (!group) return '待分入小组'
-  const suffix = `G${String(group.no).padStart(2, '0')}`
-  return `${tierMeta(group.tier).label} · ${suffix}`
-}
-
 function rowFromStatus(
   profile: HomeSnapshot['profile'],
   status: Status,
@@ -205,14 +204,13 @@ export interface HomeView {
   displayName: string
   avatarUrl: string | null
   group: LeagueGroup | null
-  groupLabel: string
-  groupSize: number
   hasGroup: boolean
   emptyBoard: boolean
   todayXp: number
   todaySeconds: number
   todayMinutes: number
   todayUpdatedAt: string
+  todayHasActivity: boolean
   goalXp: number
   todayRemaining: number
   todayRatio: number
@@ -286,14 +284,13 @@ export function buildHomeView(
     displayName: status.display_name || profile.display_name,
     avatarUrl: status.avatar_url ?? profile.avatar_url,
     group,
-    groupLabel: groupLabel(group),
-    groupSize: Math.max(0, status.group_size || standings.group_size || 0),
     hasGroup: Boolean(group),
     emptyBoard: !group || standings.standings.length === 0,
     todayXp,
     todaySeconds,
     todayMinutes: Math.floor(todaySeconds / 60),
-    todayUpdatedAt: status.updated_at,
+    todayUpdatedAt: status.last_activity_at ?? '',
+    todayHasActivity: Boolean(status.last_activity_at),
     goalXp,
     todayRemaining,
     todayRatio,

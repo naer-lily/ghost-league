@@ -11,73 +11,152 @@
   padding: 6px 0 18px;
 }
 
-@media (min-width: 720px) {
-  .today {
-    padding: 8px 0 24px;
-  }
-}
-
-
-.rivalEntry {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  margin: 0 0 14px;
-  padding: 11px 12px;
+.rival {
+  min-width: 0;
+  padding: 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-tile);
+  border-radius: var(--radius-card);
   background:
-    radial-gradient(circle at 86% 10%, rgba(206, 130, 255, 0.13), transparent 55%),
+    radial-gradient(circle at 88% 0%, rgba(206, 130, 255, 0.12), transparent 52%),
     var(--surface-2);
   box-shadow: var(--shadow-card);
-  transition:
-    border-color 0.15s ease,
-    transform 0.08s ease;
 }
 
-.rivalEntry:hover {
-  border-color: rgba(206, 130, 255, 0.42);
+.rivalHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
-.rivalEntry:active {
-  transform: translateY(2px);
+.rivalTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 1rem;
+  font-weight: 900;
+  letter-spacing: -0.01em;
 }
 
-.rivalIcon {
+.rivalTitle svg {
+  color: #7fffd4;
+}
+
+.rivalAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid rgba(127, 255, 212, 0.32);
+  border-radius: var(--radius-pill);
+  background: rgba(127, 255, 212, 0.08);
+  color: #7fffd4;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.rivalSkeleton {
   display: grid;
-  flex: none;
-  width: 42px;
-  height: 42px;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.skeletonLine,
+.skeletonBar {
+  display: block;
+  border-radius: 10px;
+  background: linear-gradient(
+    100deg,
+    rgba(43, 61, 69, 0.5) 20%,
+    rgba(74, 93, 103, 0.42) 45%,
+    rgba(43, 61, 69, 0.5) 70%
+  );
+  background-size: 220% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.skeletonLine {
+  height: 58px;
+}
+
+.skeletonBar {
+  height: 16px;
+}
+
+.rivalState {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 14px 4px 6px;
+  text-align: center;
+}
+
+.rivalState p {
+  max-width: 36ch;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.rivalEmpty {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 12px;
+  padding: 4px 0 2px;
+}
+
+.rivalEmptyIcon {
+  display: grid;
   place-items: center;
+  width: 48px;
+  height: 48px;
   border: 1px solid rgba(127, 255, 212, 0.3);
-  border-radius: 13px;
+  border-radius: 14px;
   background: rgba(127, 255, 212, 0.1);
   color: #7fffd4;
 }
 
-.rivalCopy {
-  display: grid;
-  flex: 1;
-  gap: 2px;
+.rivalEmptyCopy {
   min-width: 0;
 }
 
-.rivalCopy strong {
+.rivalEmptyCopy strong {
   color: var(--text);
-  font-size: 0.86rem;
+  font-size: 0.92rem;
   font-weight: 900;
 }
 
-.rivalCopy small {
-  overflow: hidden;
+.rivalEmptyCopy p {
+  margin-top: 3px;
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
 }
 
-.rivalEntry > svg {
-  flex: none;
-  color: var(--muted-2);
+.rivalEmpty > button {
+  grid-column: 1 / -1;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 140% 0;
+  }
+  to {
+    background-position: -60% 0;
+  }
+}
+
+@media (min-width: 720px) {
+  .today {
+    padding: 8px 0 24px;
+  }
+
+  .rival {
+    padding: 18px;
+  }
 }

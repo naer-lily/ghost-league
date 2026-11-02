@@ -656,6 +656,9 @@ class GameService:
             **_power_fields(snapshot.get("player") or {}),
             "today_seconds": int(snapshot.get("today_seconds") or 0),
             "today_xp": int(snapshot.get("today_xp") or 0),
+            "last_activity_at": self.store.last_event_occurred_at(
+                user_id, week
+            ),
             "required_xp": CHECKIN_XP,
             "checkin": snapshot.get("checkin"),
             "streak": {
@@ -756,6 +759,9 @@ class GameService:
             **_power_fields(snapshot.get("player") or {}),
             "today_seconds": int(snapshot.get("today_seconds") or 0),
             "today_xp": int(snapshot.get("today_xp") or 0),
+            "last_activity_at": self.store.last_event_occurred_at(
+                user_id, week
+            ),
             "required_xp": CHECKIN_XP,
             "checkin": snapshot.get("checkin"),
             "streak": {

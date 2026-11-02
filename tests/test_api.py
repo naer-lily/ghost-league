@@ -175,6 +175,23 @@ class AuthAndHealthTests(APITestBase):
             )
             self.assertEqual(response.status_code, 200)
 
+    def test_03b_status_exposes_the_real_last_activity_time(self) -> None:
+        with self.client() as client:
+            before = client.get("/v1/me/status", headers=auth(TOKEN)).json()
+            self.assertIsNone(before["last_activity_at"])
+
+            response = self.post_increment(
+                client,
+                event_id="last-activity-001",
+                seconds=600,
+                occurred_at="2026-10-26T08:36:00+08:00",
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            status = client.get("/v1/me/status", headers=auth(TOKEN)).json()
+            self.assertEqual(
+                status["last_activity_at"], "2026-10-26T08:36:00+08:00"
+            )
+
     def test_08_public_surface_is_hardened(self) -> None:
         with self.client() as client:
             for path in ("/docs", "/redoc", "/openapi.json"):

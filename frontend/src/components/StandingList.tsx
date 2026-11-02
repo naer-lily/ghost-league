@@ -8,16 +8,22 @@ interface StandingListProps {
   rows: StandingRow[]
   label: string
   className?: string
+  showPower?: boolean
 }
 
 interface StandingRowViewProps {
   row: StandingRow
   index: number
+  showPower: boolean
 }
 
 const MEDALS = ['gold', 'silver', 'bronze'] as const
 
-export function StandingRowView({ row, index }: StandingRowViewProps) {
+export function StandingRowView({
+  row,
+  index,
+  showPower = true,
+}: StandingRowViewProps) {
   const rank = row.rank
   const medal = rank >= 1 && rank <= 3 ? MEDALS[rank - 1] : undefined
   const medalLabel =
@@ -55,9 +61,11 @@ export function StandingRowView({ row, index }: StandingRowViewProps) {
             checkedIn={Boolean(row.checkin)}
             size="sm"
           />
-          <span className={styles.power} data-testid="standing-power">
-            战力 {formatPower(row.power)}
-          </span>
+          {showPower ? (
+            <span className={styles.power} data-testid="standing-power">
+              战力 {formatPower(row.power)}
+            </span>
+          ) : null}
         </span>
       </div>
       <p className={styles.xp} data-testid="standing-xp">
@@ -68,14 +76,24 @@ export function StandingRowView({ row, index }: StandingRowViewProps) {
   )
 }
 
-export function StandingList({ rows, label, className }: StandingListProps) {
+export function StandingList({
+  rows,
+  label,
+  className,
+  showPower = true,
+}: StandingListProps) {
   return (
     <ol
       className={[styles.list, className].filter(Boolean).join(' ')}
       aria-label={label}
     >
       {rows.map((row, index) => (
-        <StandingRowView key={row.user_id} row={row} index={index} />
+        <StandingRowView
+          key={row.user_id}
+          row={row}
+          index={index}
+          showPower={showPower}
+        />
       ))}
     </ol>
   )
