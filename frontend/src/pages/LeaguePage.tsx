@@ -4,6 +4,7 @@ import { useFriendsStandings, useHomeSnapshot } from '../api/queries'
 import type { FriendSummary, StandingRow } from '../api/types'
 import { PageError, PageLoading } from '../components/PageState'
 import { PlayerHeader } from '../components/PlayerHeader'
+import { GroupBetCard } from '../components/GroupBetCard'
 import { StandingList } from '../components/StandingList'
 import {
   buildHomeView,
@@ -186,6 +187,8 @@ export function LeaguePage() {
           <StandingList rows={rows} label="完整小组榜" />
         )}
       </section>
+
+      {isFriends ? null : <GroupBetCard />}
     </div>
   )
 }

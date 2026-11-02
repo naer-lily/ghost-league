@@ -75,14 +75,21 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
 - 首页宿敌：
   - `GET /v1/me/rival`、`GET /v1/me/rival/candidates`
   - `POST /v1/me/rival/select`
-  - `GET /v1/me/bets`、`POST /v1/me/bets`（下注 dialog 与 `/rival` 共用）
-  - 首页显示双方本周 XP/今日增量、对撞条、差距、周注/日注/组注状态和下注入口；
+  - `GET /v1/me/bets`、`POST /v1/me/bets`（周注/日注 dialog 与 `/rival` 共用）
+  - 周注/日注请求体只发送 `kind`、`target_margin`、`paid_stake`、`request_id`；
+    `stake`（`free_stake + paid_stake`）和赔率都由服务端返回，前端只读
+    `bet_options` 的 `target_options` 档位与赔率。
+  - 首页显示双方本周 XP/今日增量、对撞条、差距和**周注/日注**状态与下注入口；
     未选宿敌时直接给内联选择入口。`/rival` 保留为深链，复用同一套
     `RivalDuelCard` / `RivalCandidatePicker` 组件。
 - 小组/好友榜：
   - 小组：`GET /v1/league/standings`
   - 好友：`GET /v1/me/friends/standings`，前端过滤掉自己，只显示已关注的人；
     没有关注时显示空状态，不伪造行。
+  - 组注：`GET /v1/me/bets` 的 `bet_options.group` 与本周 `bets.group`；只在
+    「小组」tab 显示 `GroupBetCard`，文案是“押我本人在本组本周排名前三”。没有小组或
+    `bet_options.group` 为 `null` 时不显示，不伪造。组注 dialog 只输入自付钻石，
+    请求体发送 `{kind: "group", paid_stake, request_id}`。
 - 物品栏：
   - 星星：`GET /v1/shop`、`POST /v1/shop/purchase`、
     `GET /v1/me/stars/{star_id}/svg`
@@ -97,17 +104,23 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
 - **首页**：删除了小组排行榜和小组号展示；今日进度不再显示“第 N 档 X 分钟”。更新标记
   按 `status.last_activity_at` 计算，超过 1 小时不显示“刚刚更新”。顶部没有刷新按钮，
   页面容器支持 touch 下拉刷新（调用真实 refetch）。未选宿敌时显示内联候选；选好后首页
-  直接显示双方对撞条、本周 XP/今日增量、差距和三注状态。
+  直接显示双方对撞条、本周 XP/今日增量、差距和**周注/日注**状态。
+- **周注/日注 dialog**：目标差值只从服务端 `bet_options[tab].target_options` 渲染，
+  显示 `+margin XP` 与该档赔率；自付钻石用数字输入 + `0–500` 滑杆，总本金为
+  `free_stake + paid_stake`，总返为 `round(stake × 服务端赔率)`。自付 0 合法，默认只
+  使用免费 20；周注截止周一 `23:59:59`，日注 `21:00` 锁注、`22:30` 结算。
 - **小组/好友榜**：顶部只有结算倒计时，不显示小组人数。`小组 / 好友` 分段切换。
-  好友榜按关注关系读真实数据，排除自己，按 XP 排名，没有关注时给空状态。
+  好友榜按关注关系读真实数据，排除自己，按 XP 排名，没有关注时给空状态。小组榜下方的
+  `GroupBetCard` 显示个人前三组注（目标名次、赔率、免费 20、押注 0–500 和已下注状态），
+  好友 tab 不显示组注。
 - **物品栏**：页面标题和导航都叫“物品栏”。分类为星星 / 边框 / 称号 / 其他；
   星星分类下保留抽卡、概率、稀有度和独属 SVG，其他分类来自 `collection` 和真实库存。
   每类都有加载、错误和空状态。
 - **我的**：顶部显示钻石和连胜；横向 10 段段位进度条高亮当前阶段；本周 XP、今日 XP、
   本周排名、当前/最长连胜；物品栏、历史、设置入口。设置和音量从顶栏移到这里，
   音量在现有 `SettingsDialog` 内；页面支持下拉刷新。
-- **宿敌深链 `/rival`**：三态（选候选 / 已有宿敌 / 锁定空态）与下注 dialog 保持不变；
-  组注规则留给后续下注模型组。
+- **宿敌深链 `/rival`**：三态（选候选 / 已有宿敌 / 锁定空态）与周注/日注 dialog；
+  组注不再出现在宿敌卡或宿敌 dialog，只在 `/league` 的小组 tab。
 
 ## PWA shell
 
@@ -143,10 +156,12 @@ PYTHONPATH=. pytest -q tests/test_api.py
 PYTHONPATH=. pytest -q tests/test_pwa.py tests/test_pwa_design.py tests/test_pwa_next.py
 ```
 
-前端单测覆盖：首页有/无宿敌、下注状态、真实更新时间、下拉刷新、小组/好友切换和空态、
+前端单测覆盖：首页有/无宿敌、周注/日注状态、真实更新时间、下拉刷新、周注/日注目标档位、
+自付 0/500 与总返、组注卡片（仅小组 tab）、组注 `paid_stake` payload、小组/好友切换和空态、
 物品栏四类、空态与购买、我的横向段位、钻石/连胜、设置入口、导航和顶栏收敛。
-`e2e/home.spec.ts` 用真实 token 在 390×844 与 1440×1000 走一遍首页、无宿敌、下拉刷新、
-小组/好友、物品栏分类、我的与设置，并把截图写到 `artifacts/ghost-ui-group1/`。
+`e2e/home.spec.ts` 用真实 token 在 390×844 与 1440×1000 走一遍首页、周/日注 dialog、无宿敌、
+下拉刷新、小组组注与好友榜、无组注空态、物品栏分类、我的与设置，并把截图写到
+`artifacts/ghost-ui-group1/`。
 
 ## 部署边界
 

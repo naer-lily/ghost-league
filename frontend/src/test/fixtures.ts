@@ -1,4 +1,5 @@
 import type {
+  BetOptions,
   HomeSnapshot,
   Profile,
   StandingRow,
@@ -6,6 +7,50 @@ import type {
   Star,
   Status,
 } from '../api/types'
+
+export function makeBetOptions(
+  overrides: Partial<BetOptions> = {},
+): BetOptions {
+  return {
+    weekly: {
+      target_options: [
+        { margin: 0, odds: 1.2 },
+        { margin: 150, odds: 1.5 },
+        { margin: 300, odds: 2 },
+        { margin: 600, odds: 3.2 },
+      ],
+      min_target_margin: 0,
+      max_target_margin: 600,
+      min_paid_stake: 0,
+      max_paid_stake: 500,
+      free_stake: 20,
+      reference: 340,
+    },
+    daily: {
+      target_options: [
+        { margin: 0, odds: 1.2 },
+        { margin: 50, odds: 1.4 },
+        { margin: 100, odds: 1.9 },
+        { margin: 200, odds: 3.1 },
+      ],
+      min_target_margin: 0,
+      max_target_margin: 200,
+      min_paid_stake: 0,
+      max_paid_stake: 500,
+      free_stake: 20,
+      reference: 50,
+    },
+    group: {
+      target_rank: 3,
+      target_margin: 0,
+      min_paid_stake: 0,
+      max_paid_stake: 500,
+      free_stake: 20,
+      odds: 2,
+    },
+    ...overrides,
+  }
+}
 
 export function makeStar(overrides: Partial<Star> = {}): Star {
   return {

@@ -205,6 +205,138 @@
   font-weight: 700;
 }
 
+.stakeBox {
+  margin-top: 12px;
+  padding: 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 13px;
+  background: rgba(13, 23, 28, 0.48);
+}
+
+.stakeHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.stakeHead label {
+  color: var(--text);
+}
+
+.stakeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.stakeInput {
+  width: 100%;
+  min-width: 0;
+  height: 48px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: rgba(13, 23, 28, 0.72);
+  color: var(--text);
+  font-size: 1.1rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.stakeInput:focus-visible {
+  outline: 2px solid var(--rival-mint);
+  outline-offset: 1px;
+}
+
+.unit {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.stakeRange {
+  width: 100%;
+  margin-top: 10px;
+  accent-color: var(--rival-mint);
+}
+
+.stakeGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.stakeGrid div {
+  min-width: 0;
+  padding: 7px 5px;
+  border-radius: 9px;
+  background: rgba(13, 23, 28, 0.4);
+  text-align: center;
+}
+
+.stakeGrid dt {
+  color: var(--muted-2);
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
+.stakeGrid dd {
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+  padding: 9px;
+  border: 1px solid rgba(127, 255, 212, 0.26);
+  border-radius: 12px;
+  background: rgba(127, 255, 212, 0.07);
+}
+
+.summary div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: center;
+}
+
+.summary span {
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-weight: 800;
+}
+
+.summary strong {
+  color: var(--rival-mint);
+  font-size: 0.86rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.hint {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid rgba(199, 165, 255, 0.3);
+  border-radius: 12px;
+  background: rgba(199, 165, 255, 0.08);
+  color: var(--rival-purple);
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
 .deadline {
   display: flex;
   align-items: center;
@@ -246,7 +378,7 @@
 
 .placedGrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   margin-top: 9px;
 }

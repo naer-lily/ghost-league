@@ -140,8 +140,25 @@ for (const viewport of VIEWPORTS) {
       await expect(rivalCard).toBeVisible()
       await expect(page.getByTestId('rival-bet-status-周注')).toBeVisible()
       await expect(page.getByTestId('rival-bet-status-日注')).toBeVisible()
-      await expect(page.getByTestId('rival-bet-status-组注')).toBeVisible()
-      await expect(page.getByRole('button', { name: '下注' })).toBeVisible()
+      await expect(page.getByTestId('rival-bet-status-组注')).toHaveCount(0)
+      await expect(rivalCard).not.toContainText('组注')
+      const openBets = page.getByRole('button', { name: '下注' })
+      await expect(openBets).toBeVisible()
+      await openBets.click()
+      const betDialog = page.getByTestId('rival-bet-dialog')
+      await expect(betDialog).toBeVisible()
+      await expect(betDialog.getByRole('tab', { name: /周注/ })).toBeVisible()
+      await expect(betDialog.getByRole('tab', { name: /日注/ })).toBeVisible()
+      await expect(betDialog.getByRole('tab', { name: /组注/ })).toHaveCount(0)
+      await expect(
+        betDialog.getByText('押「我本周最终 XP 比宿敌高多少」'),
+      ).toBeVisible()
+      await expect(betDialog.getByTestId('rival-bet-paid-input')).toBeVisible()
+      await page.screenshot({
+        path: path.join(OUT_DIR, `home-bet-dialog-${viewport.name}.png`),
+        fullPage: true,
+      })
+      await betDialog.getByRole('button', { name: '关闭下注对话框' }).click()
     }
     await assertNoGroupCopy(page)
     await assertNoOverflow(page)
@@ -191,22 +208,81 @@ for (const viewport of VIEWPORTS) {
     })
     await page.unroute('**/v1/me/rival')
 
-    // League tabs and friends empty state / real followed list.
+    // League tabs and the personal top-three group bet entry.
     await page.goto(`${BASE}/league`)
     await expect(page.getByTestId('board-tab-group')).toBeVisible()
     await expect(page.getByTestId('board-tab-friends')).toBeVisible()
     await expect(page.getByRole('list', { name: '完整小组榜' })).toBeVisible()
+    const groupCard = page.getByTestId('group-bet-card')
+    if (await groupCard.count()) {
+      await expect(groupCard).toContainText('押我本人在本组本周排名前三')
+      await expect(groupCard).not.toContainText('我们组进前三')
+      await expect(groupCard.getByTestId('group-bet-target-rank')).toContainText(
+        '前三',
+      )
+      await expect(groupCard.getByTestId('group-bet-card-odds')).toBeVisible()
+      await page.screenshot({
+        path: path.join(OUT_DIR, `league-group-${viewport.name}.png`),
+        fullPage: true,
+      })
+      await groupCard.getByTestId('group-bet-open').click()
+      const groupDialog = page.getByTestId('group-bet-dialog')
+      await expect(groupDialog).toBeVisible()
+      await expect(groupDialog).toContainText('押「我本人在本组本周排名前三」')
+      await expect(groupDialog.getByTestId('group-bet-paid-input')).toBeVisible()
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.screenshot({
+        path: path.join(OUT_DIR, `league-group-dialog-${viewport.name}.png`),
+        fullPage: true,
+      })
+      await groupDialog.getByRole('button', { name: '关闭组注对话框' }).click()
+    } else {
+      await page.screenshot({
+        path: path.join(OUT_DIR, `league-group-${viewport.name}.png`),
+        fullPage: true,
+      })
+    }
     await page.getByTestId('board-tab-friends').click()
     await expect(
       page
         .getByRole('list', { name: '好友榜' })
         .or(page.getByTestId('friends-empty')),
     ).toBeVisible()
+    await expect(page.getByTestId('group-bet-card')).toHaveCount(0)
     await assertNoOverflow(page)
     await page.screenshot({
       path: path.join(OUT_DIR, `league-friends-${viewport.name}.png`),
       fullPage: true,
     })
+
+    // No group option: the card must disappear instead of faking a bet.
+    const betsResponse = await page.request.get(`${BASE}/v1/me/bets`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    expect(betsResponse.ok()).toBeTruthy()
+    const liveBets = await betsResponse.json()
+    await page.route('**/v1/me/bets', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue()
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ...liveBets,
+          group: null,
+          bets: { ...liveBets.bets, group: null },
+          bet_options: { ...liveBets.bet_options, group: null },
+        }),
+      })
+    })
+    await page.goto(`${BASE}/league`)
+    await expect(page.getByRole('list', { name: '完整小组榜' })).toBeVisible()
+    await expect(page.getByTestId('group-bet-card')).toHaveCount(0)
+    await assertNoOverflow(page)
+    await page.screenshot({
+      path: path.join(OUT_DIR, `league-no-group-bet-${viewport.name}.png`),
+      fullPage: true,
+    })
+    await page.unroute('**/v1/me/bets')
 
     // Inventory categories.
     await page.goto(`${BASE}/inventory`)

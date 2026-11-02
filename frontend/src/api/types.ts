@@ -215,6 +215,7 @@ export interface Bet {
   settled_at: string | null
   payout: number
   result_diff: number | null
+  target_rank?: number
   group_id?: number
   group_rank?: number | null
 }
@@ -231,11 +232,41 @@ export interface BetWindows {
   daily_settles_at: string
 }
 
+export interface TargetOption {
+  margin: number
+  odds: number
+}
+
+export interface RivalBetOption {
+  target_options: TargetOption[]
+  min_target_margin: number
+  max_target_margin: number
+  min_paid_stake: number
+  max_paid_stake: number
+  free_stake: number
+  reference: number
+}
+
+export interface GroupBetOption {
+  target_rank: number
+  target_margin: 0
+  min_paid_stake: number
+  max_paid_stake: number
+  free_stake: number
+  odds: number
+}
+
+export interface BetOptions {
+  weekly: RivalBetOption | null
+  daily: RivalBetOption | null
+  group: GroupBetOption | null
+}
+
 export interface RivalProjection {
   rival_week_estimate: number
-  week_line: number
   rival_today_estimate: number
-  daily_lines: Record<string, number>
+  weekly_target_max: number
+  daily_target_max: number
 }
 
 export interface RivalState {
@@ -246,6 +277,7 @@ export interface RivalState {
   rival: RivalPlayer | null
   result: RivalResult | null
   bets: RivalBets
+  bet_options: BetOptions
   projection: RivalProjection | null
   bet_windows: BetWindows
 }
@@ -265,6 +297,7 @@ export interface BetsState {
   daily: Bet | null
   group: Bet | null
   bets: RivalBets
+  bet_options: BetOptions
   bet_windows: BetWindows
 }
 

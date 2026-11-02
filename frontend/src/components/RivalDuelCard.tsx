@@ -23,7 +23,8 @@ interface RivalDuelCardProps {
 /**
  * The reusable duel body used by both `/rival` and the home page. It renders
  * only values from `RivalState`; the home variant is visually denser but keeps
- * the same clash bar, gap and weekly/daily/group bet statuses.
+ * the same clash bar, gap and weekly/daily bet statuses. Group bets live on
+ * the league board instead of this card.
  */
 export function RivalDuelCard({
   state,
@@ -41,7 +42,6 @@ export function RivalDuelCard({
   const statuses: ReadonlyArray<{ label: string; bet: typeof state.bets.weekly }> = [
     { label: '周注', bet: state.bets.weekly },
     { label: '日注', bet: state.bets.daily },
-    { label: '组注', bet: state.bets.group },
   ]
 
   return (

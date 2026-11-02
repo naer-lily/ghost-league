@@ -150,7 +150,7 @@ export interface SelectRivalVariables {
 
 export interface PlaceBetVariables {
   kind: BetKind
-  stake?: number
+  paidStake: number
   targetMargin?: number
   requestId: string
 }
@@ -226,18 +226,20 @@ export function useSelectRival() {
 export function usePlaceBet() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ kind, stake, targetMargin, requestId }: PlaceBetVariables) =>
-      apiFetch<PlaceBetResult>('/v1/me/bets', {
+    mutationFn: ({ kind, paidStake, targetMargin, requestId }: PlaceBetVariables) => {
+      const body: Record<string, unknown> = {
+        kind,
+        paid_stake: paidStake,
+        request_id: requestId,
+      }
+      if (kind !== 'group' && targetMargin !== undefined) {
+        body.target_margin = targetMargin
+      }
+      return apiFetch<PlaceBetResult>('/v1/me/bets', {
         method: 'POST',
-        body:
-          kind === 'daily'
-            ? {
-                kind,
-                target_margin: targetMargin,
-                request_id: requestId,
-              }
-            : { kind, stake, request_id: requestId },
-      }),
+        body,
+      })
+    },
     onSuccess: (result) => {
       const state = result.state
       queryClient.setQueryData<RivalState>(rivalQueryKey, state)
@@ -250,6 +252,7 @@ export function usePlaceBet() {
               daily: state.bets.daily,
               group: state.bets.group,
               bets: state.bets,
+              bet_options: state.bet_options,
               bet_windows: state.bet_windows,
             }
           : current,
@@ -259,6 +262,7 @@ export function usePlaceBet() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: rivalQueryKey }),
         queryClient.invalidateQueries({ queryKey: betsQueryKey }),
+        queryClient.invalidateQueries({ queryKey: homeQueryKey }),
       ])
     },
   })

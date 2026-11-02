@@ -1,11 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
 import type { RivalPlayer, RivalState } from '../api/types'
-import { makeSnapshot } from '../test/fixtures'
+import { makeBetOptions, makeSnapshot } from '../test/fixtures'
 import { HomePage } from './HomePage'
 
 const HOUR = 3_600_000
@@ -77,6 +77,7 @@ function rivalState(overrides: Partial<RivalState> = {}): RivalState {
       daily: null,
       group: null,
     },
+    bet_options: makeBetOptions(),
     projection: null,
     bet_windows: {
       weekly_locks_at: futureIso(4),
@@ -124,6 +125,19 @@ function mockApi(options: MockOptions = {}) {
       })
     }
     if (url.includes('/v1/me/rival')) return response(rival)
+    if (url.includes('/v1/me/bets')) {
+      return response({
+        server_now: rival.server_now,
+        week_start: rival.week_start,
+        day: rival.week_start,
+        weekly: rival.bets.weekly,
+        daily: rival.bets.daily,
+        group: rival.bets.group,
+        bets: rival.bets,
+        bet_options: rival.bet_options,
+        bet_windows: rival.bet_windows,
+      })
+    }
     if (url.includes('/v1/me/profile')) return response(snapshot.profile)
     if (url.includes('/v1/me/status')) return response(snapshot.status)
     if (url.includes('/v1/league/standings')) return response(snapshot.standings)
@@ -154,6 +168,10 @@ describe('HomePage rework', () => {
       '周注 · 已下注',
     )
     expect(screen.getByRole('button', { name: '下注' })).toBeVisible()
+    expect(
+      screen.queryByTestId('rival-bet-status-组注'),
+    ).not.toBeInTheDocument()
+    expect(card).not.toHaveTextContent('组注')
 
     expect(screen.queryByText('小组榜')).not.toBeInTheDocument()
     expect(screen.queryByText(/G01|我的组|组号/)).not.toBeInTheDocument()
@@ -161,6 +179,28 @@ describe('HomePage rework', () => {
     expect(screen.getByTestId('player-tier')).toHaveTextContent('青铜')
     expect(screen.getByTestId('today-progress')).toBeVisible()
     expect(screen.queryByTestId('today-current-tier')).not.toBeInTheDocument()
+  })
+
+  it('opens the home bet dialog with only weekly/daily tabs', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', mockApi())
+
+    renderHome()
+
+    await user.click(await screen.findByRole('button', { name: '下注' }))
+    const dialog = await screen.findByTestId('rival-bet-dialog')
+    expect(
+      within(dialog).getByRole('tab', { name: /周注/ }),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole('tab', { name: /日注/ }),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).queryByRole('tab', { name: /组注/ }),
+    ).not.toBeInTheDocument()
+    expect(
+      within(dialog).getByText('押「我本周最终 XP 比宿敌高多少」'),
+    ).toBeInTheDocument()
   })
 
   it('shows an inline selection entry when no rival is selected', async () => {

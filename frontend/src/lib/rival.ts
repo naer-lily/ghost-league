@@ -1,5 +1,5 @@
 import { ApiError } from '../api/client'
-import type { Bet, BetWindows, RivalOutcome } from '../api/types'
+import type { Bet, BetKind, BetWindows, RivalOutcome } from '../api/types'
 
 const numberFormat = new Intl.NumberFormat('zh-CN')
 
@@ -94,12 +94,12 @@ export function weekNumber(weekStart: string): string {
   return `第 ${week} 周`
 }
 
-export type BetTab = 'weekly' | 'daily' | 'group'
+export type RivalBetTab = 'weekly' | 'daily'
+export type BetTab = RivalBetTab
 
-export const BET_TABS: ReadonlyArray<{ kind: BetTab; label: string }> = [
+export const BET_TABS: ReadonlyArray<{ kind: RivalBetTab; label: string }> = [
   { kind: 'weekly', label: '周注' },
   { kind: 'daily', label: '日注' },
-  { kind: 'group', label: '组注' },
 ]
 
 export function betStatusText(bet: Bet | null | undefined): string {
@@ -117,7 +117,7 @@ export function betStatusTone(
   return bet.status === 'placed' ? 'placed' : 'settled'
 }
 
-export function betKindLabel(kind: BetTab): string {
+export function betKindLabel(kind: BetKind): string {
   if (kind === 'weekly') return '周注'
   if (kind === 'daily') return '日注'
   return '组注'
@@ -136,13 +136,17 @@ export function dailyLocked(windows: BetWindows, now: Date): boolean {
   return isPast(windows.daily_locks_at, now)
 }
 
-export function dailyLine(
-  projectionLines: Record<string, number> | undefined,
-  target: number,
-): number | null {
-  if (!projectionLines) return null
-  const value = projectionLines[String(target)]
-  return typeof value === 'number' ? value : null
+export function groupLocked(windows: BetWindows, now: Date): boolean {
+  return isPast(windows.weekly_locks_at, now)
+}
+
+/** Total return for a bet, using the server's locked/preview odds. */
+export function betReturn(stake: number, odds: number): number {
+  return Math.round(stake * odds)
+}
+
+export function formatOdds(odds: number): string {
+  return odds.toFixed(2)
 }
 
 function errorCode(error: ApiError): string | null {

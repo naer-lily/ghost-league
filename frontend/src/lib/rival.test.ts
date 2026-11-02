@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  BET_TABS,
+  betReturn,
   betStatusText,
   clashBar,
   dailyLocked,
-  dailyLine,
   formatCountdown,
+  formatOdds,
   gapView,
+  groupLocked,
   weekNumber,
   weeklyLocked,
 } from './rival'
@@ -112,10 +115,29 @@ describe('rival helpers', () => {
     ).toBe(true)
   })
 
-  it('reads projection lines and bet status copy', () => {
-    expect(dailyLine({ '50': 150, '150': 250 }, 50)).toBe(150)
-    expect(dailyLine({ '50': 150 }, 150)).toBeNull()
-    expect(dailyLine(undefined, 50)).toBeNull()
+  it('only exposes weekly/daily rival bet tabs', () => {
+    expect(BET_TABS.map((tab) => tab.kind)).toEqual(['weekly', 'daily'])
+    expect(BET_TABS.map((tab) => tab.label)).toEqual(['周注', '日注'])
+  })
+
+  it('shares the weekly lock with the group bet', () => {
+    expect(groupLocked(windows(), NOW)).toBe(false)
+    expect(
+      groupLocked(
+        windows({ weekly_locks_at: '2026-11-02T19:00:00+08:00' }),
+        NOW,
+      ),
+    ).toBe(true)
+  })
+
+  it('uses server odds for returns and formats them', () => {
+    expect(betReturn(20, 1.2)).toBe(24)
+    expect(betReturn(520, 2)).toBe(1040)
+    expect(formatOdds(2)).toBe('2.00')
+    expect(formatOdds(1.375)).toBe('1.38')
+  })
+
+  it('reads bet status copy', () => {
     expect(betStatusText(null)).toBe('未下注')
     expect(betStatusText(bet())).toBe('已下注')
     expect(betStatusText(bet({ status: 'won', payout: 80 }))).toBe(
