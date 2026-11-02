@@ -298,7 +298,15 @@ class BetAPITests(RivalAPITestBase):
         self.assertEqual(weekly_options["min_paid_stake"], 0)
         self.assertEqual(weekly_options["max_paid_stake"], 500)
         self.assertEqual(weekly_options["free_stake"], 20)
-        self.assertEqual(weekly_options["target_options"][0]["margin"], 0)
+        weekly_margins = [
+            entry["margin"] for entry in weekly_options["target_options"]
+        ]
+        self.assertEqual(weekly_margins[0], 0)
+        self.assertEqual(
+            weekly_margins[-1], weekly_options["max_target_margin"]
+        )
+        self.assertEqual(weekly_margins, sorted(set(weekly_margins)))
+        self.assertGreaterEqual(len(weekly_margins), 3)
         self.assertEqual(weekly_options["target_options"][0]["odds"], 1.2)
 
         repeat = client.post(
@@ -338,6 +346,13 @@ class BetAPITests(RivalAPITestBase):
             entry["margin"]: entry["odds"]
             for entry in daily_options["target_options"]
         }
+        daily_margins = [
+            entry["margin"] for entry in daily_options["target_options"]
+        ]
+        self.assertEqual(daily_margins[0], 0)
+        self.assertEqual(daily_margins[-1], daily_options["max_target_margin"])
+        self.assertEqual(daily_margins, sorted(set(daily_margins)))
+        self.assertGreater(len(daily_margins), 2)
         self.assertEqual(preview[50], daily_bet["odds"])
         self.assertEqual(store.get_diamond_balance("owner", now=NOW), 920)
 

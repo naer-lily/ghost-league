@@ -1019,8 +1019,20 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 
 - 周注上界：`max(100, round_to_50(rival_week_estimate * 2))`。
 - 日注上界：`max(50, round_to_10(rival_today_estimate * 2))`。
-- `target_options` 至少包含 `0`、宿敌估计值的 `1/4`、`1/2`、`1x`、`2x`，并补上区间
-  上界；去重、升序、取整。每个选项同时返回锁注赔率，供 UI 预览：
+- 动态锚点由双方战力和宿敌估计共同决定；周注/日注使用同一套逻辑：
+
+```text
+power_delta = my_power - rival_power
+power_factor = clamp(0.5, 1.5, 1 + power_delta / 4000)
+anchor = clamp(0, upper_bound, round_to_step(upper_bound * 0.5 * power_factor))
+```
+
+  战力更高时锚点更高，更低时锚点更低；`my_power`、`rival_power`、
+  `rival_week_estimate` / `rival_today_estimate` 都参与计算。
+- `target_options` 至少包含 `0`、动态锚点、区间上界，以及锚点与上界/零点之间的
+  中间档；周注、日注都去重、严格升序、按 step 取整。宿敌今日估计为 `0` 时日注
+  仍有中间档（例如 `0, 10, 20, 30, 40, 50`），而不是只有 `0` 和上界。每个选项
+  同时返回锁注赔率，供 UI 预览：
 
 ```json
 {"margin": 120, "odds": 2.37}

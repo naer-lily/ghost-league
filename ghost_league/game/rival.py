@@ -64,6 +64,15 @@ DAILY_REFERENCE_FLOOR: Final = 50
 POWER_RATIO_MIN: Final = 0.5
 POWER_RATIO_MAX: Final = 2.0
 POWER_GAP_SCALE: Final = 4000
+
+# Dynamic target anchor.  The player's power gap scales the middle of the
+# target range between 0.5x and 1.5x, so a stronger player is offered higher
+# margins than a weaker one on the same rival estimate.  The remaining options
+# interpolate between 0, the anchor, and the upper bound.
+POWER_ANCHOR_MIN: Final = 0.5
+POWER_ANCHOR_MAX: Final = 1.5
+TARGET_ANCHOR_RATIO: Final = 0.5
+TARGET_OPTION_INTERVALS: Final = 3
 ODDS_MIN: Final = 1.2
 ODDS_MAX: Final = 15.0
 ODDS_BASE: Final = 1.2
@@ -405,6 +414,49 @@ def target_upper_bound(
     raise ValueError(f"unsupported bet kind: {kind}")
 
 
+def target_step(kind: str) -> int:
+    """Return the widening step used by one bet kind's target options."""
+
+    if kind == "weekly":
+        return WEEKLY_TARGET_STEP
+    if kind == "daily":
+        return DAILY_TARGET_STEP
+    raise ValueError(f"unsupported bet kind: {kind}")
+
+
+def power_anchor_factor(my_power: int, rival_power: int) -> float:
+    """Scale the dynamic target anchor by the power gap, clamped to 0.5–1.5.
+
+    Equal power gives 1.0; being stronger raises the factor and being weaker
+    lowers it, independently of the rival's XP estimate.
+    """
+
+    delta = int(my_power) - int(rival_power)
+    raw = 1 + delta / POWER_GAP_SCALE
+    return max(POWER_ANCHOR_MIN, min(POWER_ANCHOR_MAX, raw))
+
+
+def target_anchor(
+    kind: str,
+    rival_week_estimate: int = 0,
+    rival_today_estimate: int = 0,
+    my_power: int = 0,
+    rival_power: int = 0,
+) -> int:
+    """Return the dynamic middle target for one bet kind.
+
+    The upper bound follows the rival's estimate; the power factor moves the
+    anchor between a quarter and three quarters of that range.  The result is
+    clamped to ``0..target_upper_bound()`` and rounded to the kind's step.
+    """
+
+    limit = target_upper_bound(kind, rival_week_estimate, rival_today_estimate)
+    step = target_step(kind)
+    factor = power_anchor_factor(my_power, rival_power)
+    raw = limit * TARGET_ANCHOR_RATIO * factor
+    return max(0, min(limit, round_to_step(raw, step)))
+
+
 def target_in_range(
     kind: str,
     target_margin: int,
@@ -474,20 +526,29 @@ def target_options(
 ) -> list[dict[str, float | int]]:
     """Return sorted preview options with their fixed odds.
 
-    The list always contains 0 and the range upper bound; it also includes the
-    rival estimate's 1/4, 1/2, 1x and 2x points when those are inside the range.
+    The list always contains 0, the dynamic power-aware anchor, and the range
+    upper bound.  Intermediate points interpolate between 0 and the anchor and
+    between the anchor and the upper bound, so both bet kinds offer more than
+    two choices even when the rival estimate is zero.  Margins are unique,
+    strictly increasing, and inside ``0..target_upper_bound()``.
     """
 
-    if kind == "weekly":
-        base = max(0, int(rival_week_estimate))
-    elif kind == "daily":
-        base = max(0, int(rival_today_estimate))
-    else:
-        raise ValueError(f"unsupported bet kind: {kind}")
     limit = target_upper_bound(kind, rival_week_estimate, rival_today_estimate)
-    margins = {0, limit}
-    for fraction in (0.25, 0.5, 1, 2):
-        margins.add(min(limit, round_to_step(base * fraction, 1)))
+    step = target_step(kind)
+    anchor = target_anchor(
+        kind,
+        rival_week_estimate,
+        rival_today_estimate,
+        my_power,
+        rival_power,
+    )
+    margins = {0, anchor, limit}
+    for index in range(1, TARGET_OPTION_INTERVALS):
+        share = index / TARGET_OPTION_INTERVALS
+        below = round_to_step(anchor * share, step)
+        above = round_to_step(anchor + (limit - anchor) * share, step)
+        margins.add(max(0, min(limit, below)))
+        margins.add(max(0, min(limit, above)))
     return [
         {
             "margin": margin,
@@ -501,6 +562,7 @@ def target_options(
             ),
         }
         for margin in sorted(margins)
+        if 0 <= margin <= limit
     ]
 
 
@@ -609,6 +671,8 @@ __all__ = [
     "OUTCOME_DRAW",
     "OUTCOME_LOSS",
     "OUTCOME_WIN",
+    "POWER_ANCHOR_MAX",
+    "POWER_ANCHOR_MIN",
     "POWER_GAP_SCALE",
     "POWER_RATIO_MAX",
     "POWER_RATIO_MIN",
@@ -624,6 +688,8 @@ __all__ = [
     "RivalSelectionRejected",
     "RivalUnavailable",
     "RivalWindowClosed",
+    "TARGET_ANCHOR_RATIO",
+    "TARGET_OPTION_INTERVALS",
     "WEEKLY_REFERENCE_FLOOR",
     "WEEKLY_TARGET_FLOOR",
     "WEEKLY_TARGET_STEP",
@@ -642,6 +708,7 @@ __all__ = [
     "odds_reference",
     "payout_for_win",
     "percentile_value",
+    "power_anchor_factor",
     "power_ratio",
     "projected_today_xp",
     "projected_week_xp",
@@ -649,8 +716,10 @@ __all__ = [
     "rival_reward",
     "round_to_step",
     "selection_window_open",
+    "target_anchor",
     "target_in_range",
     "target_options",
+    "target_step",
     "target_upper_bound",
     "wager_result",
     "week_lock_at",

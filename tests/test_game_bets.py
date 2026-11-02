@@ -17,9 +17,13 @@ from ghost_league.game.rival import (
     daily_bet_settles_at,
     group_market_odds_table,
     payout_for_win,
+    power_anchor_factor,
     power_ratio,
+    target_anchor,
     target_in_range,
     target_options,
+    target_step,
+    target_upper_bound,
     wager_result,
 )
 from ghost_league.game.rules import InsufficientDiamonds, group_quota
@@ -135,19 +139,21 @@ def test_target_options_cover_range_and_preview_odds() -> None:
     assert weekly_margins == sorted(set(weekly_margins))
     assert weekly_margins[0] == 0
     assert weekly_margins[-1] == 200
-    assert {25, 50, 100, 200}.issubset(weekly_margins)
+    assert weekly_margins == [0, 50, 100, 150, 200]
     odds = [entry["odds"] for entry in weekly]
     assert odds == sorted(odds)
 
     daily = target_options("daily", 0, 0, 500, 500)
-    assert [entry["margin"] for entry in daily] == [0, 50]
+    assert [entry["margin"] for entry in daily] == [0, 10, 20, 30, 40, 50]
 
     large = target_options("weekly", 1000, 0, 500, 500)
     assert [entry["margin"] for entry in large] == [
         0,
-        250,
-        500,
+        350,
+        650,
         1000,
+        1350,
+        1650,
         2000,
     ]
 
@@ -155,6 +161,63 @@ def test_target_options_cover_range_and_preview_odds() -> None:
     assert target_in_range("weekly", 200, 100, 0)
     assert not target_in_range("weekly", 201, 100, 0)
     assert not target_in_range("daily", -1, 0, 0)
+
+
+def test_daily_target_options_have_midpoints_when_estimate_is_zero() -> None:
+    margins = [
+        entry["margin"] for entry in target_options("daily", 0, 0, 500, 500)
+    ]
+    assert len(margins) > 2
+    assert margins[-1] == target_upper_bound("daily")
+    assert any(0 < margin < margins[-1] for margin in margins)
+    assert all(margin % target_step("daily") == 0 for margin in margins)
+
+
+def test_power_gap_moves_dynamic_anchor() -> None:
+    strong = target_anchor("daily", my_power=10_000, rival_power=0)
+    even = target_anchor("daily", my_power=500, rival_power=500)
+    weak = target_anchor("daily", my_power=0, rival_power=10_000)
+    assert strong > even > weak
+    assert power_anchor_factor(10_000, 0) == 1.5
+    assert power_anchor_factor(0, 10_000) == 0.5
+
+    strong_margins = [
+        entry["margin"]
+        for entry in target_options("daily", 0, 0, 10_000, 0)
+    ]
+    weak_margins = [
+        entry["margin"]
+        for entry in target_options("daily", 0, 0, 0, 10_000)
+    ]
+    assert strong_margins != weak_margins
+    assert strong in strong_margins
+    assert weak in weak_margins
+
+
+def test_target_options_are_unique_sorted_bounded_and_odds_monotonic() -> None:
+    cases = [
+        ("weekly", 100, 0, 500, 500),
+        ("weekly", 1000, 0, 500, 500),
+        ("weekly", 0, 0, 10_000, 0),
+        ("weekly", 0, 0, 0, 10_000),
+        ("daily", 0, 0, 500, 500),
+        ("daily", 0, 0, 10_000, 0),
+        ("daily", 0, 0, 0, 10_000),
+        ("daily", 0, 500, 500, 500),
+    ]
+    for kind, week, day, my_power, rival_power in cases:
+        entries = target_options(kind, week, day, my_power, rival_power)
+        margins = [entry["margin"] for entry in entries]
+        odds = [entry["odds"] for entry in entries]
+        limit = target_upper_bound(kind, week, day)
+        step = target_step(kind)
+        assert margins == sorted(set(margins))
+        assert margins[0] == 0
+        assert margins[-1] == limit
+        assert all(0 <= margin <= limit for margin in margins)
+        assert all(margin % step == 0 for margin in margins)
+        assert target_anchor(kind, week, day, my_power, rival_power) in margins
+        assert odds == sorted(odds)
 
 
 def test_weekly_bet_uses_free_stake_and_closes_after_monday(
