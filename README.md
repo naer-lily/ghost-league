@@ -70,17 +70,25 @@ python3 -m waka_channel.cli tick
 ```
 
 Channel token 在 API 进程里由 `GHOST_LEAGUE_CHANNEL_TOKEN` 配置，不能使用普通账号
-token。systemd 模板把 token 放在 `/etc/ghost-league/waka.env`（0600）；安装和定时器
-说明见 [`deploy/systemd/README.md`](deploy/systemd/README.md)。
+token。部署模板把它放在 `/etc/ghost-league/api.env`（API）和
+`/etc/ghost-league/web.env`（PWA）这类 0600 的 EnvironmentFile；安装说明见
+[`deploy/systemd/README.md`](deploy/systemd/README.md)。
 
-### 定时器
+### 进程内调度器
 
-仓库只提供模板，不自动安装：
+Ghost 自带调度器，随 FastAPI lifespan 启动/停止，不依赖外部 timer、cron 或
+ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，之后每 20 秒检查到期
+任务；`job_runs` 表用 `(name, period_key)` 唯一键和租约保证多进程下同一周期只执行
+一次，失败/崩溃的周期会在后续 tick 重试，成功的周期幂等跳过。
 
-- `ghost-league-source-fetch`：周一 00:02 刷新公开榜缓存。
-- `ghost-league-waka-roster`：周一 00:03 发送本周 roster。
-- `ghost-league-settle`：周一 00:05 结算上一周。
-- `ghost-league-waka-tick`：每小时第 1 分钟推送已完成小时。
+- `waka tick`：每小时第 1 分钟推送已完成小时。
+- `power`：每小时第 5 分钟刷新当前战力。
+- `diamond-decay`：每小时第 10 分钟执行钻石软上限衰减。
+- `source fetch`：周一 00:02 刷新公开榜缓存（只在周一当天补跑）。
+- `waka roster`：周一 00:03 发送本周 roster（只在周一当天补跑）。
+- `weekly settle`：周一 00:05 结算上一周；本周内未完成可补跑。
+- `rival-auto`：周二 00:00 为没有宿敌的真人自动匹配；本周内可补跑。
+- `daily-bets`：每天 10:30 结算日注；09:00 锁注，之后不能再下。
 
 结算只处理上一个本地周，不预建下一周；提前或重复运行会安全跳过。
 
@@ -187,16 +195,17 @@ ghost_league/
   schedule.py         # 周/小时投影纯函数（Channel 复用）
   themes.py           # 图标主题
   channels/           # Channel ingest 契约
-  game/               # 规则、分组、打卡、结算、SQLite store
+  game/               # 规则、分组、打卡、结算、SQLite store、进程内调度器
   source/             # 旧的归一化工具，仅供 Channel/fetch 兼容
   fetch.py            # 公开榜抓取（只写 cache）
+  runtime_jobs.py     # 调度任务与 Channel/Source 的运行时装配
 waka_channel/         # 独立 WakaTime Channel 包
 web/                  # 旧 PWA 静态资源（生产默认入口，保留回滚；含 web/widget-studio/）
 frontend/             # 星图前端 React/TypeScript 源码
 web-next/             # frontend 构建产物（gitignore；切流时由 pwa.py 挂载）
 data/widgets/         # Widget Studio 运行时模版目录（gitignore，仅 .gitkeep 入库）
 scripts/              # API/PWA 启动与抓取脚本
-deploy/               # systemd/服务模板
+deploy/               # 部署模板（API/PWA service）
 docs/                 # API、Channel、Webhook 文档
 tests/                # pytest 测试
 ```

@@ -23,7 +23,7 @@ from ..stars import (
     is_valid_palette,
 )
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 ALGORITHM_VERSION = "phase1-v1"
 DEFAULT_DB_PATH = Path("data/league/league.db")
 SOURCE_AI = "wakatime_public_leaderboard"
@@ -35,6 +35,21 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS job_runs (
+    name TEXT NOT NULL,
+    period_key TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),
+    attempts INTEGER NOT NULL DEFAULT 1 CHECK (attempts >= 1),
+    run_id TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    lease_until TEXT,
+    error TEXT,
+    PRIMARY KEY (name, period_key)
+);
+CREATE INDEX IF NOT EXISTS idx_job_runs_status_lease
+    ON job_runs (status, lease_until);
 
 CREATE TABLE IF NOT EXISTS epochs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -505,6 +520,7 @@ CREATE INDEX IF NOT EXISTS idx_group_bets_week_status
 
 _TABLE_NAMES = (
     "meta",
+    "job_runs",
     "epochs",
     "players",
     "player_power_history",

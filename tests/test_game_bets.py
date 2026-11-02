@@ -12,14 +12,18 @@ from ghost_league.game.rival import (
     BetRejected,
     BetWindowClosed,
     RivalUnavailable,
+    daily_bet_locks_at,
+    daily_bet_settles_at,
 )
 from ghost_league.game.rules import InsufficientDiamonds
 from ghost_league.game.store import GameStore
 from ghost_league.schedule import TZ
 
 WEEK = "2026-11-02"
-MONDAY = datetime(2026, 11, 2, 10, 0, 0, tzinfo=TZ)
-MONDAY_EVENING = datetime(2026, 11, 2, 19, 59, 59, tzinfo=TZ)
+MONDAY = datetime(2026, 11, 2, 8, 0, 0, tzinfo=TZ)
+MONDAY_BEFORE_LOCK = datetime(2026, 11, 2, 8, 59, 59, tzinfo=TZ)
+MONDAY_LOCK = datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ)
+MONDAY_SETTLE = datetime(2026, 11, 2, 10, 30, 0, tzinfo=TZ)
 TUESDAY = datetime(2026, 11, 3, 0, 0, 0, tzinfo=TZ)
 NEXT_MONDAY = datetime(2026, 11, 9, 0, 5, 0, tzinfo=TZ)
 
@@ -210,13 +214,22 @@ def test_bet_requires_rival_and_enough_diamonds(tmp_path: Path) -> None:
     assert store.get_diamond_balance("poor", now=MONDAY) == 10
 
 
+def test_daily_bet_window_is_minute_precise() -> None:
+    assert daily_bet_locks_at("2026-11-02") == datetime(
+        2026, 11, 2, 9, 0, 0, tzinfo=TZ
+    )
+    assert daily_bet_settles_at("2026-11-02") == datetime(
+        2026, 11, 2, 10, 30, 0, tzinfo=TZ
+    )
+
+
 def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     make_rival_pair(store, "h1", "h2")
     make_rival_pair(store, "h3", "h4")
 
     bet = store.place_bet(
-        "h1", "daily", None, 50, now=MONDAY_EVENING, request_id="daily-1"
+        "h1", "daily", None, 50, now=MONDAY_BEFORE_LOCK, request_id="daily-1"
     )
     assert bet["kind"] == "daily"
     assert bet["stake"] == 20
@@ -224,7 +237,7 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
     assert bet["odds"] == 1.5
     assert bet["free_stake"] == 20
     assert bet["paid_stake"] == 0
-    assert store.get_diamond_balance("h1", now=MONDAY_EVENING) == 1000
+    assert store.get_diamond_balance("h1", now=MONDAY_BEFORE_LOCK) == 1000
 
     with pytest.raises(BetRejected):
         store.place_bet(
@@ -240,13 +253,13 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
             "daily",
             None,
             50,
-            now=datetime(2026, 11, 2, 20, 0, 0, tzinfo=TZ),
+            now=MONDAY_LOCK,
             request_id="daily-late",
         )
     assert store.get_diamond_balance("h3", now=MONDAY) == 1000
 
 
-def test_daily_settlement_waits_for_22_and_uses_2200_xp(
+def test_daily_settlement_waits_for_1030_and_uses_1030_xp(
     tmp_path: Path,
 ) -> None:
     store = make_store(tmp_path)
@@ -270,38 +283,31 @@ def test_daily_settlement_waits_for_22_and_uses_2200_xp(
     )
 
     early = store.settle_daily_bets(
-        "2026-11-02", now=datetime(2026, 11, 2, 21, 59, 0, tzinfo=TZ)
+        "2026-11-02", now=datetime(2026, 11, 2, 10, 29, 0, tzinfo=TZ)
     )
     assert early["status"] == "skipped"
     assert store.bets_for("h1", now=MONDAY)["daily"]["status"] == "placed"
 
-    settled = store.settle_daily_bets(
-        "2026-11-02", now=datetime(2026, 11, 2, 22, 0, 0, tzinfo=TZ)
-    )
+    settled = store.settle_daily_bets("2026-11-02", now=MONDAY_SETTLE)
     assert settled["settled"] == 1
     assert settled["results"][0]["status"] == "won"
     assert settled["results"][0]["payout"] == 30
     assert settled["results"][0]["result_diff"] == 100
-    assert (
-        store.get_diamond_balance(
-            "h1", now=datetime(2026, 11, 2, 22, 0, 0, tzinfo=TZ)
-        )
-        == 1030
-    )
+    assert store.get_diamond_balance("h1", now=MONDAY_SETTLE) == 1030
 
     again = store.settle_daily_bets(
-        "2026-11-02", now=datetime(2026, 11, 2, 22, 5, 0, tzinfo=TZ)
+        "2026-11-02", now=datetime(2026, 11, 2, 10, 35, 0, tzinfo=TZ)
     )
     assert again["settled"] == 0
     assert (
         store.get_diamond_balance(
-            "h1", now=datetime(2026, 11, 2, 22, 5, 0, tzinfo=TZ)
+            "h1", now=datetime(2026, 11, 2, 10, 35, 0, tzinfo=TZ)
         )
         == 1030
     )
 
 
-def test_daily_settlement_ignores_activity_after_2200(tmp_path: Path) -> None:
+def test_daily_settlement_ignores_activity_after_1030(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     make_rival_pair(store, "h1", "h2")
     add_activity(
@@ -322,25 +328,25 @@ def test_daily_settlement_ignores_activity_after_2200(tmp_path: Path) -> None:
         "h1", "daily", None, 300, now=MONDAY, request_id="daily-cutoff"
     )
 
-    # A late burst would make the final day XP much higher, but the 22:00
+    # A late burst would make the final day XP much higher, but the 10:30
     # snapshot must not see it.
     add_activity(
         store,
         "h1",
         event_id="h1-late",
         seconds=3000,
-        occurred_at=datetime(2026, 11, 2, 23, 0, 0, tzinfo=TZ),
-        now=datetime(2026, 11, 2, 23, 0, 0, tzinfo=TZ),
+        occurred_at=datetime(2026, 11, 2, 11, 0, 0, tzinfo=TZ),
+        now=datetime(2026, 11, 2, 11, 0, 0, tzinfo=TZ),
     )
     settled = store.settle_daily_bets(
-        "2026-11-02", now=datetime(2026, 11, 2, 23, 30, 0, tzinfo=TZ)
+        "2026-11-02", now=datetime(2026, 11, 2, 11, 30, 0, tzinfo=TZ)
     )
     assert settled["results"][0]["status"] == "lost"
     assert settled["results"][0]["result_diff"] == 100
     assert settled["results"][0]["payout"] == 0
     assert (
         store.get_diamond_balance(
-            "h1", now=datetime(2026, 11, 2, 23, 30, 0, tzinfo=TZ)
+            "h1", now=datetime(2026, 11, 2, 11, 30, 0, tzinfo=TZ)
         )
         == 1000
     )
@@ -366,15 +372,8 @@ def test_daily_loss_and_weekly_draw_refund(tmp_path: Path) -> None:
     store.place_bet(
         "daily", "daily", None, 50, now=MONDAY, request_id="daily-loss"
     )
-    store.settle_daily_bets(
-        "2026-11-02", now=datetime(2026, 11, 2, 22, 0, 0, tzinfo=TZ)
-    )
-    assert (
-        store.get_diamond_balance(
-            "daily", now=datetime(2026, 11, 2, 22, 0, 0, tzinfo=TZ)
-        )
-        == 1000
-    )
+    store.settle_daily_bets("2026-11-02", now=MONDAY_SETTLE)
+    assert store.get_diamond_balance("daily", now=MONDAY_SETTLE) == 1000
 
     make_rival_pair(store, "weekly", "weekly-rival")
     set_week_xp(store, "weekly", 200)
@@ -496,9 +495,7 @@ def test_rival_auto_and_daily_bet_jobs(tmp_path: Path) -> None:
     daily_store.place_bet(
         "h1", "daily", None, 50, now=MONDAY, request_id="job-daily"
     )
-    result = run_daily_bets(
-        daily_store.path, at=datetime(2026, 11, 2, 22, 0, 0, tzinfo=TZ)
-    )
+    result = run_daily_bets(daily_store.path, at=MONDAY_SETTLE)
     assert result["status"] == "settled"
     assert result["settled"] == 1
 

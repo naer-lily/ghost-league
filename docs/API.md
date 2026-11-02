@@ -595,7 +595,7 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 
 ### `GET /v1/me/status`
 
-给助理或 cron 的稳定快照。只返回当前 token 的用户，不提供全员状态。
+给助理或外部轮询方的稳定快照。只返回当前 token 的用户，不提供全员状态。
 
 ```json
 {
@@ -695,9 +695,9 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
   当前周。
 - 只有完全没有可用周时 `power` 才为 `null`，此时 `power_provisional=true`；有 1 周
   及以上就已经正式定级，`power_provisional=false`，不会显示“定级中”。
-- 战力由外部 timer 每小时执行一次 `python3 -m ghost_league.game.jobs power` 刷新
-  `players` 当前值；该命令不写周历史、不结算。周结算在 `weekly_results` 落库后写
-  `player_power_history` 最终值。`status_for_user` 返回同一组战力字段。
+- 战力由 API 进程内的调度器每小时第 5 分钟刷新 `players` 当前值；该任务不写周历史、
+  不结算。周结算在 `weekly_results` 落库后写 `player_power_history` 最终值。
+  `status_for_user` 返回同一组战力字段。
 - 轮询方可以比较 `updated_at`、`xp`、`rank` 和 `next_settlement_at`；重复 `event_id`
   不会推进 `updated_at`。
 - 没有 `version` 字段；当前也不实现推送。
@@ -951,8 +951,8 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 - 周注：周一 `23:59:59` 前可下；下一个周一 `00:05` 的 `settle_week()` 结算。
 - 组注：与周注同一窗口；下一个周一 `00:05` 随 `settle_week()` 结算，每真人每周
   一次，可与周注/日注同时存在。
-- 日注：当天 `20:00` 前可下（`now < 20:00`），`20:00` 锁注，`22:00` 结算。
-- 日注按当天 `22:00` 时的打卡 XP 差判定，不使用 23:59 的最终日 XP。
+- 日注：当天 `09:00` 前可下（`now < 09:00`），`09:00` 锁注，`10:30` 结算。
+- 日注按当天 `10:30` 时的打卡 XP 差判定，不使用之后（含 23:59）的最终日 XP。
 
 ### `GET /v1/me/rival`
 
@@ -984,8 +984,8 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
   "projection": null,
   "bet_windows": {
     "weekly_locks_at": "2026-11-02T23:59:59+08:00",
-    "daily_locks_at": "2026-11-02T20:00:00+08:00",
-    "daily_settles_at": "2026-11-02T22:00:00+08:00"
+    "daily_locks_at": "2026-11-02T09:00:00+08:00",
+    "daily_settles_at": "2026-11-02T10:30:00+08:00"
   }
 }
 ```
@@ -1001,14 +1001,14 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 {
   "rival_week_estimate": 3400,
   "week_line": 3401,
-  "rival_today_estimate": 200,
-  "daily_lines": {"50": 250, "150": 350, "300": 500}
+  "rival_today_estimate": 100,
+  "daily_lines": {"50": 150, "150": 250, "300": 400}
 }
 ```
 
 周线：用宿敌 `power / 2000` 作百分位，取最近一个 `weeks.status='settled'` 周的
 `weekly_scores.xp` 分位值，四舍五入到百位；没有已结算周时退化到宿敌本周 XP。
-日线：用当前 `today_xp / 已过比例` 外推到当天 `22:00`，比例最低按 `20%` 计算，
+日线：用当前 `today_xp / 已过比例` 外推到当天 `10:30`，比例最低按 `20%` 计算，
 四舍五入到十位；当天没有 XP 时估计为 `0`。`daily_lines[target] = 估计值 + target`，
 `target` 为 `50` / `150` / `300`。
 
@@ -1060,8 +1060,8 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
   "bets": {"weekly": null, "daily": null, "group": null},
   "bet_windows": {
     "weekly_locks_at": "2026-11-02T23:59:59+08:00",
-    "daily_locks_at": "2026-11-02T20:00:00+08:00",
-    "daily_settles_at": "2026-11-02T22:00:00+08:00"
+    "daily_locks_at": "2026-11-02T09:00:00+08:00",
+    "daily_settles_at": "2026-11-02T10:30:00+08:00"
   }
 }
 ```

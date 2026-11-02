@@ -82,6 +82,12 @@ def day_start_at(value: date | datetime | str) -> datetime:
     return datetime.combine(parse_date(value), time.min, tzinfo=TZ)
 
 
+def day_time_at(value: date | datetime | str, at: time) -> datetime:
+    """Return ``at`` on the local calendar day containing ``value``."""
+
+    return datetime.combine(parse_date(value), at, tzinfo=TZ)
+
+
 def day_end_at(value: date | datetime | str) -> datetime:
     return day_start_at(value) + timedelta(days=1)
 

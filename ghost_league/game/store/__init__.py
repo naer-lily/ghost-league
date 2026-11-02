@@ -40,6 +40,12 @@ from .core import (
 )
 from .feed import FeedMixin
 from .groups import GroupsMixin
+from .job_runs import (
+    JOB_STATUS_FAILED,
+    JOB_STATUS_RUNNING,
+    JOB_STATUS_SUCCEEDED,
+    JobRunMixin,
+)
 from .players import PlayersMixin
 from .power import (
     POWER_WEIGHTS,
@@ -114,6 +120,7 @@ class GameStore(
     ShopMixin,
     RivalMixin,
     BetsMixin,
+    JobRunMixin,
 ):
     """Transactional access to one ``league.db`` file."""
 
@@ -138,6 +145,9 @@ __all__ = [
     "EMBER_PURCHASE_QUANTITY",
     "GROUP_SIZE",
     "ITEM_BY_ID",
+    "JOB_STATUS_FAILED",
+    "JOB_STATUS_RUNNING",
+    "JOB_STATUS_SUCCEEDED",
     "POWER_WEIGHTS",
     "POWER_WINDOW_WEEKS",
     "RARITY_BY_TYPE",

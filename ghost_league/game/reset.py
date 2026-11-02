@@ -82,6 +82,7 @@ def dry_run(path: str | Path) -> dict[str, Any]:
             "epoch_reason": "reset:to-bronze",
             "tables": [
                 "meta",
+                "job_runs",
                 "epochs",
                 "players",
                 "sources",

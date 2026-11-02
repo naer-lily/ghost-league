@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 # Running ``python scripts/source_fetch.py`` puts ``scripts/`` on sys.path, not
-# the repository root.  Keep the systemd ExecStart path simple and self-contained.
+# the repository root.  Keep the direct script invocation self-contained.
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))

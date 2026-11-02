@@ -17,8 +17,8 @@ from .api import app as api_app
 
 WEB_ROOT = Path(__file__).resolve().parents[1] / "web"
 
-# Production systemd points this at the next build; local tests keep using the
-# legacy ``web/`` root unless the environment explicitly overrides it.
+# Production deployment points this at the next build; local tests keep using
+# the legacy ``web/`` root unless the environment explicitly overrides it.
 _configured_root = os.environ.get("GHOST_LEAGUE_WEB_ROOT", "").strip()
 ACTIVE_WEB_ROOT = Path(_configured_root).expanduser() if _configured_root else WEB_ROOT
 

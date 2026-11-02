@@ -1,15 +1,15 @@
-"""Deployable weekly settlement job.
+"""Reusable background job entry points.
 
 The Channel owns hourly ingest. Ghost only needs to settle the previous local
 week, so this module stays a thin wrapper around the game store with explicit
-skip semantics for timers that run early or twice.
+skip semantics when a job runs early or twice.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +26,7 @@ def run_weekly_settlement(
 
     The job never pre-creates the next week and never settles older weeks. A
     week that has not ended or has no group is reported as ``skipped`` rather
-    than raised, so a persistent/holiday-delayed timer remains safe to rerun.
+    than raised, so a delayed or repeated scheduler pass remains safe.
     """
 
     local_now = cal.parse_datetime(at) if at is not None else cal.now_local()
@@ -74,7 +74,7 @@ def run_power_refresh(
 ) -> dict[str, Any]:
     """Refresh every player's current power without writing weekly history.
 
-    The hourly timer may run this as often as it likes; the operation is a
+    The scheduler may run this as often as it likes; the operation is a
     deterministic projection of ``weekly_scores`` and is safe to repeat.
     """
 
@@ -122,8 +122,8 @@ def run_diamond_decay(
     """Apply the hourly soft-cap decay to every existing wallet.
 
     The operation uses the same pure function as lazy wallet reads, so an
-    offline server catches up at the next timer or read without double-charging
-    a complete hour.
+    offline server catches up at the next scheduler pass or read without
+    double-charging a complete hour.
     """
 
     local_now = cal.parse_datetime(at) if at is not None else cal.now_local()
@@ -159,14 +159,19 @@ def run_auto_assign_rivals(
 def run_daily_bets(
     db_path: str | Path,
     *,
+    day: date | str | None = None,
     at: datetime | str | None = None,
 ) -> dict[str, Any]:
-    """Settle today's daily bets at 22:00 local time."""
+    """Settle one day's daily bets once its 10:30 cutoff has passed.
+
+    ``day`` defaults to the local date of ``at``.  The scheduler passes an
+    explicit date when catching up a missed day.
+    """
 
     local_now = cal.parse_datetime(at) if at is not None else cal.now_local()
-    day = local_now.date()
+    target_day = cal.parse_date(day) if day is not None else local_now.date()
     store = GameStore(Path(db_path))
-    result = store.settle_daily_bets(day, now=local_now)
+    result = store.settle_daily_bets(target_day, now=local_now)
     return {
         "status": result.get("status", "settled"),
         **result,
@@ -208,9 +213,12 @@ def build_parser() -> argparse.ArgumentParser:
     rival_auto.add_argument("--db", default=str(DEFAULT_DB_PATH))
     rival_auto.add_argument("--at")
     daily_bets = sub.add_parser(
-        "daily-bets", help="settle today's daily bets at 22:00"
+        "daily-bets", help="settle one day's daily bets at 10:30"
     )
     daily_bets.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    daily_bets.add_argument(
+        "--day", help="ISO date to settle (default: the local date of --at)"
+    )
     daily_bets.add_argument("--at")
     return parser
 
@@ -236,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "rival-auto":
         result = run_auto_assign_rivals(args.db, at=args.at)
     elif args.command == "daily-bets":
-        result = run_daily_bets(args.db, at=args.at)
+        result = run_daily_bets(args.db, day=args.day, at=args.at)
     else:  # pragma: no cover - argparse rejects unknown subcommands
         parser.error(f"unknown command: {args.command}")
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))

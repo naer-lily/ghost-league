@@ -158,12 +158,16 @@ Ghost 只把 profile 当**展示层快照**：不参与计分、分组、难度�
    幂等；
 6. Channel 心跳丢失时，Ghost 保留玩家和历史，不把 Channel 当真相源。
 
-Ghost 周一 00:05 结算上一周；Channel 周一 00:02 拉新快照。两者独立，不互相调用。
+周一的任务统一由 API 进程内调度器触发（`ghost_league/runtime_jobs.py` 装配）：
+`source-fetch` 00:02、`waka-roster` 00:03、`weekly-settle` 00:05。前两个是 Channel
+任务，最后一个是 Ghost 任务；调度器只是运行时组合根，`game/` 与 ingest 路径仍不
+import Channel/Source，二者依旧通过 roster/increments 契约交互。
 
 ## WakaChannel 独立包
 
 WakaTime 接入在独立包 `waka_channel/`，不进入 Ghost 的 `game/` 或 `channels/`。Ghost
-只通过上面的 roster/increments 契约接收匿名结果。包内职责：
+只通过上面的 roster/increments 契约接收匿名结果；进程内调度器通过 Channel 的公开
+CLI/客户端入口触发周任务，不复制其内部逻辑。包内职责：
 
 - `identity.py`：对每条 source row id 生成固定命名空间的 UUIDv5 `player_ref`；
 - `roster.py`：只读 `data/cache/cn-978.json`，保留全量行（含 0 秒行），复用 p75 缩尾；
@@ -201,4 +205,6 @@ python3 -m waka_channel.cli tick
 
 API 和 ingest 主路径已经是 Channel-only：`GameService.initialize()` 只建账号、social
 和 GameStore，不读 `data/cache`、不投影 AI、不建组；roster 到达后才建组。旧 source
-计划/投影代码只作历史兼容，不在 API/ingest 路径，也不应被新增代码 import。
+计划/投影代码只作历史兼容，不在 API/ingest 路径，也不应被新增代码 import。唯一的
+跨边界装配点是 `ghost_league/runtime_jobs.py`：它只把 Channel/Source 的公开入口注册
+为后台任务，不把 provider 字段、token 或 Channel 状态写进游戏库。

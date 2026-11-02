@@ -145,6 +145,22 @@ class BetsMixin:
         with self._reader() as conn:
             return self._bets_for_with(conn, player_id, week_iso, day_iso)
 
+    def has_unsettled_daily_bets(self, day: date | datetime | str) -> bool:
+        """True when ``day`` still has a placed daily bet.
+
+        The scheduler uses this to catch up overdue days without creating
+        no-op runs for days that never had a bet.
+        """
+
+        day_iso = cal.iso_date(day)
+        with self._reader() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM bets WHERE kind = 'daily' AND period_key = ? "
+                "AND status = 'placed' LIMIT 1",
+                (day_iso,),
+            ).fetchone()
+        return row is not None
+
     # ------------------------------------------------------------------
     # Placement
     # ------------------------------------------------------------------
@@ -374,7 +390,7 @@ class BetsMixin:
         ``checkins.xp`` is the real daily XP snapshot, but its row keeps the
         first check-in timestamp while its XP is updated later.  For a late
         settlement we therefore reconstruct a verified day from the activity
-        events strictly before 22:00.  Repaired days are final and are used as
+        events strictly before 10:30.  Repaired days are final and are used as
         stored.
         """
 

@@ -43,6 +43,7 @@ from .game.rival import (
     RivalUnavailable,
     RivalWindowClosed,
 )
+from .game.scheduler import GhostScheduler, ScheduledTask
 from .game.star_svg import render_star_svg
 from .game.rules import (
     CHECKIN_XP,
@@ -62,6 +63,7 @@ from .game.rules import (
     xp_for_seconds,
 )
 from .game.store import DEFAULT_DB_PATH, SOURCE_CHANNEL, SOURCE_HUMAN, GameStore
+from .runtime_jobs import build_scheduled_tasks
 from .schedule import TZ
 from .social import FollowStore
 from .themes import icon_theme_or_default
@@ -1687,11 +1689,20 @@ def create_app(
     game_now_fn: Callable[[], datetime] | None = None,
     widgets_dir: str | Path | None = None,
     widget_web_root: str | Path | None = None,
+    start_scheduler: bool = False,
+    scheduler_task_factory: (
+        Callable[[GameStore], list[ScheduledTask]] | None
+    ) = None,
+    scheduler_tick_seconds: float = 20.0,
+    scheduler_startup_grace_seconds: float = 0.25,
+    scheduler_shutdown_timeout_seconds: float = 15.0,
 ) -> FastAPI:
     """Application factory used by production and tests.
 
     ``state_path`` and the WakaTime arguments remain accepted only so local
     launchers can be upgraded independently; no legacy league file is read.
+    The production ``app`` enables the in-process scheduler; tests and other
+    embedders can keep it off.
     """
 
     del state_path, wakatime_cache_path, wakatime_fetch_fn
@@ -1740,15 +1751,43 @@ def create_app(
     )
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI):
+    async def lifespan(fastapi_app: FastAPI):
         service.initialize()
         widget_store.initialize()
         webhook_service.initialize()
         if start_webhook_worker:
             webhook_service.start_worker()
+        scheduler: GhostScheduler | None = None
+        if start_scheduler:
+            try:
+                assert service.store is not None
+                tasks = (
+                    scheduler_task_factory(service.store)
+                    if scheduler_task_factory is not None
+                    else build_scheduled_tasks(
+                        service.store, cache_path=service.cache_path
+                    )
+                )
+                scheduler = GhostScheduler(
+                    service.store,
+                    tasks,
+                    now_fn=service.now,
+                    tick_seconds=scheduler_tick_seconds,
+                    startup_grace_seconds=scheduler_startup_grace_seconds,
+                    shutdown_timeout_seconds=scheduler_shutdown_timeout_seconds,
+                )
+                scheduler.start()
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "failed to start in-process scheduler"
+                )
+                scheduler = None
+        fastapi_app.state.scheduler = scheduler
         try:
             yield
         finally:
+            if scheduler is not None:
+                await scheduler.stop()
             webhook_service.stop_worker()
 
     docs_enabled = os.environ.get("GHOST_LEAGUE_ENABLE_DOCS", "").lower() in {
@@ -1767,6 +1806,7 @@ def create_app(
     app.state.game_service = service
     app.state.webhook_service = webhook_service
     app.state.widget_store = widget_store
+    app.state.scheduler = None
     auth = _auth_dependency(service)
     channel_auth = _channel_auth_dependency(service)
     app.include_router(
@@ -2453,7 +2493,7 @@ def create_app(
     return app
 
 
-app = create_app()
+app = create_app(start_scheduler=True)
 
 
 __all__ = [

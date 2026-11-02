@@ -107,16 +107,19 @@ def test_player_ref_is_stable_uuid5_and_channel_scoped() -> None:
         player_ref(123)  # type: ignore[arg-type]
 
 
-def test_real_cache_has_978_unique_stable_anonymous_roster_rows() -> None:
+def test_real_cache_has_unique_stable_anonymous_roster_rows() -> None:
     if not REAL_CACHE.exists():
         pytest.skip("real snapshot cache is not present")
 
     rows = rows_from_cache(REAL_CACHE)
     roster = build_roster(REAL_CACHE)
     refs = [row.player_ref for row in rows]
+    cached = json.loads(REAL_CACHE.read_text(encoding="utf-8"))["users"]
+    expected = len({str(row["id"]) for row in cached})
 
-    assert len(rows) == len(roster) == 978
-    assert len(set(refs)) == 978
+    assert expected
+    assert len(rows) == len(roster) == expected
+    assert len(set(refs)) == expected
     assert all(row.kind == "ai" for row in rows)
     assert all(set(player) == {"player_ref", "kind", "profile"} for player in roster)
     assert all(player["kind"] == "ai" for player in roster)
@@ -124,7 +127,6 @@ def test_real_cache_has_978_unique_stable_anonymous_roster_rows() -> None:
     assert all(player["profile"]["avatar_url"] for player in roster)
 
     # Public names/avatars survive; private source fields do not.
-    cached = json.loads(REAL_CACHE.read_text(encoding="utf-8"))["users"]
     serialized = json.dumps(roster, ensure_ascii=False)
     profile_by_ref = {
         player["player_ref"]: player["profile"] for player in roster
@@ -133,7 +135,9 @@ def test_real_cache_has_978_unique_stable_anonymous_roster_rows() -> None:
         profile = profile_by_ref[player_ref(row["id"])]
         assert profile["display_name"] == row["name"]
         assert profile["avatar_url"] == row["avatar_url"]
-        assert row["city"] not in serialized
+        city = row.get("city")
+        if city:
+            assert city not in serialized
     assert "provider" not in serialized
     assert "raw_seconds" not in serialized
     assert "anchor" not in serialized

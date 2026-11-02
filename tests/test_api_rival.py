@@ -14,7 +14,7 @@ from ghost_league.schedule import TZ
 TOKEN = "rival-token"
 CHANNEL_TOKEN = "rival-channel-token"
 CHANNEL = "rival-channel"
-NOW = datetime(2026, 11, 2, 12, 0, 0, tzinfo=TZ)
+NOW = datetime(2026, 11, 2, 8, 0, 0, tzinfo=TZ)
 TUESDAY = datetime(2026, 11, 3, 0, 0, 0, tzinfo=TZ)
 WEEK_START = "2026-11-02"
 
@@ -118,7 +118,7 @@ class RivalStateAPITests(RivalAPITestBase):
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
         self.assertEqual(payload["week_start"], WEEK_START)
-        self.assertEqual(payload["server_now"], "2026-11-02T12:00:00+08:00")
+        self.assertEqual(payload["server_now"], "2026-11-02T08:00:00+08:00")
         self.assertTrue(payload["selection"]["open"])
         self.assertIsNone(payload["selection"]["mode"])
         self.assertIsNone(payload["rival"])
@@ -132,8 +132,8 @@ class RivalStateAPITests(RivalAPITestBase):
             payload["bet_windows"],
             {
                 "weekly_locks_at": "2026-11-02T23:59:59+08:00",
-                "daily_locks_at": "2026-11-02T20:00:00+08:00",
-                "daily_settles_at": "2026-11-02T22:00:00+08:00",
+                "daily_locks_at": "2026-11-02T09:00:00+08:00",
+                "daily_settles_at": "2026-11-02T10:30:00+08:00",
             },
         )
         keys: set[str] = set()
@@ -401,10 +401,10 @@ class BetAPITests(RivalAPITestBase):
             insufficient_store.get_diamond_balance("owner", now=NOW), 10
         )
 
-    def test_daily_bet_locks_at_2000(self) -> None:
+    def test_daily_bet_locks_at_0900(self) -> None:
         client = self.client()
         self.select_first(client)
-        self.clock["now"] = datetime(2026, 11, 2, 20, 0, 0, tzinfo=TZ)
+        self.clock["now"] = datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ)
         response = client.post(
             "/v1/me/bets",
             headers=auth(),

@@ -361,8 +361,8 @@ def test_projection_uses_settled_percentile_and_daily_ratio(
     assert state["projection"] == {
         "rival_week_estimate": 300,
         "week_line": 301,
-        "rival_today_estimate": 200,
-        "daily_lines": {"50": 250, "150": 350, "300": 500},
+        "rival_today_estimate": 100,
+        "daily_lines": {"50": 150, "150": 250, "300": 400},
     }
 
 
@@ -387,6 +387,7 @@ def test_projection_falls_back_without_settled_week(tmp_path: Path) -> None:
 
 def test_projected_today_xp_clamps_ratio() -> None:
     assert projected_today_xp(0, datetime(2026, 11, 2, 0, 5, tzinfo=TZ)) == 0
-    assert projected_today_xp(100, datetime(2026, 11, 2, 11, 0, tzinfo=TZ)) == 200
+    assert projected_today_xp(100, datetime(2026, 11, 2, 11, 0, tzinfo=TZ)) == 100
     assert projected_today_xp(100, datetime(2026, 11, 2, 0, 5, tzinfo=TZ)) == 500
+    assert projected_today_xp(100, datetime(2026, 11, 2, 10, 30, tzinfo=TZ)) == 100
     assert projected_today_xp(100, datetime(2026, 11, 2, 23, 0, tzinfo=TZ)) == 100

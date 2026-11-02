@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Final
 
 from . import calendar as cal
@@ -21,11 +21,11 @@ WEEK_SELECT_OPEN_OFFSET: Final = timedelta(minutes=5)
 WEEK_LOCK_OFFSET: Final = timedelta(days=1)
 AUTO_SELECT_OFFSET: Final = timedelta(days=1)
 
-# Weekly bets share the Monday window.  Daily bets lock at 20:00 and settle at
-# 22:00 so the result never depends on late-night activity.
+# Weekly bets share the Monday window.  Daily bets lock at 09:00 and settle at
+# 10:30 local time so the result only uses the morning check-in window.
 WEEKLY_BET_LOCK_OFFSET: Final = timedelta(days=1)
-DAILY_BET_LOCK_HOUR: Final = 20
-DAILY_BET_SETTLE_HOUR: Final = 22
+DAILY_BET_LOCK_TIME: Final = time(9, 0)
+DAILY_BET_SETTLE_TIME: Final = time(10, 30)
 
 WEEKLY_STAKES: Final[tuple[int, ...]] = (20, 40, 60)
 WEEKLY_ODDS: Final = 2.0
@@ -51,7 +51,10 @@ DAILY_TARGET_PAYOUTS: Final[dict[int, int]] = {
 PROJECTION_POWER_SCALE: Final = 2000
 PROJECTION_WEEK_STEP: Final = 100
 PROJECTION_DAY_STEP: Final = 10
-PROJECTION_DAY_WINDOW_HOURS: Final = 22
+# Extrapolate to the 10:30 daily settlement cutoff, expressed in hours.
+PROJECTION_DAY_WINDOW_HOURS: Final = (
+    DAILY_BET_SETTLE_TIME.hour + DAILY_BET_SETTLE_TIME.minute / 60
+)
 PROJECTION_MIN_DAY_RATIO: Final = 0.2
 DAILY_PROJECTION_TARGETS: Final[tuple[int, ...]] = (50, 150, 300)
 
@@ -152,11 +155,11 @@ def weekly_bet_locks_at(week: date | datetime | str) -> datetime:
 
 
 def daily_bet_locks_at(day: date | datetime | str) -> datetime:
-    return cal.day_start_at(day) + timedelta(hours=DAILY_BET_LOCK_HOUR)
+    return cal.day_time_at(day, DAILY_BET_LOCK_TIME)
 
 
 def daily_bet_settles_at(day: date | datetime | str) -> datetime:
-    return cal.day_start_at(day) + timedelta(hours=DAILY_BET_SETTLE_HOUR)
+    return cal.day_time_at(day, DAILY_BET_SETTLE_TIME)
 
 
 def group_bet_settles_at(week: date | datetime | str) -> datetime:
@@ -240,10 +243,10 @@ def projected_week_xp(
 
 
 def projected_today_xp(today_xp: int, now: datetime) -> int:
-    """Extrapolate today's XP to the 22:00 cutoff, rounded to tens.
+    """Extrapolate today's XP to the 10:30 cutoff, rounded to tens.
 
-    The elapsed fraction is measured against the 22-hour window and clamped to
-    at least 20% so a very early single event does not explode the estimate.
+    The elapsed fraction is measured against the 10.5-hour window and clamped
+    to at least 20% so a very early single event does not explode the estimate.
     """
 
     if today_xp <= 0:
@@ -263,8 +266,8 @@ __all__ = [
     "BetError",
     "BetRejected",
     "BetWindowClosed",
-    "DAILY_BET_LOCK_HOUR",
-    "DAILY_BET_SETTLE_HOUR",
+    "DAILY_BET_LOCK_TIME",
+    "DAILY_BET_SETTLE_TIME",
     "DAILY_PROJECTION_TARGETS",
     "DAILY_STAKE",
     "DAILY_TARGET_ODDS",
