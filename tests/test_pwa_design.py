@@ -146,7 +146,7 @@ class PWADesignMotionTests(unittest.TestCase):
         self.assertIn("minmax(0, 1fr)", self.css)
 
     def test_07_shell_cache_is_bumped_without_removing_previous_marker(self) -> None:
-        self.assertIn('const CACHE_VERSION = "gl-shell-v46-2026-10-30";', self.sw)
+        self.assertIn('const CACHE_VERSION = "gl-shell-v47-2026-11-02";', self.sw)
         self.assertIn("gl-shell-v45-2026-10-30", self.sw)
         self.assertIn("gl-shell-v43-2026-10-30", self.sw)
         self.assertIn("gl-shell-v42-2026-10-30", self.sw)
@@ -160,7 +160,7 @@ class PWADesignMotionTests(unittest.TestCase):
         self.assertIn("gl-shell-v34-2026-10-29", self.sw)
         self.assertIn("caches.delete", self.sw)
         self.assertIn("/style.css?v=46", self.sw)
-        self.assertIn("/app.js?v=46", self.sw)
+        self.assertIn("/app.js?v=47", self.sw)
 
     def test_10_ember_frame_art_is_scoped_to_owned_avatars(self) -> None:
         self.assertIn('frame_ember: "/assets/frames/frame_ember.png"', self.js)

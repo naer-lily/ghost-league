@@ -87,6 +87,23 @@
     Diamond: "钻石",
   };
 
+  const PAGES = new Set([
+    "home", "league", "feed", "embers", "history", "me", "user", "people", "integration",
+  ]);
+
+  function normalizePage(page) {
+    return PAGES.has(page) ? page : "home";
+  }
+
+  function pageFromHash() {
+    return normalizePage(window.location.hash.replace("#", "") || "home");
+  }
+
+  function currentHistoryDepth() {
+    const depth = Number(window.history.state?.glDepth);
+    return Number.isInteger(depth) && depth >= 0 ? depth : 0;
+  }
+
   const el = {};
   const state = {
     token: storageGet(TOKEN_KEY),
@@ -2714,8 +2731,9 @@
     state.pollTimer = null;
   }
 
-  function showPage(page) {
-    if (!["home", "league", "feed", "embers", "history", "me", "user", "people", "integration"].includes(page)) page = "home";
+  function showPage(page, { push = true, replace = false } = {}) {
+    page = normalizePage(page);
+    const previousPage = state.page;
     state.page = page;
     document.querySelectorAll(".page").forEach((section) => {
       section.hidden = section.dataset.page !== page;
@@ -2726,8 +2744,19 @@
       if (active) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
     });
-    if (window.location.hash !== `#${page}`) {
-      window.history.replaceState(null, "", `#${page}`);
+    const nextHash = `#${page}`;
+    if (push && previousPage !== page) {
+      window.history.pushState(
+        { glPage: page, glDepth: currentHistoryDepth() + 1 },
+        "",
+        nextHash,
+      );
+    } else if (replace || window.location.hash !== nextHash) {
+      window.history.replaceState(
+        { glPage: page, glDepth: currentHistoryDepth() },
+        "",
+        nextHash,
+      );
     }
     window.scrollTo({ top: 0, behavior: reducedMotionQuery.matches ? "auto" : "smooth" });
     if (page === "league" && state.tierRailNeedsCenter) {
@@ -2744,7 +2773,36 @@
       if (!state.embersLoaded) loadEmbers();
     }
     if (page === "history" && !state.historyLoaded) loadHistory();
+    if (page === "league" && state.leagueTab === "friends") loadFriendsStandings();
     if (page === "integration") renderIntegrationToken();
+  }
+
+  function resetNavigation(page = "home") {
+    page = normalizePage(page);
+    window.history.replaceState({ glPage: page, glDepth: 0 }, "", `#${page}`);
+    showPage(page, { push: false });
+  }
+
+  function bootNavigation() {
+    const initialPage = pageFromHash();
+    window.history.replaceState({ glPage: "home", glDepth: 0 }, "", "#home");
+    if (initialPage !== "home") {
+      window.history.pushState({ glPage: initialPage, glDepth: 1 }, "", `#${initialPage}`);
+    }
+    showPage(initialPage, { push: false });
+  }
+
+  function goBack(fallback = "home") {
+    if (currentHistoryDepth() > 0) {
+      window.history.back();
+      return;
+    }
+    showPage(fallback, { push: false, replace: true });
+  }
+
+  function handlePopState(event) {
+    const page = event.state?.glPage || pageFromHash();
+    showPage(page, { push: false });
   }
 
   async function loadHistory() {
@@ -2873,7 +2931,7 @@
       storageSet(TOKEN_KEY, value);
       await loadDashboard({ first: true });
       showApp();
-      showPage("home");
+      resetNavigation("home");
       playClick();
     } catch (error) {
       state.token = null;
@@ -2895,7 +2953,7 @@
     registerServiceWorker();
     renderSound();
     updateOfflineBanner();
-    showPage(location.hash.replace("#", "") || "home");
+    bootNavigation();
     if (!state.token) {
       showLogin();
       return;
@@ -2904,7 +2962,7 @@
       await api("/v1/me/profile", { skipAuthRedirect: true });
       await loadDashboard({ first: true });
       showApp();
-      showPage(location.hash.replace("#", "") || "home");
+      showPage(pageFromHash(), { push: false });
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         storageRemove(TOKEN_KEY);
@@ -3000,6 +3058,7 @@
   function bindEvents() {
     setupPullToRefresh();
     setupTierRailScroll();
+    window.addEventListener("popstate", handlePopState);
     el["login-form"].addEventListener("submit", (event) => {
       event.preventDefault();
       if (state.loginBusy) return;
@@ -3021,7 +3080,7 @@
     });
     if (el["feed-back-button"]) {
       el["feed-back-button"].addEventListener("click", () => {
-        showPage("home");
+        goBack("home");
         playClick();
       });
     }
@@ -3060,7 +3119,7 @@
       playClick();
     });
     el["integration-back-button"].addEventListener("click", () => {
-      showPage("me");
+      goBack("me");
       playClick();
     });
     el["integration-token-reveal"].addEventListener("click", () => {
@@ -3120,15 +3179,11 @@
       playClick();
     });
     el["people-back-button"].addEventListener("click", () => {
-      showPage("me");
+      goBack("me");
       playClick();
     });
     el["user-back-button"].addEventListener("click", () => {
-      const target = state.detailReturnPage || "league";
-      showPage(target);
-      if (target === "league" && state.leagueTab === "friends") {
-        loadFriendsStandings();
-      }
+      goBack(state.detailReturnPage || "league");
       playClick();
     });
     el["user-follow-button"].addEventListener("click", async () => {
