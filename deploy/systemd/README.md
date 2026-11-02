@@ -15,6 +15,8 @@
   `python3 -m waka_channel.cli sync-roster`，发送本周全量名单。
 - `ghost-league-settle.timer`：`Mon 00:05`，`Persistent=true`；执行
   `python3 -m ghost_league.game.jobs settle`，只结算上一个本地周，不预建下一周。
+- `ghost-league-power.timer`：每小时第 5 分钟，`Persistent=true`；执行
+  `python3 -m ghost_league.game.jobs power`，刷新当前战力，不写周历史。
 - `ghost-league-waka-tick.timer`：每小时第 1 分钟，`Persistent=true`；执行
   `python3 -m waka_channel.cli tick`，只发送已完成小时，重复或漏跑由 cursor 处理。
 
@@ -47,13 +49,18 @@ sudo install -m 0644 deploy/systemd/ghost-league-waka-tick.service \
   /etc/systemd/system/ghost-league-waka-tick.service
 sudo install -m 0644 deploy/systemd/ghost-league-waka-tick.timer \
   /etc/systemd/system/ghost-league-waka-tick.timer
+sudo install -m 0644 deploy/systemd/ghost-league-power.service \
+  /etc/systemd/system/ghost-league-power.service
+sudo install -m 0644 deploy/systemd/ghost-league-power.timer \
+  /etc/systemd/system/ghost-league-power.timer
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now \
   ghost-league-source-fetch.timer \
   ghost-league-waka-roster.timer \
   ghost-league-settle.timer \
-  ghost-league-waka-tick.timer
+  ghost-league-waka-tick.timer \
+  ghost-league-power.timer
 ```
 
 ## 检查
@@ -64,11 +71,13 @@ systemctl status \
   ghost-league-source-fetch.timer \
   ghost-league-waka-roster.timer \
   ghost-league-settle.timer \
-  ghost-league-waka-tick.timer
+  ghost-league-waka-tick.timer \
+  ghost-league-power.timer
 journalctl -u ghost-league-source-fetch.service \
   -u ghost-league-waka-roster.service \
   -u ghost-league-settle.service \
-  -u ghost-league-waka-tick.service
+  -u ghost-league-waka-tick.service \
+  -u ghost-league-power.service
 ```
 
 手工运行：

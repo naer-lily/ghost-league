@@ -1,0 +1,10 @@
+[Unit]
+Description=Ghost League hourly power refresh timer
+
+[Timer]
+OnCalendar=*-*-* *:05:00
+Persistent=true
+Unit=ghost-league-power.service
+
+[Install]
+WantedBy=timers.target
