@@ -95,7 +95,7 @@ export function UserProfileSheet({ userId, onOpenChange }: UserProfileSheetProps
           </div>
 
           <Dialog.Description className={styles.description}>
-            只展示公开的联赛信息；钻石、下注和其他私有数据不会出现在这里。
+            {data?.handle ? `@${data.handle}` : null}
           </Dialog.Description>
 
           {profile.isPending ? (
@@ -133,7 +133,6 @@ export function UserProfileSheet({ userId, onOpenChange }: UserProfileSheetProps
                 />
                 <div className={styles.identityText}>
                   <p className={styles.name}>{data.display_name}</p>
-                  <p className={styles.handle}>@{data.user_id}</p>
                   <span className={styles.tier}>
                     <TierIcon
                       tier={data.tier}

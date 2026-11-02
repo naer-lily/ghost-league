@@ -90,6 +90,7 @@ function rivalState(overrides: Partial<RivalState> = {}): RivalState {
 
 const PUBLIC_USER = {
   user_id: 'ch-rival',
+  handle: null,
   display_name: '林间',
   avatar_url: null,
   activity_label: '绘画',
@@ -97,6 +98,7 @@ const PUBLIC_USER = {
   group_id: 7,
   week_start: '2026-10-26',
   xp: 760,
+  power: 980,
   rank: 4,
   group_size: 15,
   checkin: 'verified',

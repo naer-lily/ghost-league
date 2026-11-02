@@ -390,6 +390,7 @@ export interface Collection {
 
 export interface FriendSummary {
   user_id: string
+  handle: string | null
   display_name: string
   avatar_url: string | null
   activity_label: string | null
@@ -397,6 +398,7 @@ export interface FriendSummary {
   group_id: number | null
   week_start: string
   xp: number
+  power: number | null
   rank: number | null
   group_size: number
   checkin: string | null

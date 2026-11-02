@@ -122,6 +122,9 @@ describe('HistoryPage', () => {
       '升段',
     )
     expect(screen.queryByText('还没有历史记录')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('打卡、下注、宿敌、星星和周结算，按时间倒序排列。'),
+    ).not.toBeInTheDocument()
   })
 
   it('filters by chip and treats group bets as bets', async () => {
@@ -168,6 +171,9 @@ describe('HistoryPage', () => {
     expect(await screen.findByTestId('history-empty')).toHaveTextContent(
       '还没有历史记录',
     )
+    expect(
+      screen.queryByText('完成打卡、下注或周结算后，真实记录会出现在这里。'),
+    ).not.toBeInTheDocument()
     expect(screen.getByTestId('history-count')).toHaveTextContent('全部 0 条')
     expect(screen.queryByTestId('history-item')).not.toBeInTheDocument()
   })

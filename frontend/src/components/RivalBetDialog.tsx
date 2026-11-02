@@ -110,7 +110,6 @@ function PlacedBet({ bet }: PlacedBetProps) {
           周期 {bet.period_key} · 周一 23:59:59 截止 · 次周一结算
         </p>
       )}
-      <p className={styles.placedCopy}>本周期已经下过，不能重复提交。</p>
     </div>
   )
 }
@@ -451,12 +450,6 @@ export function RivalBetDialog({
 
             {currentBet ? <PlacedBet bet={currentBet} /> : null}
 
-            {closed ? (
-              <p className={styles.closed} role="status">
-                {closed}
-              </p>
-            ) : null}
-
             {error ? (
               <p
                 className={styles.error}
@@ -482,9 +475,8 @@ export function RivalBetDialog({
               多少就扣多少钻石；赢按总本金 × 赔率派彩。
             </p>
             <p className={styles.note}>
-              {lockedTab === 'daily'
-                ? `日注锁注 ${formatCountdown(windows.daily_locks_at, now)}`
-                : `本周剩余 ${formatCountdown(windows.weekly_locks_at, now)} · 日注锁注 ${formatCountdown(windows.daily_locks_at, now)}`}
+              本周剩余 {formatCountdown(windows.weekly_locks_at, now)} · 日注锁注{' '}
+              {formatCountdown(windows.daily_locks_at, now)}
             </p>
           </div>
         </Dialog.Content>

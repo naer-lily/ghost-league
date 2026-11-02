@@ -480,6 +480,11 @@ describe('RivalPage', () => {
     expect(within(dialog).getByTestId('rival-bet-placed')).toHaveTextContent(
       '总返30',
     )
+    expect(within(dialog).getAllByText('已下注')).toHaveLength(1)
+    expect(
+      within(dialog).queryByText('本周期已经下过，不能重复提交。'),
+    ).not.toBeInTheDocument()
+    expect(within(dialog).getByTestId('rival-bet-paid-input')).toBeVisible()
     expect(
       within(dialog).getByRole('button', { name: '本期已下注' }),
     ).toBeDisabled()
@@ -552,6 +557,10 @@ describe('RivalPage', () => {
       '赔率 ×1.90',
     )
     expect(within(dialog).getByTestId('rival-target-200')).toBeInTheDocument()
+    expect(within(dialog).getByTestId('rival-bet-paid-input')).toBeVisible()
+    expect(within(dialog).getByTestId('rival-bet-stake')).toHaveTextContent(
+      '20',
+    )
 
     await user.click(within(dialog).getByTestId('rival-target-50'))
     expect(within(dialog).getByTestId('rival-bet-target')).toHaveTextContent(
@@ -579,7 +588,7 @@ describe('RivalPage', () => {
     const dialog = await screen.findByTestId('rival-bet-dialog')
     await user.click(within(dialog).getByRole('tab', { name: /日注/ }))
 
-    expect(within(dialog).getAllByText('今天的注已截止')).toHaveLength(2)
+    expect(within(dialog).getAllByText('今天的注已截止')).toHaveLength(1)
     expect(
       within(dialog).getByRole('button', { name: '今天的注已截止' }),
     ).toBeDisabled()

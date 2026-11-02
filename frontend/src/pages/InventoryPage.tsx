@@ -72,7 +72,6 @@ type ShopCategoryId = 'stars' | 'embers' | 'cap' | 'other'
 interface ShopCategory {
   id: ShopCategoryId
   label: string
-  description: string
   icon: typeof Star
   items: ShopItem[]
 }
@@ -82,7 +81,6 @@ function groupShopItems(items: ShopItem[]): ShopCategory[] {
     {
       id: 'stars',
       label: '星星',
-      description: '抽取随机星体，每次抽取的结果都在抽取后揭晓。',
       icon: Star,
       items: items.filter(
         (item) => item.kind === 'star' || item.kind === 'seasonal_star',
@@ -91,21 +89,18 @@ function groupShopItems(items: ShopItem[]): ShopCategory[] {
     {
       id: 'embers',
       label: '余烬',
-      description: '补签等操作需要的消耗品。',
       icon: Flame,
       items: items.filter((item) => item.kind === 'ember'),
     },
     {
       id: 'cap',
       label: '仓库上限',
-      description: '提升仓库能保存的钻石上限。',
       icon: Package,
       items: items.filter((item) => item.kind === 'cap'),
     },
     {
       id: 'other',
       label: '其他商品',
-      description: '商店里的其他通用物品。',
       icon: Package,
       items: items.filter(
         (item) =>
@@ -173,8 +168,6 @@ function DrawEntry({
           {formatNumber(item.price_diamonds)}
         </span>
       </div>
-
-      <p className={styles.description}>{item.description}</p>
 
       <div className={styles.chips}>
         <span>{types.length} 种星体</span>
@@ -302,8 +295,6 @@ function ProductCard({
         </span>
       </div>
 
-      <p className={styles.description}>{item.description}</p>
-
       <div className={styles.chips}>
         <span>{stats}</span>
         {cooldown ? (
@@ -332,11 +323,9 @@ function ProductCard({
 function EmptyState({
   icon: Icon,
   title,
-  copy,
 }: {
   icon: typeof Star
   title: string
-  copy: string
 }) {
   return (
     <div className={styles.empty} data-testid="inventory-empty">
@@ -344,7 +333,6 @@ function EmptyState({
         <Icon size={28} />
       </span>
       <p className={styles.emptyTitle}>{title}</p>
-      <p className={styles.emptyCopy}>{copy}</p>
     </div>
   )
 }
@@ -578,11 +566,7 @@ export function InventoryPage() {
 
       <section className={styles.hero} aria-labelledby="inventory-title">
         <div className={styles.heroText}>
-          <p className="eyebrow">物品 / 商店</p>
           <h1 id="inventory-title">物品</h1>
-          <p className={styles.heroCopy}>
-            星星、边框、称号和其他物品都在这里；商店里的星星、余烬和仓库上限也只是商品类别。
-          </p>
         </div>
         <div className={styles.wallet} data-testid="inventory-wallet">
           <span className={styles.balance} aria-label={`钻石 ${view.diamonds}`}>
@@ -633,7 +617,6 @@ export function InventoryPage() {
             <div className={styles.sectionHead}>
               <div>
                 <h2 id="inventory-stars-title">我的星星</h2>
-                <p>已拥有的星星都在这里；星星只是物品栏的一类。</p>
               </div>
               {stars.length > 0 ? (
                 <span className={styles.count}>{stars.length} 颗</span>
@@ -643,7 +626,6 @@ export function InventoryPage() {
               <EmptyState
                 icon={Star}
                 title="还没有星星"
-                copy="去商店抽一颗，抽到的星会放进物品里。"
               />
             ) : (
               <div className={styles.starGrid} data-testid="star-library">
@@ -687,7 +669,6 @@ export function InventoryPage() {
             <div className={styles.sectionHead}>
               <div>
                 <h2 id="inventory-frames-title">边框</h2>
-                <p>通过里程碑获得的头像边框，可以随时更换或卸下。</p>
               </div>
               {frames.length > 0 ? (
                 <span className={styles.count}>{frames.length} 个</span>
@@ -703,7 +684,6 @@ export function InventoryPage() {
                 <EmptyState
                   icon={Frame}
                   title="还没有边框"
-                  copy="完成里程碑后，边框会出现在这里。"
                 />
               ) : (
                 <ul className={styles.collectionList} aria-label="边框列表">
@@ -745,7 +725,6 @@ export function InventoryPage() {
             <div className={styles.sectionHead}>
               <div>
                 <h2 id="inventory-titles-title">称号</h2>
-                <p>比赛和里程碑解锁的称号，可以随时更换或卸下。</p>
               </div>
               {collection.data && collection.data.titles.length > 0 ? (
                 <span className={styles.count}>
@@ -763,7 +742,6 @@ export function InventoryPage() {
                 <EmptyState
                   icon={Award}
                   title="还没有称号"
-                  copy="参加联赛、保持连胜后，称号会自动解锁。"
                 />
               ) : (
                 <ul className={styles.collectionList} aria-label="称号列表">
@@ -799,7 +777,6 @@ export function InventoryPage() {
             <div className={styles.sectionHead}>
               <div>
                 <h2 id="inventory-other-title">其他物品</h2>
-                <p>背景、徽章底色和消耗品；有装备槽的物品可以装备或卸下。</p>
               </div>
             </div>
             <CollectionState
@@ -812,7 +789,6 @@ export function InventoryPage() {
                 <EmptyState
                   icon={Package}
                   title="还没有其他物品"
-                  copy="兑换补给后，消耗品会出现在这里。"
                 />
               ) : (
                 <ul className={styles.collectionList} aria-label="其他物品列表">
@@ -875,7 +851,6 @@ export function InventoryPage() {
         <div className={styles.sectionHead}>
           <div>
             <h2 id="inventory-shop-title">商店</h2>
-            <p>星星、余烬、仓库上限和其他商品，都是商店里的商品类别。</p>
           </div>
           {shopCategories.length > 0 ? (
             <span className={styles.count}>{items.length} 件商品</span>
@@ -897,7 +872,6 @@ export function InventoryPage() {
           <EmptyState
             icon={Package}
             title="商店暂时没有商品"
-            copy="有新品上架后会显示在这里。"
           />
         ) : (
           <div className={styles.shopCategories}>
@@ -927,7 +901,6 @@ export function InventoryPage() {
                       <h3 id={`shop-category-${category.id}-title`}>
                         {category.label}
                       </h3>
-                      <p>{category.description}</p>
                     </div>
                     <span className={styles.count}>
                       {category.items.length} 件

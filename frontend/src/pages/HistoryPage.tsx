@@ -76,7 +76,6 @@ function HistoryLoading() {
         <History size={26} />
       </span>
       <p className={styles.stateTitle}>正在读取历史记录</p>
-      <p className={styles.stateCopy}>打卡、下注、星星和周结算会按时间汇总。</p>
     </div>
   )
 }
@@ -177,11 +176,6 @@ export function HistoryPage() {
                 ? '还没有历史记录'
                 : `还没有${filterLabel}记录`}
             </p>
-            <p className={styles.stateCopy}>
-              {items.length === 0
-                ? '完成打卡、下注或周结算后，真实记录会出现在这里。'
-                : '换一个筛选，或下拉刷新后再看。'}
-            </p>
             {items.length === 0 ? null : (
               <button
                 type="button"
@@ -210,9 +204,6 @@ function HistoryHead() {
       <div className={styles.headText}>
         <p className="eyebrow">历史</p>
         <h1>我的历史</h1>
-        <p className={styles.copy}>
-          打卡、下注、宿敌、星星和周结算，按时间倒序排列。
-        </p>
       </div>
     </header>
   )

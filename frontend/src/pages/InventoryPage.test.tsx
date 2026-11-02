@@ -378,7 +378,9 @@ describe('InventoryPage', () => {
     expect(
       await screen.findByRole('heading', { name: '物品' }),
     ).toBeInTheDocument()
-    expect(document.body.textContent ?? '').not.toMatch(/星库|星图/)
+    expect(document.body.textContent ?? '').not.toMatch(
+      /星库|星图|物品 \/ 商店|星星、边框、称号和其他物品都在这里|已拥有的星星都在这里|都是商店里的商品类别/,
+    )
     expect(screen.getByTestId('inventory-tab-stars')).toHaveAttribute(
       'aria-selected',
       'true',
@@ -417,11 +419,20 @@ describe('InventoryPage', () => {
     const starItem = screen.getByTestId('shop-item-star')
     expect(starItem).toHaveTextContent('抽取一颗')
     expect(starItem).toHaveTextContent('13 种星体')
+    expect(starItem).not.toHaveTextContent('300 钻石抽一颗随机星。')
     expect(within(starItem).getAllByTestId('star-rate')).toHaveLength(5)
 
     const seasonalItem = screen.getByTestId('shop-item-seasonal_star')
     expect(seasonalItem).toHaveTextContent('2026-11 限定')
     expect(seasonalItem).toHaveTextContent('抽取季节星')
+    expect(seasonalItem).not.toHaveTextContent('500 钻石抽一颗当季随机星。')
+
+    const emberItem = within(shop).getByTestId('shop-item-ember')
+    expect(emberItem).not.toHaveTextContent('立即获得 1 枚余烬。')
+    expect(within(shop).queryByText('抽取随机星体，每次抽取的结果都在抽取后揭晓。'))
+      .not.toBeInTheDocument()
+    expect(within(shop).queryByText('补签等操作需要的消耗品。'))
+      .not.toBeInTheDocument()
 
     expect(document.body.textContent ?? '').not.toMatch(
       /common|uncommon|legendary|gacha/,
@@ -472,10 +483,19 @@ describe('InventoryPage', () => {
     await screen.findByRole('heading', { name: '物品' })
 
     expect(screen.getByText('还没有星星')).toBeInTheDocument()
+    expect(
+      screen.queryByText('去商店抽一颗，抽到的星会放进物品里。'),
+    ).not.toBeInTheDocument()
     await userEvent.click(screen.getByTestId('inventory-tab-frames'))
     expect(await screen.findByText('还没有边框')).toBeInTheDocument()
+    expect(
+      screen.queryByText('完成里程碑后，边框会出现在这里。'),
+    ).not.toBeInTheDocument()
     await userEvent.click(screen.getByTestId('inventory-tab-titles'))
     expect(await screen.findByText('还没有称号')).toBeInTheDocument()
+    expect(
+      screen.queryByText('参加联赛、保持连胜后，称号会自动解锁。'),
+    ).not.toBeInTheDocument()
     await userEvent.click(screen.getByTestId('inventory-tab-other'))
     expect(await screen.findByText('还没有其他物品')).toBeInTheDocument()
   })
@@ -508,6 +528,9 @@ describe('InventoryPage', () => {
 
     const reveal = await screen.findByTestId('star-reveal')
     expect(within(reveal).getByText('霜蓝')).toBeInTheDocument()
+    expect(
+      within(reveal).queryByText('这颗星已经放进物品栏，收下后可以随时查看。'),
+    ).not.toBeInTheDocument()
     const purchaseCall = fetchMock.mock.calls.find(([input]) =>
       String(input).endsWith('/v1/shop/purchase'),
     )

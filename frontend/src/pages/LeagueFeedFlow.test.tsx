@@ -19,6 +19,7 @@ function response(payload: unknown, status = 200): Response {
 function friendSummary(following: boolean): FriendSummary {
   return {
     user_id: 'friend-a',
+    handle: 'friend-a',
     display_name: '阿岚',
     avatar_url: null,
     activity_label: '画画',
@@ -26,6 +27,7 @@ function friendSummary(following: boolean): FriendSummary {
     group_id: 2,
     week_start: '2026-10-26',
     xp: 900,
+    power: 450,
     rank: 4,
     group_size: 15,
     checkin: 'verified',

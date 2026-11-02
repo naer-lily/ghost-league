@@ -1360,11 +1360,15 @@ odds = round(odds, 2)
 
 需要普通账号 Bearer token。返回本地账号或 Channel player 的公开卡片，并附带
 “我与目标”的本周对比。公开响应**不包含** `kind`、`is_ai`、`origin`、`synthetic`、
-钻石、钱包、下注、私有库存或原始秒数。顶层字段包括 `user_id`、`display_name`、
-`avatar_url`、`activity_label`、`tier`、`group_id`、`week_start`、`xp`、`rank`、
-`group_size`、`checkin`、`streak`、`equipped_title`、`frame`、`backdrop`、
-`badge_accent`、`is_following`、`followers_count`、`following_count` 和
+钻石、钱包、下注、私有库存或原始秒数。顶层字段包括 `user_id`、`handle`、
+`display_name`、`avatar_url`、`activity_label`、`tier`、`group_id`、`week_start`、
+`xp`、`power`、`rank`、`group_size`、`checkin`、`streak`、`equipped_title`、`frame`、
+`backdrop`、`badge_accent`、`is_following`、`followers_count`、`following_count` 和
 `comparison`。未知 user_id 返回 `404`；无 token 返回 `401`。
+
+`handle` 只对本地人类账号返回其 `user_id`；Channel/AI 玩家返回 `null`，前端不得把
+随机 `ch-...` 标识当作 handle 展示。`power` 是公开的当前战力，没有可用周数据时为
+`null`。
 
 `comparison` 在查看自己时为 `null`（前端不渲染“我和我对比”），查看他人时稳定返回：
 
@@ -1392,7 +1396,8 @@ odds = round(odds, 2)
 - `POST /v1/me/follows/{user_id}`：幂等关注；不能关注自己（`422`），未知用户 `404`。
 - `DELETE /v1/me/follows/{user_id}`：幂等取消，成功返回 `204`。
 - `GET /v1/me/follows`、`GET /v1/me/followers`：返回用户卡片数组。
-- `GET /v1/me/friends/standings`：返回 `{week_start, members}`，成员按 XP 降序。
+- `GET /v1/me/friends/standings`：返回 `{week_start, members}`，成员按 XP 降序；
+  每个成员带公开的 `power` 与 `handle`（人类账号为 `user_id`，AI/Channel 为 `null`）。
 - `GET /v1/discover/people`：只列出本地账号，不含 Channel player；排除自己。
 
 ### 公开卡片

@@ -44,7 +44,7 @@ function friendRows(members: FriendSummary[], myId: string): StandingRow[] {
       avatar_url: member.avatar_url,
       is_me: member.user_id === myId,
       xp: member.xp,
-      power: null,
+      power: member.power,
       checkin: member.checkin,
       streak: member.streak,
       title: member.equipped_title,
@@ -184,7 +184,6 @@ export function LeaguePage() {
               <StandingList
                 rows={followed}
                 label="好友榜"
-                showPower={false}
                 onOpenProfile={setProfileId}
               />
             )

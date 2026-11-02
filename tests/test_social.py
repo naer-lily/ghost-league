@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import unittest
 from pathlib import Path
 
@@ -80,6 +81,10 @@ class SocialAPITests(APITestBase):
         self.add_account("friend-1", "Friend", FRIEND_TOKEN)
         with self.client() as client:
             target = self.league_player_id(client)
+            with sqlite3.connect(self.game_db_path) as connection:
+                connection.execute(
+                    "UPDATE players SET power = ? WHERE id = ?", (1234, target)
+                )
             client.post(f"/v1/me/follows/{target}", headers=auth(TOKEN))
             client.post("/v1/me/follows/friend-1", headers=auth(TOKEN))
             response = client.get("/v1/me/friends/standings", headers=auth(TOKEN))
@@ -91,6 +96,17 @@ class SocialAPITests(APITestBase):
             self.assertEqual(sum(1 for member in members if member["user_id"] == "owner"), 1)
             xp_values = [member["xp"] for member in members]
             self.assertEqual(xp_values, sorted(xp_values, reverse=True))
+            for member in members:
+                self.assertIn("power", member)
+            target_member = next(
+                member for member in members if member["user_id"] == target
+            )
+            self.assertEqual(target_member["power"], 1234)
+            self.assertIsNone(target_member["handle"])
+            friend_member = next(
+                member for member in members if member["user_id"] == "friend-1"
+            )
+            self.assertEqual(friend_member["handle"], "friend-1")
             for forbidden in ("is_ghost", "origin", "synthetic", "kind", "raw"):
                 self.assertNotIn(forbidden, response.text)
 
@@ -130,8 +146,10 @@ class SocialAPITests(APITestBase):
             self.assertEqual(human.status_code, 200)
             human_payload = human.json()
             self.assertEqual(human_payload["user_id"], "friend-1")
+            self.assertEqual(human_payload["handle"], "friend-1")
             self.assertIsNotNone(human_payload["activity_label"])
             self.assertIn("xp", human_payload)
+            self.assertIn("power", human_payload)
             self.assertIn("streak", human_payload)
 
             league_user = client.get(
@@ -140,8 +158,10 @@ class SocialAPITests(APITestBase):
             self.assertEqual(league_user.status_code, 200)
             payload = league_user.json()
             self.assertIsNone(payload["activity_label"])
+            self.assertIsNone(payload["handle"])
             self.assertEqual(payload["user_id"], target)
             self.assertIn("xp", payload)
+            self.assertIn("power", payload)
             for forbidden in ("is_ghost", "origin", "synthetic", "kind", "raw"):
                 self.assertNotIn(forbidden, league_user.text)
 

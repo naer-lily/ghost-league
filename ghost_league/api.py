@@ -1557,6 +1557,7 @@ class GameService:
             )
         return {
             "user_id": user_id,
+            "handle": user_id if account is not None else None,
             "display_name": (
                 str(account["display_name"])
                 if account is not None
@@ -1576,6 +1577,11 @@ class GameService:
             ),
             "week_start": week.isoformat(),
             "xp": int(snapshot.get("xp") or 0) if snapshot else 0,
+            "power": (
+                int(player["power"])
+                if player is not None and player.get("power") is not None
+                else None
+            ),
             "rank": snapshot.get("rank") if snapshot else None,
             "group_size": int(snapshot.get("group_size") or 0) if snapshot else 0,
             "checkin": snapshot.get("checkin") if snapshot else None,

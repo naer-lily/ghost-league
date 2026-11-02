@@ -5,7 +5,6 @@ import { createRequestId, usePlaceBet } from '../api/queries'
 import type { BetWindows, GroupMarketOption } from '../api/types'
 import {
   betReturn,
-  betStatusText,
   describeRivalError,
   formatCountdown,
   formatOdds,
@@ -140,10 +139,6 @@ export function GroupBetDialog({
                 <span>免费本金</span>
                 <strong>{formatXp(freeStake)}</strong>
               </div>
-              <div>
-                <span>状态</span>
-                <strong>{bet ? betStatusText(bet) : '未下注'}</strong>
-              </div>
             </div>
 
             <div className={styles.stakeBox}>
@@ -218,19 +213,6 @@ export function GroupBetDialog({
             <p className={styles.note}>
               本周剩余 {formatCountdown(windows.weekly_locks_at, now)}
             </p>
-
-            {bet ? (
-              <p className={styles.closed} role="status">
-                {option.label}
-                {betStatusText(bet)}，不能重复提交。
-              </p>
-            ) : null}
-
-            {closed ? (
-              <p className={styles.closed} role="status">
-                本周的注已截止
-              </p>
-            ) : null}
 
             {error ? (
               <p

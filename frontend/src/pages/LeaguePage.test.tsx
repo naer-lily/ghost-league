@@ -37,6 +37,7 @@ function response(payload: unknown, status = 200): Response {
 
 const PUBLIC_USER = {
   user_id: 'ch-kookouse',
+  handle: null,
   display_name: '@kookouse',
   avatar_url: null,
   activity_label: '绘画',
@@ -44,6 +45,7 @@ const PUBLIC_USER = {
   group_id: 1,
   week_start: '2026-10-26',
   xp: 4071,
+  power: 2000,
   rank: 4,
   group_size: 15,
   checkin: 'verified',
@@ -89,6 +91,7 @@ function friend(
 ): FriendSummary {
   return {
     user_id,
+    handle: user_id,
     display_name,
     avatar_url: null,
     activity_label: '绘画',
@@ -96,6 +99,7 @@ function friend(
     group_id: 2,
     week_start: '2026-10-26',
     xp,
+    power: Math.round(xp / 2),
     rank: 4,
     group_size: 15,
     checkin: 'verified',
@@ -321,6 +325,12 @@ describe('LeaguePage tabs', () => {
       '我和他的本周对比',
     )
     expect(within(sheet).getByTestId('profile-follow')).toBeVisible()
+    expect(within(sheet).queryByText('@ch-kookouse')).not.toBeInTheDocument()
+    expect(
+      within(sheet).queryByText(
+        '只展示公开的联赛信息；钻石、下注和其他私有数据不会出现在这里。',
+      ),
+    ).not.toBeInTheDocument()
     expect(within(sheet).queryByText('720')).not.toBeInTheDocument()
   })
 
@@ -344,7 +354,14 @@ describe('LeaguePage tabs', () => {
     expect(rows[1]).toHaveAccessibleName(/阿岚，第 2 名/)
     expect(rows[2]).toHaveAccessibleName(/那尔，第 3 名.*我的位置/)
     expect(rows[2]).toHaveAttribute('data-me', 'true')
-    expect(within(rows[0]!).queryByTestId('standing-power')).not.toBeInTheDocument()
+    for (const [index, row] of rows.entries()) {
+      const expected = Math.round(
+        [1200, 900, 524][index]! / 2,
+      )
+      expect(within(row).getByTestId('standing-power')).toHaveTextContent(
+        `战力 ${formatNumber(expected)}`,
+      )
+    }
     expect(screen.getByRole('heading', { name: '好友榜' })).toBeVisible()
   })
 
@@ -398,9 +415,7 @@ describe('LeaguePage tabs', () => {
       expect(
         within(panel).getByTestId(`group-market-odds-${market}`),
       ).toHaveTextContent(odds)
-      expect(
-        within(panel).getByTestId(`group-market-taken-${market}`),
-      ).toHaveTextContent('未下注')
+      expect(within(panel).queryByText('未下注')).not.toBeInTheDocument()
       expect(
         within(panel).getByTestId(`group-bet-open-${market}`),
       ).toBeEnabled()
@@ -408,6 +423,27 @@ describe('LeaguePage tabs', () => {
 
     await user.click(screen.getByTestId('board-tab-friends'))
     expect(screen.queryByTestId('group-bet-card')).not.toBeInTheDocument()
+  })
+
+  it('only shows the closed state once from the market button', async () => {
+    const bets = makeBetsState(makeBetOptions())
+    bets.bet_windows = {
+      ...bets.bet_windows,
+      weekly_locks_at: new Date(Date.now() - HOUR).toISOString(),
+    }
+    vi.stubGlobal('fetch', mockApi([], { bets }))
+
+    renderLeague()
+
+    const card = await screen.findByTestId('group-bet-card')
+    expect(card).not.toHaveTextContent('本周组注已截止')
+    for (const market of ['top3', 'promote', 'no_demote'] as const) {
+      const panel = within(card).getByTestId(`group-market-${market}`)
+      expect(within(panel).getAllByText('本周已截止')).toHaveLength(1)
+      expect(
+        within(panel).getByTestId(`group-bet-open-${market}`),
+      ).toBeDisabled()
+    }
   })
 
   it('only renders the markets the server allows for the tier', async () => {
@@ -515,11 +551,15 @@ describe('LeaguePage tabs', () => {
     expect(within(promote).getByTestId('group-bet-placed')).toHaveTextContent(
       '已下注',
     )
+    expect(within(promote).getAllByText('已下注')).toHaveLength(1)
+    expect(
+      within(promote).queryByTestId('group-bet-open-promote'),
+    ).not.toBeInTheDocument()
     expect(
       within(await screen.findByTestId('group-market-top3')).getByTestId(
-        'group-market-taken-top3',
+        'group-bet-open-top3',
       ),
-    ).toHaveTextContent('未下注')
+    ).toHaveTextContent('下注')
     expect(posted).toEqual({
       kind: 'group',
       market: 'promote',

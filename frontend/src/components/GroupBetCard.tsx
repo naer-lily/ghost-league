@@ -73,17 +73,6 @@ function MarketArticle({
     >
       <div className={styles.marketHead}>
         <h3 className={styles.title}>{option.label}</h3>
-        <span
-          className={[
-            styles.chip,
-            betStatusTone(option.bet) === 'placed' ? styles.chipPlaced : '',
-          ]
-            .filter(Boolean)
-            .join(' ')}
-          data-testid={`group-market-status-${option.market}`}
-        >
-          {betStatusText(option.bet)}
-        </span>
       </div>
 
       <dl className={styles.stats}>
@@ -93,27 +82,23 @@ function MarketArticle({
             {option.odds === null ? '—' : `×${formatOdds(option.odds)}`}
           </dd>
         </div>
-        <div>
-          <dt>状态</dt>
-          <dd data-testid={`group-market-taken-${option.market}`}>
-            {placed ? '已下注' : '未下注'}
-          </dd>
-        </div>
       </dl>
 
       <PlacedGroupBet option={option} />
 
-      <button
-        type="button"
-        className={styles.button}
-        disabled={disabled}
-        data-testid={`group-bet-open-${option.market}`}
-        aria-label={`${option.label}下注`}
-        onClick={onOpen}
-      >
-        <Diamond size={16} aria-hidden="true" />
-        {placed ? '本期已下注' : closed ? '本周已截止' : '下注'}
-      </button>
+      {placed ? null : (
+        <button
+          type="button"
+          className={styles.button}
+          disabled={disabled}
+          data-testid={`group-bet-open-${option.market}`}
+          aria-label={`${option.label}下注`}
+          onClick={onOpen}
+        >
+          <Diamond size={16} aria-hidden="true" />
+          {closed ? '本周已截止' : '下注'}
+        </button>
+      )}
     </article>
   )
 }
@@ -168,12 +153,13 @@ export function GroupBetCard() {
         ))}
       </div>
 
-      <p className={styles.deadline}>
-        <Clock3 size={14} aria-hidden="true" />
-        {closed
-          ? '本周组注已截止'
-          : `周一 23:59:59 截止 · 剩余 ${formatCountdown(data.bet_windows.weekly_locks_at, now)}`}
-      </p>
+      {closed ? null : (
+        <p className={styles.deadline}>
+          <Clock3 size={14} aria-hidden="true" />
+          周一 23:59:59 截止 · 剩余{' '}
+          {formatCountdown(data.bet_windows.weekly_locks_at, now)}
+        </p>
+      )}
 
       {active ? (
         <GroupBetDialog

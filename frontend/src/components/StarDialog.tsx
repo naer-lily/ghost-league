@@ -60,10 +60,11 @@ export function StarDialog({ reveal, detail, onClose }: StarDialogProps) {
               </Dialog.Close>
             </div>
 
-            <Dialog.Description id={descriptionId} className={styles.description}>
-              {mode === 'reveal'
-                ? '这颗星已经放进物品栏，收下后可以随时查看。'
-                : `${star.type_label} · ${star.rarity_label}`}
+            <Dialog.Description
+              id={descriptionId}
+              className={styles.description}
+            >
+              {`${star.type_label} · ${star.rarity_label}`}
             </Dialog.Description>
 
             <div className={styles.art}>
