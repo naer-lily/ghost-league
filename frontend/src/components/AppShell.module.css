@@ -51,12 +51,15 @@
   gap: 0;
 }
 
-.gemBalance {
+.diamondBalance {
   display: inline-flex;
+  min-width: 0;
+  max-width: 92px;
   align-items: center;
   gap: 4px;
   height: 44px;
   padding: 0 6px;
+  border-radius: 12px;
   color: var(--purple);
   font-size: 0.8rem;
   font-weight: 900;
@@ -65,13 +68,19 @@
   white-space: nowrap;
 }
 
-.gemBalance svg {
+.diamondBalance:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.diamondBalance svg {
   flex: none;
   filter: drop-shadow(0 0 6px rgba(206, 130, 255, 0.35));
 }
 
-.gemValue {
+.diamondValue {
+  overflow: hidden;
   color: var(--text);
+  text-overflow: ellipsis;
 }
 
 .iconAction {

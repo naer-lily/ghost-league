@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
@@ -81,6 +81,16 @@ describe('MePage', () => {
     const ring = screen.getByRole('progressbar', { name: '今日 XP 目标' })
     expect(ring).toHaveAttribute('aria-valuenow', '100')
     expect(ring).toHaveStyle({ width: '68px', height: '68px' })
+
+    const resources = screen.getByTestId('me-resource-row')
+    expect(resources).toHaveAttribute('href', '/shop')
+    expect(resources).toHaveTextContent('钻石')
+    expect(within(resources).getByTestId('me-diamonds')).toHaveTextContent('720')
+    expect(within(resources).getByTestId('me-stars')).toHaveTextContent('1')
+    expect(resources).toHaveTextContent('星图')
+    expect(within(resources).getByTestId('me-power')).toHaveTextContent(
+      '1,667',
+    )
 
     const rankRow = screen.getByRole('link', {
       name: '我的榜单位置，第 10 名',

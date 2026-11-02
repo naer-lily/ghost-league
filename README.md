@@ -107,10 +107,12 @@ token。systemd 模板把 token 放在 `/etc/ghost-league/waka.env`（0600）；
 - [`docs/CHANNEL_BOUNDARY.md`](docs/CHANNEL_BOUNDARY.md)：Source → Channel → Ghost
   契约、身份规则和分组规则。
 - [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md)：webhook 事件、签名、重试和 CLI。
-- PWA：`web/` 是移动优先的静态应用，`ghost_league/pwa.py` 先注册 API 路由，再挂载
-  静态根；`/v1/...`、`/avatars/...` 始终走 API。
-- 下一版前端：`frontend/` 是 React/TypeScript 新栈，独立构建到 `web-next/`，不覆盖
-  `web/`，当前不切换生产入口；启动、测试和截图见
+- PWA：`web/` 是旧的移动优先静态应用，`ghost_league/pwa.py` 先注册 API 路由，再挂载
+  静态根；`/v1/...`、`/avatars/...` 始终走 API。生产默认仍使用 `web/`；设置
+  `GHOST_LEAGUE_WEB_ROOT=/opt/ghost-league/web-next` 可切到新构建，SPA 深链回退到
+  `index.html`，旧 `web/` 保留回滚。
+- 星图前端：`frontend/` 是 React/TypeScript 新栈，构建到 `web-next/`，不覆盖 `web/`；
+  包含首页、小组榜、星图、历史占位、个人页和 PWA shell。启动、测试、切流和截图见
   [`frontend/README.md`](frontend/README.md)。
 - [`docs/AVATAR_FRAME_SPEC.md`](docs/AVATAR_FRAME_SPEC.md)：头像框的 `1.36D` 画布、
   `1.00D` 开孔和 `1.08×` 辉光规范，PWA 与 SVG 状态卡共用同一组数字。
@@ -189,9 +191,9 @@ ghost_league/
   source/             # 旧的归一化工具，仅供 Channel/fetch 兼容
   fetch.py            # 公开榜抓取（只写 cache）
 waka_channel/         # 独立 WakaTime Channel 包
-web/                  # 当前生产 PWA 静态资源（含 web/widget-studio/ 编辑器）
-frontend/             # 下一版 React/TypeScript 前端（独立构建）
-web-next/             # frontend 构建产物（gitignore；由现有静态服务单独提供）
+web/                  # 旧 PWA 静态资源（生产默认入口，保留回滚；含 web/widget-studio/）
+frontend/             # 星图前端 React/TypeScript 源码
+web-next/             # frontend 构建产物（gitignore；切流时由 pwa.py 挂载）
 data/widgets/         # Widget Studio 运行时模版目录（gitignore，仅 .gitkeep 入库）
 scripts/              # API/PWA 启动与抓取脚本
 deploy/               # systemd/服务模板

@@ -1,23 +1,22 @@
-# 前端下一版 · React + TypeScript
+# 星图前端 · React + TypeScript
 
-这是本仓库前端的第四个新栈迭代：三页（首页、排行榜、个人页）继续沿用无卡片、图标优先的
-游戏界面，并加入自托管圆体、行内 XP 后缀和顶栏宝石计数。旧 `web/` 原样保留，仍是当前生产入口；
-`frontend/` 包含真实首页、完整小组榜和个人页，构建产物输出到仓库根目录的
-`web-next/`，由现有静态服务单独提供，不覆盖 `web/`，也不新增生产端口。
+`frontend/` 是当前维护的 React 18 + TypeScript + Vite 前端，包含首页、小组榜、
+星图、历史占位页和个人页。构建产物输出到仓库根目录的 `web-next/`；旧 `web/` 不修改，
+保留作生产回滚。生产切流只切换 `ghost_league/pwa.py` 的静态根，不新增端口。
 
 ## 技术栈
 
 - React 18 + TypeScript + Vite 5
 - React Router 6
-- TanStack Query 5（服务端状态、30 秒轮询、错误与重试）
+- TanStack Query 5（服务端状态、30 秒轮询、401 不重试）
 - Zustand 4（纯客户端 UI 状态）
 - Radix UI primitives（Tooltip、Dialog 无障碍底座）
 - Motion / framer-motion（页面切换、数字滚动、节点反馈）
-- lucide-react（线性图标，顶栏宝石用 `Gem`）
+- lucide-react（线性图标；顶栏钻石用 `Diamond`，星图入口用 `Sparkles`）
 - `@fontsource/nunito` 自托管 600/700/800/900 字重；`--font` 第一项为 `Nunito`，中文回退
   `Noto Sans CJK SC` / `PingFang SC` / `Microsoft YaHei`，不依赖 Google Fonts CDN
 - CSS 自定义属性 + CSS Modules；token、字体栈、3D 按钮和图标优先的深色界面语言移植自
-  `prototype/src/styles.css`，三页主内容不再使用内容卡片
+  `prototype/src/styles.css`
 - Vitest + Testing Library + Playwright
 
 没有 Tailwind、MUI、Chakra、Element Plus，也没有引入后台 UI 套件。
@@ -26,18 +25,22 @@
 
 ```text
 frontend/
+  public/
+    manifest.webmanifest   # PWA manifest（构建时复制到 web-next/）
+    sw.js                  # PWA shell service worker
+    icons/                 # 从 web/icons/ 复制的 192/512/apple-touch 图标
   src/
-    api/          # fetch 封装、Bearer 注入、API 类型、TanStack Query hook
-    components/   # 应用外壳、纯图标导航、三合一 PlayerHeader、榜单、TierIcon、StreakBadge、今日进度条、进度环
-    lib/          # API → 页面视图映射、段位资源路径、数字/时间格式、错误文案、音效
-    pages/        # 真实首页 / 小组榜 / 个人页、登录、余烬与历史占位
+    api/          # fetch/blob 封装、Bearer 注入、API 类型、TanStack Query hook
+    components/   # AppShell、PlayerHeader、榜单、StarArt、StarDialog、通用状态组件
+    lib/          # API → 页面视图映射、星图格式/错误文案、段位资源、音效
+    pages/        # 首页 / 小组 / 星图 / 个人页 / 登录 / 历史占位
     store/        # Zustand UI 状态；复用旧 token
     styles/       # token + 全局基础样式
     test/         # Vitest setup 与 fixtures
   e2e/            # Playwright 真数据截图和对比检查
 ```
 
-## 启动与构建
+## 启动、测试与构建
 
 ```bash
 cd frontend
@@ -47,188 +50,137 @@ npm ci
 # GHOST_LEAGUE_API_PROXY 只用于本地 /v1、/avatars 代理，不写进部署
 # 也可以在 frontend/.env.local 里设置（已 gitignore）；默认 http://127.0.0.1:8095
 GHOST_LEAGUE_API_PROXY=http://127.0.0.1:8095 npm run dev
-# 打开 http://127.0.0.1:4174/
-```
 
-构建到 `web-next/`：
-
-```bash
-npm run build
-# = tsc --noEmit && vite build
-```
-
-其他命令：
-
-```bash
 npm run typecheck     # 严格模式 tsc --noEmit
-npm run test          # Vitest + Testing Library
-npm run test:e2e      # Playwright（需要真实 token 与旧页面地址）
+npm test -- --run     # Vitest + Testing Library
+npm run build         # tsc --noEmit && vite build，产物写入 ../web-next/
+npm run test:e2e      # Playwright（需要真实 token 与 running API）
 ```
 
-生产接入不在本迭代范围内：`web-next/` 交给现有静态服务单独提供；静态服务需要把
-非文件路径回退到 `web-next/index.html`（SPA fallback，Vite 开发服务器已内置），
-`/v1` 与 `/avatars` 在生产同源访问，开发时只通过 Vite 代理。旧 `web/index.html`、
-`web/app.js`、`web/style.css`、`web/sw.js` 未修改。
+构建后 `web-next/` 必须包含 `index.html`、`assets/`、`manifest.webmanifest`、`sw.js`、
+`icons/`。`web-next/` 仍在 `.gitignore` 中，不提交。
 
-## 登录态与真实数据
+## 路由与导航
+
+- `/` 首页
+- `/league` 完整小组榜
+- `/shop` 星图
+- `/history` 历史占位页（保留）
+- `/me` 我的
+- `/embers` 旧地址重定向到 `/shop`
+
+底部/侧边导航固定 5 个入口：首页、小组、星图、历史、我的。导航是纯图标 +
+`aria-label` + Radix Tooltip。顶栏左侧是品牌，右侧是钻石余额（`Diamond` 图标 +
+`status.diamonds`，`aria-label="钻石 N"`，链接到 `/shop`）、刷新、声音、设置和头像；
+390px 下这些操作不被钻石数字挤出。`gems` 字段仍保留兼容，但不再作为主要货币显示。
+
+## 真实数据
 
 - 复用旧页面同一个 `localStorage["gl.token.v1"]`，以 `Authorization: Bearer <token>`
-  访问 API。没有新建账号体系；登录页只校验并保存这个既有 token。
-- 首页只读以下现有接口：
+  访问 API。登录页只校验并保存这个既有 token。
+- 首页快照读取：
   - `GET /v1/me/profile`
   - `GET /v1/me/status`
   - `GET /v1/league/standings`
-- 首页展示真实：单行 `PlayerHeader`（头像 64px、名字、段位图标 + 段位/组号、连胜）、
-  六档横向「今日进度」条、小组榜前 5 行；名次 `11/15` 是榜单标题右侧的小标签，
-  本周 XP 是同一标题行的无框数字（带小号 `XP` 后缀）。首页不再有“排名”卡、`PageAside`、
-  “节奏/赛程/计分”三张卡。
-- `/league` 用同一份快照渲染完整小组榜（全部行，不只前三），`PlayerHeader` 下方只有
-  一条组信息 + 结算倒计时；左侧名次是裸数字，前 3 名金/银/铜色，行内右侧是同一行的
-  `数字 XP`（小号弱化后缀），榜单标题不再有单独的 `XP` 表头；当前用户行用青色左侧竖条 +
-  轻底色，不是圆角卡片。
-- `/me` 使用同一个 `PlayerHeader`，下方是一行三列无框统计（本周 `数字 XP`、排名、余烬）、
-  68px 的紧凑今日 XP 状态环和“我的榜单位置”一行；没有第二个头像/段位/连胜块。
-- 顶栏（`TopBar`）在刷新/声音/设置/头像左侧显示紫色 `Gem` 图标 + 数字，无文字标题、无
-  卡片；数字来自 `/v1/me/status` 的 `gems`（累计 XP 每 10 点 1 个），390px 下不挤出其他
-  操作。`data-testid="gem-balance"` 与 `aria-label="宝石 N"` 已预留，本次没有消费按钮。
-- 三页主内容无内容卡片：没有圆角背景、边框或阴影把一组信息包起来；层级靠字号、
-  颜色、留白和全宽细分隔线。头像、段位图标、图标按钮、底部导航选中态、圆环内部和
-  小标签仍可保留自己的圆角/底色。
-- 段位图标复用旧 `web/assets/tiers/` 的 10 个资源：`TierIcon` 按
-  `profile.icon_theme` 选择 `classic` / `material`，未知主题回退 `classic`，加载失败
-  回退另一套主题；路径通过 `import.meta.env.BASE_URL` 拼接。
-- `StreakBadge` 只显示火焰 + 整数：今天已打卡时火焰为暖橙色，未打卡时火焰和数字都是
-  纯灰度；没有可见的“连胜 / 连续 / 已打卡”文字，`aria-label` 只服务读屏。三页的
-  玩家头部和榜单行都复用它。
-- 接口失败显示无卡片错误态和“重试”，不显示假数字；无小组时显示明确空态。首屏统计来自
-  同一次 `Promise.all` 快照，避免三块数据来自不同时间点。
-- 设置里的声音是本地真实音效开关；外观会调用现有 `PATCH /v1/me/profile` 的
-  `icon_theme` 能力。本迭代没有实现打卡、补签、关注、分享等联赛写操作。
+- `/v1/me/status` 已使用字段：`diamonds`、`diamond_cap`、`diamond_cap_level`、
+  `diamond_excess`、`inventory`（`star` / `seasonal_star` / `ember`）、`stars`、`power`、
+  `power_percentile`、`power_updated_at`、`power_provisional`，以及原有 XP、排名、
+  连胜、余烬和段位字段。
+- 星图读取：
+  - `GET /v1/shop`
+  - `POST /v1/shop/purchase`，请求体 `{ item_id, quantity: 1, request_id }`；本次前端不填
+    `name`，由服务器生成
+  - `GET /v1/me/stars/{star_id}/svg`，需要 Bearer；`StarArt` 用 `apiFetchBlob` 取 blob，
+    生成 object URL 给 `<img>`，卸载时 `URL.revokeObjectURL`
+- 不发明后端字段，不在前端生成假星星、假钻石或假概率。加载、空态、错误态都有明确 UI；
+  抽取失败只显示后端错误文案，不显示假结果。
 
-## 首页今日进度条
+## 页面行为
 
-- 首页在 `PlayerHeader` 与 `StandingsBoard` 之间渲染 `TodayProgress`；个人页的小号
-  `GoalRing` 保持不变。
-- 六档目标固定为 **10 / 30 / 60 / 120 / 180 / 240 分钟**，对应 **100 / 300 / 600 /
-  1200 / 1800 / 2400 XP**（1 XP = 6 秒）。当前档位取第一个尚未达到的目标；已完成档位
-  按 `today_xp >= tier.xp` 判断。六档在等宽网格中展示，进度按「已完成档位数 + 当前档内
-  进度」折算，所以早期档位在视觉上不会被压缩。
-- 所有数字来自真实字段：`status.today_xp`、`status.today_seconds`（展示分钟为
-  `Math.floor(today_seconds / 60)`）和 `status.updated_at`。不读取或伪造 `last_xp_at`。
-- 条状视觉包含青绿/琥珀/橙金渐变（起点跟随 `--tier-color`）、白色扫光、发光进度头、
-  当前刻度脉冲和火焰呼吸；`prefers-reduced-motion` 下关闭扫光、脉冲和过渡，只保留静态
-  层级。进度条本身是 `role="progressbar"`、`aria-label="今日 XP 目标"`，并带
-  `aria-valuemin/max/now/valuetext`；六档标签是真实 DOM `li`，不是 canvas。
-- 火焰「刚刚更新」只在最近 10 分钟内显示，位置在「今日进度」标题右侧；没有更新时不渲染。
-- **数据限制**：现有 `/v1/me/status` 的 `updated_at` 由 `api.py` 在每次状态请求时写成当前
-  时间（`_iso(now)`），并不是独立的 XP 更新时间。前端按任务口径先用它与当前时间比较，
-  同时把时间戳冻结到「观察到 `today_xp` 增加」的那次快照，避免 30 秒轮询让火焰常驻；
-  页面打开/重新进入时仍只能用服务端请求时间做初始近似。彻底解决需要后端增加
-  `last_xp_at`，本迭代没有改后端契约。
+- 首页保留无卡片布局：单行 `PlayerHeader`、六档今日进度条、小组榜前 5 行。榜单每行在
+  名字下显示 `战力 N`（`null` 显示 `—`），不出现内部身份标签。
+- `/league` 渲染完整小组榜，每行同样显示战力。
+- `/me` 保留三列统计（本周 XP、排名、余烬）、紧凑 XP 环和“我的榜单位置”行；在三列统计
+  下增加一行紧凑资源信息：钻石、星图星数、战力，整行链接到 `/shop`。
+- `/shop` 从上到下：`PlayerHeader`、星图层头（余额、仓库上限、超出量）、抽取区、星库、
+  补给。
+  - 抽取条目来自 `GET /v1/shop` 的 `kind === "star"` / `"seasonal_star"`，显示名称、
+    描述、价格、已拥有数量、可用状态、冷却、`rates` 和 `types`。概率条完全由 API 的
+    `rates` 渲染；类型只显示数量（如“13 种星体”），不展示内部英文枚举。
+  - 普通星按钮“抽取一颗”，钻石不足时禁用并显示还差多少。季节星显示 `season_key`
+    （如“2026-11 限定”）；不可用且本月已拥有时显示“本月已获得”，否则“暂不可用”。
+  - 点击抽取生成 `crypto.randomUUID()`（不支持时时间戳 + 随机串），只发一次
+    `POST /v1/shop/purchase`，进行中按钮禁用。成功用返回的真实 `star` 打开结果对话框；
+    结果不自动关闭，用户点“收下”。失败在抽取区显示后端错误。
+  - 星库来自 `status.stars`，按 API 顺序显示全部。移动端 2 列、≥720px 3 列、
+    ≥1100px 4 列。空态是虚线星形 + “还没有星，去抽一颗”，不显示假卡片或“0 颗”。
+  - 卡片和结果/详情对话框均用真实 Bearer SVG。对话框复用
+    `@radix-ui/react-dialog`，有 `aria-labelledby` / `aria-describedby`、44px 关闭按钮、
+    Escape 关闭、遮罩滚动锁定；结果态 `data-testid="star-reveal"`，详情态
+    `data-testid="star-detail"`。
+  - 补给区显示余烬（价格、真实余额、冷却）和仓库升级（当前等级、下一级价格、当前上限）。
+    冷却中按钮禁用并显示剩余时间；等级不匹配或钻石不足也禁用。没有真实货币充值入口。
+- 设置里的声音是本地真实音效开关；外观调用 `PATCH /v1/me/profile` 的 `icon_theme`。
+  本迭代没有实现打卡、补签、关注、分享等联赛写操作。
 
-## 响应式与可访问性
+## PWA shell
 
-- `< 960px`：顶部栏 + 底部 5 个纯图标 Tab。
-- `≥ 960px`：左侧 88px 纯图标 rail；主内容仍是居中的游戏列（首页/个人页 640px、
-  排行榜 760px），不铺成后台仪表盘。
-- 底部和侧边导航不显示可见文字，只保留图标、`aria-label` 和 Radix Tooltip；选中项有
-  对应颜色的底块。
-- 保留 skip link、`:focus-visible`、44px 最小触达、`prefers-reduced-motion`。
-- 路由：`/` 首页；`/league` 完整小组榜；`/me` 个人页；`/embers`、`/history` 仍是
-  可导航占位页，不展示占位数字。
+- `frontend/public/manifest.webmanifest`：名称“炉火联赛”、短名“联赛”、`start_url` /
+  `scope` 为 `/`、`display: standalone`、`background_color` / `theme_color` 为 `#131F24`，
+  192/512 PNG 图标来自 `web/icons/`（已复制到 `frontend/public/icons/`）。
+- `frontend/public/sw.js`：版本 `gl-next-v1-2026-11-02`；安装时缓存 `/`、
+  `/manifest.webmanifest`、192/512 图标，不预缓存 API；导航 network-first 并回退缓存
+  `/index.html`，静态资源 cache-first，`/v1/` 与 `/avatars/` 一律 network-only；
+  `skipWaiting` + `clients.claim`；`activate` 清理旧 cache；不缓存 API/token 响应。
+- `frontend/index.html` 增加 manifest、apple-touch-icon、apple-mobile-web-app 相关 meta；
+  `src/main.tsx` 在 `load` 后注册 `/sw.js` 并调用 `registration.update()`。
 
-## 测试与本地证据
+## 生产挂载与切流
 
-单元 / 组件测试覆盖：
-
-- API 映射：段位、今日 XP、本周 XP、名次、连胜、前 3、自己的行、结算倒计时。
-- Bearer 注入、错误解析、网络失败、token 读写。
-- `TierIcon` 10 个段位的 classic / material `src`、未知主题/段位回退、`onError` 换主题。
-- `StreakBadge` 已打卡 / 未打卡的灰度与彩色状态、可见文本不含“天/连胜/连续/已打卡”。
-- `PlayerHeader` 四个部分同属一个 `display:flex; flex-wrap:nowrap` 行，头像 64px、
-  段位图标 20px，且没有卡片外壳。
-- 首页真实数据、六档今日进度条（等宽档位、当前档/已完成/未来档、XP/分钟/还差 XP、
-  `role="progressbar"` 与 `aria-valuetext`）、火焰 10 分钟窗口与跨轮询过期、5 行榜单、
-  无 `RankCard` / `PageAside`、空态、错误态、点击重试后恢复。
-- `/league` 完整行数等于 API、前三名 data-medal 与金银铜配色、每行同一行 `数字 XP` 后缀、
-  页面无 `XP` 表头、当前用户行 `data-me`、行内无语言/状态拼接文本。
-- `/me` 单行头部、三列统计（本周 `524 XP` 同一行）、紧凑 XP 环、“我的榜单位置”行、
-  无重复段位块。
-- 顶栏宝石图标 + 数字来自 API fixture，`aria-label` 与可见文本分离，没有额外按钮。
-- 三页主内容无 `class*="card"`；底部导航可见文本为空，仅保留 `aria-label` / Tooltip。
-
-运行真实数据截图与旧/新对比：
-
-```bash
-cd frontend
-GHOST_LEAGUE_TOKEN_FILE=/path/to/token \
-GHOST_LEAGUE_API_PROXY=http://127.0.0.1:8095 \
-npm run test:e2e
-```
-
-也可以把 token 放进 `GHOST_LEAGUE_TOKEN`。默认使用 `/usr/bin/google-chrome`；其他环境
-用 `CHROME_PATH=/path/to/chrome` 指定。Playwright 会：
-
-- 在 390×844 与 1440×900 打开真实数据的首页、完整小组榜和个人页并截图；
-- `e2e/today-progress.spec.ts` 额外在 390×844 与 1440×1000 截图真实首页，校验六档标签、
-  当前档位、`aria-valuemin/max/now/valuetext`、今日 XP/分钟、火焰与无横向 overflow；
-- 用 Playwright `page.route` 的确定性 fixture 覆盖「最近 2 分钟更新」与「20 分钟前更新」，
-  确认火焰出现/消失；再用 `prefers-reduced-motion: reduce` 确认进度条仍可读且无 CSS 动画；
-- 校验 Nunito 600/700/800/900 的 woff2 真的 `loaded`，`getComputedStyle` 的字体栈以
-  `Nunito` 开头；
-- 校验顶栏 `data-testid="gem-balance"` 可见、图标 19px、数字与 `aria-label="宝石 N"` 一致，
-  390px 下仍在视口内；
-- 校验段位 PNG 真的加载（不是通用图标）、底部/侧边导航无可见文字；
-- 校验 `PlayerHeader` 四个部分在同一 flex 行且垂直居中，头像 64px；
-- 校验首页只有 5 行、无排名卡/`PageAside`，排行榜 15 行、前三名金银铜、每行同一行
-  `数字 XP`、榜单标题无 `XP` 表头、当前用户行有青色左条和整行底色；
-- 校验三页主内容没有 `class*="card"`，`[data-flat]` 区块没有圆角/阴影/底色；
-- 校验每行名字下是火焰 + 整数、未打卡行两处颜色 R=G=B、已打卡行火焰带颜色；
-- 校验横向 overflow、console/page error、可见交互元素 ≥44px、头像无空白圆；
-- 写入 `report.json`，并在抓取前后比对 API 签名，证明展示没有写 live 数据。
-
-截图与报告（本地证据，`artifacts/` 已在 `.gitignore` 中，含真实榜单信息，不提交）：
+`ghost_league/pwa.py` 保留 `WEB_ROOT = web/`，新增 `ACTIVE_WEB_ROOT`：
 
 ```text
-artifacts/frontend-iteration-4/390/home.png
-artifacts/frontend-iteration-4/390/league.png
-artifacts/frontend-iteration-4/390/me.png
-artifacts/frontend-iteration-4/1440/home.png
-artifacts/frontend-iteration-4/1440/league.png
-artifacts/frontend-iteration-4/1440/me.png
-artifacts/frontend-iteration-4/report.json
-artifacts/prototype-today-progress-web-next/home-390.png
-artifacts/prototype-today-progress-web-next/home-1440.png
-artifacts/prototype-today-progress-web-next/report.json
-artifacts/prototype-today-progress-web-next/recent-stale-390.json
-artifacts/prototype-today-progress-web-next/recent-stale-1440.json
+GHOST_LEAGUE_WEB_ROOT 未设置 -> ACTIVE_WEB_ROOT = WEB_ROOT（旧 web/）
+GHOST_LEAGUE_WEB_ROOT 已设置 -> ACTIVE_WEB_ROOT = 该目录
 ```
 
-最近一次本地验证（2026-10-31，今日进度条迭代）：
+`mount_web` 在 API 路由之后注册 SPA fallback：真实文件、目录 `index.html` 正常返回；
+`/v1`、`/avatars`、`/assets`、`/icons` 缺失时保持 404；其余无扩展名的缺失路径返回
+`index.html`（HTTP 200）。`/manifest.webmanifest` 与 `/sw.js` 保留原有响应头。
+
+生产切流（不在本前端任务内执行）：
 
 ```bash
-npm run typecheck                       # tsc --noEmit 通过
-npm test                                # 12 个测试文件，46 个测试通过
-npm run build                           # tsc --noEmit + vite build 通过，产物写入 web-next/
-GHOST_LEAGUE_TOKEN_FILE=/path/to/token \
-  npx playwright test e2e/today-progress.spec.ts  # 4 passed
-GHOST_LEAGUE_TOKEN_FILE=/path/to/token \
-  npx playwright test e2e/home.spec.ts            # 1 passed
+# systemd unit 里设置，不改代码
+Environment=GHOST_LEAGUE_WEB_ROOT=/opt/ghost-league/web-next
+# 然后重启 web/API 服务
 ```
 
-`today-progress.spec.ts` 的 live capture 在 390×844 与 1440×1000 两个视口均读到
-`today_xp=129`、`today_minutes=12`，当前档位为「第 2 档 · 30 分钟」，还差 171 XP；
-六档标签为 10/30/60/120/180/240 分钟，溢出为 0，console/page error 为空。确定性
-fixture 覆盖最近/非最近更新与 reduced-motion，均通过。截图与 JSON 见上面的
-`artifacts/prototype-today-progress-web-next/`；`artifacts/` 不提交，旧 `web/` 与 live
-数据均未修改。
+回滚只需移除该环境变量或指回 `web/`；旧 `web/` 与旧 PWA 测试保持不动。
 
-本轮后端改动：`player_status` 增加 `lifetime_xp`（`weekly_scores` 的 `SUM(xp)`），
-`/v1/me/status` 与 badge/widget 用的 `status_for_user` 都返回 `gems = lifetime_xp // 10`。
-没有新增宝石 ledger 表，也不按本周 XP 重置；本次不实现消费入口。
+## 测试
 
-## 后续小步
+```bash
+cd /opt/ghost-league/frontend
+npm run typecheck
+npm test -- --run
+npm run build
 
-1. 余烬、历史页读取现有接口。
-2. 在写操作单独评审后再接打卡、补签、关注、分享。
-3. 生产入口切换单独安排，届时仅改变静态服务挂载点，不改 API。
+cd /opt/ghost-league
+ruff check ghost_league scripts tests
+python3 -m compileall -q ghost_league scripts
+PYTHONPATH=. pytest -q tests/test_pwa.py tests/test_pwa_design.py tests/test_pwa_next.py
+PYTHONPATH=. pytest -q --ignore=tests/test_source_normalize.py --ignore=tests/test_waka_channel.py
+```
+
+前端测试覆盖：API 映射、Bearer/blob、`StarArt` 的 blob 渲染与卸载 revoke、
+`ShopPage` 的加载、两个抽取条目与真实概率、钻石不足、购买成功结果、购买失败、
+空星库、季节星已拥有、星库详情与 Escape、补给区；`AppShell` 的钻石替代宝石、
+`/shop` 导航和旧的 `/embers` 不出现在主导航；`MePage` 的钻石/星数/战力和原有三列统计。
+`fixtures.ts` 补齐钻石、仓库、库存、星星、战力字段，避免测试靠 `undefined` 通过。
+
+## 部署边界
+
+- 只在本仓库本地构建、测试、提交；不 push、不部署、不重启线上服务、不写 live DB。
+- 不修改 `web/`、systemd unit 和旧 PWA 测试的预期。
+- `web-next/` 是构建产物，仍由 `.gitignore` 忽略，不强制加入 Git。

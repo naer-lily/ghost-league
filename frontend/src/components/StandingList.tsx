@@ -1,5 +1,5 @@
 import type { StandingRow } from '../api/types'
-import { formatNumber } from '../lib/home'
+import { formatNumber, formatPower } from '../lib/home'
 import { Avatar } from './Avatar'
 import { StreakBadge } from './StreakBadge'
 import styles from './StandingsBoard.module.css'
@@ -55,6 +55,9 @@ export function StandingRowView({ row, index }: StandingRowViewProps) {
             checkedIn={Boolean(row.checkin)}
             size="sm"
           />
+          <span className={styles.power} data-testid="standing-power">
+            战力 {formatPower(row.power)}
+          </span>
         </span>
       </div>
       <p className={styles.xp} data-testid="standing-xp">

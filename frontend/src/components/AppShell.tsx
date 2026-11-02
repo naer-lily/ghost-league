@@ -2,12 +2,13 @@ import * as Tooltip from '@radix-ui/react-tooltip'
 import type { UseQueryResult } from '@tanstack/react-query'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
+  Diamond,
   Flame,
-  Gem,
   History,
   Home,
   RefreshCw,
   Settings,
+  Sparkles,
   Trophy,
   User,
   Volume2,
@@ -48,12 +49,12 @@ const NAV_ITEMS = [
     soft: 'rgba(255, 200, 0, 0.16)',
   },
   {
-    to: '/embers',
-    label: '余烬',
-    icon: Flame,
+    to: '/shop',
+    label: '星图',
+    icon: Sparkles,
     end: false,
-    color: '#ff9600',
-    soft: 'rgba(255, 150, 0, 0.16)',
+    color: '#ce82ff',
+    soft: 'rgba(206, 130, 255, 0.16)',
   },
   {
     to: '/history',
@@ -132,7 +133,7 @@ function TopBar({
   const [refreshing, setRefreshing] = useState(false)
 
   const view = home.data ? buildHomeView(home.data) : null
-  const gems = view?.gems ?? 0
+  const diamonds = view?.diamonds ?? 0
 
   async function handleRefresh() {
     if (refreshing) return
@@ -163,14 +164,17 @@ function TopBar({
         </Link>
 
         <div className={styles.topActions}>
-          <span
-            className={styles.gemBalance}
-            data-testid="gem-balance"
-            aria-label={`宝石 ${gems}`}
+          <Link
+            className={styles.diamondBalance}
+            to="/shop"
+            data-testid="diamond-balance"
+            aria-label={`钻石 ${diamonds}`}
           >
-            <Gem size={19} aria-hidden="true" />
-            <span className={styles.gemValue}>{formatNumber(gems)}</span>
-          </span>
+            <Diamond size={18} aria-hidden="true" />
+            <span className={styles.diamondValue}>
+              {formatNumber(diamonds)}
+            </span>
+          </Link>
           <IconAction
             label="刷新联赛数据"
             tooltip="刷新"

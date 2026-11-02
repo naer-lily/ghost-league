@@ -1,4 +1,10 @@
-import { ChevronRight, Sparkles, Trophy, Zap } from 'lucide-react'
+import {
+  ChevronRight,
+  Diamond,
+  Sparkles,
+  Trophy,
+  Zap,
+} from 'lucide-react'
 import type { CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { useHomeSnapshot } from '../api/queries'
@@ -9,6 +15,8 @@ import { PlayerHeader } from '../components/PlayerHeader'
 import {
   buildHomeView,
   describeApiError,
+  formatNumber,
+  formatPower,
   tierStyleVars,
 } from '../lib/home'
 import styles from './MePage.module.css'
@@ -78,6 +86,54 @@ export function MePage() {
           <p className={styles.statLabel}>余烬</p>
         </div>
       </div>
+
+      <Link
+        className={styles.resourceRow}
+        to="/shop"
+        aria-label="打开星图，查看钻石、星图和战力"
+        data-testid="me-resource-row"
+      >
+        <span className={styles.resource}>
+          <Diamond
+            className={`${styles.resourceIcon} ${styles.diamondIcon}`}
+            size={16}
+            aria-hidden="true"
+          />
+          <span className={styles.resourceText}>
+            <small>钻石</small>
+            <strong data-testid="me-diamonds">
+              {formatNumber(view.diamonds)}
+            </strong>
+          </span>
+        </span>
+        <span className={styles.resource}>
+          <Sparkles
+            className={`${styles.resourceIcon} ${styles.starIcon}`}
+            size={16}
+            aria-hidden="true"
+          />
+          <span className={styles.resourceText}>
+            <small>星图</small>
+            <strong data-testid="me-stars">{formatNumber(view.starCount)}</strong>
+          </span>
+        </span>
+        <span className={styles.resource}>
+          <Zap
+            className={`${styles.resourceIcon} ${styles.powerIcon}`}
+            size={16}
+            aria-hidden="true"
+          />
+          <span className={styles.resourceText}>
+            <small>战力</small>
+            <strong data-testid="me-power">{formatPower(view.power)}</strong>
+          </span>
+        </span>
+        <ChevronRight
+          className={styles.resourceChevron}
+          size={16}
+          aria-hidden="true"
+        />
+      </Link>
 
       <div className={styles.goal} style={style} data-flat="true">
         <GoalRing

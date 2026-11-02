@@ -147,7 +147,17 @@
 
 .streakLine {
   display: inline-flex;
+  align-items: center;
+  gap: 7px;
   margin-top: 2px;
+}
+
+.power {
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .xp {

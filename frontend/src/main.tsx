@@ -31,3 +31,14 @@ createRoot(root).render(
     </QueryClientProvider>
   </StrictMode>,
 )
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker
+      .register('/sw.js')
+      .then((registration) => registration.update())
+      .catch(() => {
+        // A failed registration must not block the app shell.
+      })
+  })
+}

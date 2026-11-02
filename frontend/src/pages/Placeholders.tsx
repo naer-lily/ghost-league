@@ -1,16 +1,5 @@
-import { Compass, Flame, History } from 'lucide-react'
+import { Compass, History } from 'lucide-react'
 import { PlaceholderPage } from './PlaceholderPage'
-
-export function EmbersPage() {
-  return (
-    <PlaceholderPage
-      eyebrow="余烬"
-      title="余烬"
-      description="余烬余额、获取记录和补签会在后续迭代接入。"
-      icon={Flame}
-    />
-  )
-}
 
 export function HistoryPage() {
   return (

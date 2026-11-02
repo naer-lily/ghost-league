@@ -60,6 +60,8 @@ interface StatusPayload {
   streak: { current: number; longest: number }
   embers: { balance: number; cap: number }
   gems: number
+  diamonds: number
+  power: number | null
   group: { no: number; tier: string } | null
   next_settlement_at: string
 }
@@ -71,6 +73,7 @@ interface StandingRowPayload {
   avatar_url: string | null
   is_me: boolean
   xp: number
+  power: number | null
   checkin: string | null
   streak: number
 }
@@ -94,11 +97,12 @@ function signature(snapshot: Snapshot): string {
     xp: status.xp,
     rank: status.rank,
     streak: status.streak.current,
-    gems: status.gems,
+    diamonds: status.diamonds,
     rows: standings.standings.map((row) => [
       row.rank,
       row.display_name,
       row.xp,
+      row.power,
       row.checkin,
       row.streak,
     ]),
@@ -212,7 +216,7 @@ async function assertIconOnlyNav(page: Page): Promise<void> {
     new Array(count).fill(''),
   )
   expect(info.every((entry) => entry.label.length > 0)).toBeTruthy()
-  for (const label of ['首页', '小组', '余烬', '历史', '我的']) {
+  for (const label of ['首页', '小组', '星图', '历史', '我的']) {
     expect(info.some((entry) => entry.label === label)).toBeTruthy()
   }
 }
@@ -244,14 +248,18 @@ async function assertNoStreakCopy(page: Page): Promise<void> {
   }
 }
 
-async function assertGemBalance(page: Page, gems: number): Promise<void> {
+async function assertDiamondBalance(
+  page: Page,
+  diamonds: number,
+): Promise<void> {
   const viewport = page.viewportSize()
   if (!viewport) throw new Error('missing viewport')
-  const balance = page.getByTestId('gem-balance')
+  const balance = page.getByTestId('diamond-balance')
   await expect(balance).toBeVisible()
-  await expect(balance).toHaveAttribute('aria-label', `宝石 ${gems}`)
-  await expect(balance).toContainText(format(gems))
-  await expect(balance).not.toContainText('宝石')
+  await expect(balance).toHaveAttribute('aria-label', `钻石 ${diamonds}`)
+  await expect(balance).toHaveAttribute('href', '/shop')
+  await expect(balance).toContainText(format(diamonds))
+  await expect(balance).not.toContainText('钻石')
   await expect(balance.locator('svg')).toHaveCount(1)
 
   const box = await balance.boundingBox()
@@ -261,8 +269,8 @@ async function assertGemBalance(page: Page, gems: number): Promise<void> {
 
   const iconBox = await balance.locator('svg').boundingBox()
   expect(iconBox).not.toBeNull()
-  expect(Math.round(iconBox!.width)).toBe(19)
-  expect(Math.round(iconBox!.height)).toBe(19)
+  expect(Math.round(iconBox!.width)).toBe(18)
+  expect(Math.round(iconBox!.height)).toBe(18)
 }
 
 async function assertNunito(page: Page): Promise<void> {
@@ -539,7 +547,8 @@ test('flat home, league and me use real data at 390 and 1440', async ({
       rank: status.rank,
       group_size: status.group_size,
       streak: status.streak.current,
-      gems: status.gems,
+      diamonds: status.diamonds,
+      power: status.power,
       rows: expectedRows,
     },
     viewports: {},
@@ -564,7 +573,7 @@ test('flat home, league and me use real data at 390 and 1440', async ({
     await expect(page.getByRole('heading', { name: tierLabel })).toHaveCount(0)
     const header = await assertPlayerHeader(page)
     await assertTierIcon(page, status.tier, status.icon_theme)
-    await assertGemBalance(page, status.gems)
+    await assertDiamondBalance(page, status.diamonds)
     await assertNunito(page)
     await expect(
       page.getByRole('progressbar', { name: '今日 XP 目标' }),
@@ -644,7 +653,7 @@ test('flat home, league and me use real data at 390 and 1440', async ({
     await expect(leagueRows).toHaveCount(expectedRows)
     await assertPlayerHeader(page)
     await assertTierIcon(page, status.tier, status.icon_theme)
-    await assertGemBalance(page, status.gems)
+    await assertDiamondBalance(page, status.diamonds)
     await expect(page.getByLabel(/结算倒计时/)).toBeVisible()
     await assertNoCards(page)
     await assertNoOverflow(page)
@@ -746,7 +755,7 @@ test('flat home, league and me use real data at 390 and 1440', async ({
     ).toBeVisible()
     await assertPlayerHeader(page)
     await assertTierIcon(page, status.tier, status.icon_theme)
-    await assertGemBalance(page, status.gems)
+    await assertDiamondBalance(page, status.diamonds)
     await expect(page.getByTestId('tier-icon')).toHaveCount(1)
     await assertNoCards(page)
     await assertNoOverflow(page)

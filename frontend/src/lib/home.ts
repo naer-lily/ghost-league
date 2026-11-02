@@ -4,6 +4,7 @@ import type {
   LeagueGroup,
   StandingRow,
   Standings,
+  Star,
   Status,
 } from '../api/types'
 
@@ -177,6 +178,7 @@ function rowFromStatus(
     avatar_url: status.avatar_url ?? profile.avatar_url,
     is_me: true,
     xp: status.xp,
+    power: status.power,
     checkin: status.checkin,
     streak: status.streak.current,
     title: status.equipped_title ?? profile.equipped_title,
@@ -234,6 +236,17 @@ export interface HomeView {
   embersBalance: number
   embersCap: number
   gems: number
+  power: number | null
+  powerPercentile: number | null
+  powerProvisional: boolean
+  diamonds: number
+  diamondCap: number
+  diamondCapLevel: number
+  diamondExcess: number
+  stars: Star[]
+  starCount: number
+  seasonalStarCount: number
+  inventory: Record<string, number>
 }
 
 export function buildHomeView(
@@ -305,7 +318,24 @@ export function buildHomeView(
     embersBalance: Math.max(0, Math.trunc(status.embers.balance)),
     embersCap: Math.max(0, Math.trunc(status.embers.cap)),
     gems: Math.max(0, Math.trunc(status.gems)),
+    power:
+      status.power === null ? null : Math.max(0, Math.trunc(status.power)),
+    powerPercentile: status.power_percentile,
+    powerProvisional: status.power_provisional,
+    diamonds: Math.max(0, Math.trunc(status.diamonds)),
+    diamondCap: Math.max(0, Math.trunc(status.diamond_cap)),
+    diamondCapLevel: Math.max(0, Math.trunc(status.diamond_cap_level)),
+    diamondExcess: Math.max(0, Math.trunc(status.diamond_excess)),
+    stars: status.stars,
+    starCount: status.stars.length,
+    seasonalStarCount: status.stars.filter((star) => star.kind === 'seasonal')
+      .length,
+    inventory: status.inventory,
   }
+}
+
+export function formatPower(power: number | null): string {
+  return power === null ? '—' : formatNumber(power)
 }
 
 export function describeApiError(error: unknown): string {

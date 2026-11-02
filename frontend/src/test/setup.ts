@@ -5,6 +5,19 @@ import { afterEach, vi } from 'vitest'
 afterEach(() => {
   cleanup()
   window.localStorage.clear()
+  vi.clearAllMocks()
+})
+
+Object.defineProperty(URL, 'createObjectURL', {
+  configurable: true,
+  writable: true,
+  value: vi.fn(() => 'blob:mock-url'),
+})
+
+Object.defineProperty(URL, 'revokeObjectURL', {
+  configurable: true,
+  writable: true,
+  value: vi.fn(),
 })
 
 if (!window.matchMedia) {

@@ -3,8 +3,29 @@ import type {
   Profile,
   StandingRow,
   Standings,
+  Star,
   Status,
 } from '../api/types'
+
+export function makeStar(overrides: Partial<Star> = {}): Star {
+  return {
+    id: 'star-1',
+    name: '霜蓝',
+    kind: 'normal',
+    season_key: null,
+    star_type: 'blue_white_star',
+    type_label: '蓝白星',
+    rarity: 'rare',
+    rarity_label: '耀星',
+    palette: ['#bfe4ff', '#ffffff', '#2b5b8a'],
+    visual_seed: 4242,
+    companion_count: 0,
+    catalog_code: 'GL-2026-0A1B2C3D',
+    acquired_at: '2026-10-31T10:00:00+08:00',
+    svg_url: '/v1/me/stars/star-1/svg',
+    ...overrides,
+  }
+}
 
 export function makeProfile(overrides: Partial<Profile> = {}): Profile {
   return {
@@ -48,6 +69,10 @@ export function makeStatus(overrides: Partial<Status> = {}): Status {
     seconds: 3149,
     xp: 524,
     rank: 10,
+    power: 1667,
+    power_percentile: 0.625,
+    power_updated_at: '2026-11-02T12:00:00+08:00',
+    power_provisional: false,
     today_seconds: 779,
     today_xp: 129,
     required_xp: 100,
@@ -60,6 +85,12 @@ export function makeStatus(overrides: Partial<Status> = {}): Status {
     },
     embers: { balance: 0, cap: 3, earned_this_week: 0 },
     gems: 128,
+    diamonds: 720,
+    diamond_cap: 1000,
+    diamond_cap_level: 0,
+    diamond_excess: 0,
+    inventory: { star: 1, seasonal_star: 0, ember: 0 },
+    stars: [makeStar()],
     equipped_title: '小丑',
     equipped_title_id: 'title_clown',
     frame: '余烬',
@@ -80,6 +111,7 @@ function row(
   is_me = false,
   checkin: string | null = rank === 1 ? null : 'verified',
   streak = 2,
+  power: number | null = 1200,
 ): StandingRow {
   return {
     rank,
@@ -88,6 +120,7 @@ function row(
     avatar_url: null,
     is_me,
     xp,
+    power,
     checkin,
     streak,
     title: rank === 1 ? '点火' : '三日不息',
@@ -120,12 +153,12 @@ export function makeStandings(overrides: Partial<Standings> = {}): Standings {
       row(7, 'ch-hana', 'HanaTaka2137', 1057, false, null, 2),
       row(8, 'ch-gao', 'Gaopeiwen', 873, false, null, 1),
       row(9, 'ch-nine', '第九名', 748, false, null, 2),
-      row(10, 'naer-lily', '那尔', 524, true),
+      row(10, 'naer-lily', '那尔', 524, true, 'verified', 2, 1667),
       row(11, 'ch-shai', '筛滤淘', 453, false, 'verified', 2),
       row(12, 'ch-lan', '蓝啼儿', 237, false, null, 1),
       row(13, 'ch-jun', '@Junhao', 201, false, 'verified', 1),
       row(14, 'ch-qdmxy', 'qdmxy', 182, false, null, 1),
-      row(15, 'ch-ao', '@aoaostar', 59, false, null, 0),
+      row(15, 'ch-ao', '@aoaostar', 59, false, null, 0, null),
     ],
     ...overrides,
   }

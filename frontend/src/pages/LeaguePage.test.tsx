@@ -88,6 +88,10 @@ describe('LeaguePage', () => {
 
     for (const [index, row] of rows.entries()) {
       expect(within(row).getByTestId('streak-badge')).toBeInTheDocument()
+      const power = snapshot.standings.standings[index]!.power
+      expect(within(row).getByTestId('standing-power')).toHaveTextContent(
+        `战力 ${power === null ? '—' : formatNumber(power)}`,
+      )
       expect(within(row).getByText('XP', { exact: true })).toBeInTheDocument()
       expect(within(row).getByTestId('standing-xp')).toHaveTextContent(
         `${formatNumber(snapshot.standings.standings[index]!.xp)} XP`,

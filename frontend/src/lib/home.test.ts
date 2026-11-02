@@ -32,6 +32,18 @@ describe('home mapping', () => {
     expect(view.groupSize).toBe(15)
     expect(view.streak).toBe(2)
     expect(view.gems).toBe(128)
+    expect(view.diamonds).toBe(720)
+    expect(view.diamondCap).toBe(1000)
+    expect(view.diamondCapLevel).toBe(0)
+    expect(view.diamondExcess).toBe(0)
+    expect(view.power).toBe(1667)
+    expect(view.powerPercentile).toBe(0.625)
+    expect(view.powerProvisional).toBe(false)
+    expect(view.starCount).toBe(1)
+    expect(view.seasonalStarCount).toBe(0)
+    expect(view.stars[0]?.name).toBe('霜蓝')
+    expect(view.inventory.star).toBe(1)
+    expect(view.selfRow?.power).toBe(1667)
     expect(view.topThree.map((row) => row.display_name)).toEqual([
       '@Xkein',
       'RogerRordo',
@@ -95,6 +107,7 @@ describe('home mapping', () => {
             avatar_url: null,
             is_me: true,
             xp: 8019,
+            power: 2000,
             checkin: 'verified',
             streak: 2,
             title: '小丑',

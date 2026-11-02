@@ -62,6 +62,77 @@
   font-weight: 800;
 }
 
+.resourceRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 54px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.resource {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.resource + .resource {
+  padding-left: 8px;
+  border-left: 1px solid rgba(55, 70, 79, 0.72);
+}
+
+.resourceIcon {
+  flex: none;
+}
+
+.diamondIcon {
+  color: var(--purple);
+}
+
+.starIcon {
+  color: var(--cyan);
+}
+
+.powerIcon {
+  color: var(--yellow);
+}
+
+.resourceText {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  line-height: 1.12;
+}
+
+.resourceText small {
+  color: var(--muted);
+  font-size: 0.6rem;
+  font-weight: 800;
+}
+
+.resourceText strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resourceChevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted-2);
+}
+
+.resourceRow:hover .resourceText strong,
+.resourceRow:hover .resourceChevron {
+  color: var(--cyan);
+}
+
 .goal {
   display: grid;
   place-items: center;

@@ -65,6 +65,23 @@ describe('AppShell navigation', () => {
       expect(link.querySelector('svg')).not.toBeNull()
     }
     expect(bottomLinks[0]).toHaveAttribute('aria-current', 'page')
+    expect(bottomLinks.map((link) => link.getAttribute('aria-label'))).toEqual([
+      '首页',
+      '小组',
+      '星图',
+      '历史',
+      '我的',
+    ])
+    expect(bottomLinks.map((link) => link.getAttribute('href'))).toEqual([
+      '/',
+      '/league',
+      '/shop',
+      '/history',
+      '/me',
+    ])
+    expect(
+      within(bottom).queryByRole('link', { name: '余烬' }),
+    ).not.toBeInTheDocument()
 
     for (const link of document.querySelectorAll<HTMLAnchorElement>(
       'nav[aria-label="主导航"] a',
@@ -74,13 +91,15 @@ describe('AppShell navigation', () => {
     }
   })
 
-  it('shows the gem balance as an icon and number in the top bar', async () => {
+  it('shows diamonds, not gems, in the top bar and links to the star map', async () => {
     renderShell()
 
-    const gems = await screen.findByLabelText('宝石 128')
-    expect(gems).toHaveAttribute('data-testid', 'gem-balance')
-    expect(gems).toHaveTextContent('128')
-    expect(gems.textContent).not.toMatch(/宝石/)
-    expect(gems.querySelector('svg')).not.toBeNull()
+    const diamonds = await screen.findByLabelText('钻石 720')
+    expect(diamonds).toHaveAttribute('data-testid', 'diamond-balance')
+    expect(diamonds).toHaveAttribute('href', '/shop')
+    expect(diamonds).toHaveTextContent('720')
+    expect(diamonds.textContent).not.toMatch(/钻石/)
+    expect(diamonds.querySelector('svg')).not.toBeNull()
+    expect(screen.queryByTestId('gem-balance')).not.toBeInTheDocument()
   })
 })
