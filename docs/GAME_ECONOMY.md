@@ -39,6 +39,7 @@ The intended chain is:
 
 ```text
 drawing session -> real seconds -> XP -> tier and weekly standing
+drawing session -> XP -> lifetime XP milestones -> diamonds
 drawing session -> XP and rank -> rival / group / bet settlement -> diamonds
 diamonds -> stars and other sinks -> visible collection
 ```
@@ -73,7 +74,8 @@ Signals that a mechanic is misaligned:
 
 Diamonds enter through the settlement of XP and rank outcomes, not through a separate casino:
 
-- rival and group settlement payouts, which are derived from real XP and rank;
+- lifetime XP milestones, one diamond per complete 10 XP, boosted while a boost is active;
+- rival and group settlement payouts, which are derived from real XP and rank and are never boosted;
 - initial wallet balance for new players;
 - free stake on each bet, as a bounded subsidy.
 

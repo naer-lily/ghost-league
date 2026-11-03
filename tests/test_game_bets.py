@@ -547,13 +547,15 @@ def test_daily_settlement_waits_for_2230_and_uses_2230_xp(
     assert early["status"] == "skipped"
     assert store.bets_for("h1", now=MONDAY)["daily"]["status"] == "placed"
 
+    before_settlement = store.get_diamond_balance("h1", now=MONDAY_SETTLE)
     settled = store.settle_daily_bets("2026-11-02", now=MONDAY_SETTLE)
     assert settled["settled"] == 1
     assert settled["results"][0]["status"] == "won"
     assert settled["results"][0]["payout"] == expected
     assert settled["results"][0]["result_diff"] == 200
     assert (
-        store.get_diamond_balance("h1", now=MONDAY_SETTLE) == 1000 + expected
+        store.get_diamond_balance("h1", now=MONDAY_SETTLE)
+        == before_settlement + expected
     )
 
     again = store.settle_daily_bets(
@@ -564,7 +566,7 @@ def test_daily_settlement_waits_for_2230_and_uses_2230_xp(
         store.get_diamond_balance(
             "h1", now=datetime(2026, 11, 2, 22, 35, 0, tzinfo=TZ)
         )
-        == 1000 + expected
+        == before_settlement + expected
     )
 
 
@@ -607,18 +609,13 @@ def test_daily_settlement_ignores_activity_after_2230(tmp_path: Path) -> None:
         occurred_at=datetime(2026, 11, 2, 23, 0, 0, tzinfo=TZ),
         now=datetime(2026, 11, 2, 23, 0, 0, tzinfo=TZ),
     )
-    settled = store.settle_daily_bets(
-        "2026-11-02", now=datetime(2026, 11, 2, 23, 30, 0, tzinfo=TZ)
-    )
+    settle_at = datetime(2026, 11, 2, 23, 30, 0, tzinfo=TZ)
+    before_settlement = store.get_diamond_balance("h1", now=settle_at)
+    settled = store.settle_daily_bets("2026-11-02", now=settle_at)
     assert settled["results"][0]["status"] == "lost"
     assert settled["results"][0]["result_diff"] == -100
     assert settled["results"][0]["payout"] == 0
-    assert (
-        store.get_diamond_balance(
-            "h1", now=datetime(2026, 11, 2, 23, 30, 0, tzinfo=TZ)
-        )
-        == 1000
-    )
+    assert store.get_diamond_balance("h1", now=settle_at) == before_settlement
 
 
 def test_daily_loss_and_weekly_tie_refund(tmp_path: Path) -> None:
@@ -649,8 +646,14 @@ def test_daily_loss_and_weekly_tie_refund(tmp_path: Path) -> None:
         now=MONDAY,
         request_id="daily-loss",
     )
+    before_daily_settlement = store.get_diamond_balance(
+        "daily", now=MONDAY_SETTLE
+    )
     store.settle_daily_bets("2026-11-02", now=MONDAY_SETTLE)
-    assert store.get_diamond_balance("daily", now=MONDAY_SETTLE) == 1000
+    assert (
+        store.get_diamond_balance("daily", now=MONDAY_SETTLE)
+        == before_daily_settlement
+    )
 
     make_rival_pair(store, "weekly", "weekly-rival")
     set_week_xp(store, "weekly", 200)
@@ -751,23 +754,19 @@ def test_settle_week_runs_rivals_and_weekly_bets_once(tmp_path: Path) -> None:
     )
     bet_payout = payout_for_win(bet["stake"], bet["odds"])
 
+    before_settlement = store.get_diamond_balance("h1", now=NEXT_MONDAY)
     settled = store.settle_week(WEEK, now=NEXT_MONDAY)
     assert settled["already_settled"] is False
     assert settled["rivals"]["results"][0]["outcome"] == "win"
     assert settled["rivals"]["results"][0]["reward_diamonds"] == 120
     assert settled["weekly_bets"]["results"][0]["status"] == "won"
     assert settled["group_bets"]["settled"] == 0
-    assert (
-        store.get_diamond_balance("h1", now=NEXT_MONDAY)
-        == 1000 + 120 + bet_payout
-    )
+    expected_balance = before_settlement + 120 + bet_payout
+    assert store.get_diamond_balance("h1", now=NEXT_MONDAY) == expected_balance
 
     again = store.settle_week(WEEK, now=NEXT_MONDAY)
     assert again["already_settled"] is True
-    assert (
-        store.get_diamond_balance("h1", now=NEXT_MONDAY)
-        == 1000 + 120 + bet_payout
-    )
+    assert store.get_diamond_balance("h1", now=NEXT_MONDAY) == expected_balance
     rewards = [
         row
         for row in store.diamond_ledger("h1")
@@ -1346,22 +1345,82 @@ def test_settle_week_settles_group_bets_once(tmp_path: Path) -> None:
     bet = store.place_bet(
         "h1", "group", paid_stake=20, now=MONDAY, request_id="group-integration"
     )
-    assert store.get_diamond_balance("h1", now=MONDAY) == 980
+    # 1800 seconds = 300 XP = 30 XP diamonds; the 20 paid stake is then debited.
+    assert store.get_diamond_balance("h1", now=MONDAY) == 1000 + 30 - 20
     group_payout = payout_for_win(bet["stake"], bet["odds"])
 
+    before_settlement = store.get_diamond_balance("h1", now=NEXT_MONDAY)
     settled = store.settle_week(WEEK, now=NEXT_MONDAY)
     assert settled["group_bets"]["settled"] == 1
     assert settled["group_bets"]["results"][0]["status"] == "won"
     assert settled["group_bets"]["results"][0]["payout"] == group_payout
     # The rival reward is also paid in the same weekly pass.
-    assert (
-        store.get_diamond_balance("h1", now=NEXT_MONDAY)
-        == 980 + 120 + group_payout
-    )
+    expected_balance = before_settlement + 120 + group_payout
+    assert store.get_diamond_balance("h1", now=NEXT_MONDAY) == expected_balance
 
     again = store.settle_week(WEEK, now=NEXT_MONDAY)
     assert again["group_bets"]["settled"] == 0
+    assert store.get_diamond_balance("h1", now=NEXT_MONDAY) == expected_balance
+
+
+def test_boost_does_not_multiply_settlement_payouts(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    make_rival_pair(store, "h1", "h2")
+    add_activity(
+        store,
+        "h1",
+        event_id="h1-boost-scope",
+        seconds=1800,
+        occurred_at=datetime(2026, 11, 6, 12, 0, 0, tzinfo=TZ),
+    )
+    add_activity(
+        store,
+        "h2",
+        event_id="h2-boost-scope",
+        seconds=600,
+        occurred_at=datetime(2026, 11, 6, 12, 0, 0, tzinfo=TZ),
+    )
+    weekly_bet = store.place_bet(
+        "h1",
+        "weekly",
+        paid_stake=0,
+        target_margin=50,
+        now=MONDAY,
+        request_id="boost-scope-weekly",
+    )
+    group_bet = store.place_bet(
+        "h1",
+        "group",
+        paid_stake=0,
+        now=MONDAY,
+        request_id="boost-scope-group",
+    )
+    weekly_payout = payout_for_win(
+        weekly_bet["stake"], weekly_bet["odds"]
+    )
+    group_payout = payout_for_win(group_bet["stake"], group_bet["odds"])
+
+    store.purchase_shop_item(
+        "h1", "diamond_boost_25", 1, "boost-scope", now=NEXT_MONDAY
+    )
+    assert store.diamond_boost_state("h1", now=NEXT_MONDAY)["multiplier"] == 2
+    before = store.get_diamond_balance("h1", now=NEXT_MONDAY)
+
+    settled = store.settle_week(WEEK, now=NEXT_MONDAY)
+
+    assert settled["rivals"]["results"][0]["reward_diamonds"] == 120
+    assert settled["weekly_bets"]["results"][0]["status"] == "won"
+    assert settled["group_bets"]["results"][0]["status"] == "won"
     assert (
         store.get_diamond_balance("h1", now=NEXT_MONDAY)
-        == 980 + 120 + group_payout
+        == before + 120 + weekly_payout + group_payout
+    )
+    payouts = [
+        row
+        for row in store.diamond_ledger("h1")
+        if row["reason"]
+        in {"rival_reward", "bet_payout", "group_bet_payout"}
+    ]
+    assert sum(row["delta"] for row in payouts) == (
+        120 + weekly_payout + group_payout
     )

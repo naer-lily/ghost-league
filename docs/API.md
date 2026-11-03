@@ -719,20 +719,24 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 - `last_activity_at` 是本周最后一条 `activity_events.occurred_at`，没有活动时为 `null`。
   前端用它计算“刚刚更新/N 分钟前更新”，超过 1 小时不再显示“刚刚更新”；`updated_at`
   仍是响应生成时间，两者语义不同。
-- `gems` 继续是原来的展示值，由该玩家 `weekly_scores` 的累计 `SUM(xp) // 10` 派生，
-  每累计 10 XP 得 1 个宝石；不按本周 XP 重置，也没有独立 ledger 表。`gems` 不是钻石，
-  不会因为商店消费而变化。
+- `gems` 继续是兼容展示值，由该玩家 `weekly_scores` 的累计 `SUM(xp) // 10` 派生，
+  每累计 10 XP 得 1 个宝石；不按本周 XP 重置。`gems` 本身不是钱包，不会因为商店消费
+  而变化；钻石钱包现在由同一条 lifetime XP 规则写入真账本。
 - `diamonds` 是独立钻石钱包余额。新真人钱包初始 1000，`diamond_cap` 初始 1000、
   `diamond_cap_level` 初始 0。旧库中已有钱包保留余额并补 1000 上限；没有钱包记录的
-  真人补 1000/1000。AI 没有钱包。当前只有本地管理命令/未来奖励接入会充值，正式的
-  宿敌、活动奖励后续再接。
+  真人补 1000/1000。AI 没有钱包。XP 里程碑、宿敌奖励、下注派彩和管理命令都会充值。
+- XP 换钻石：每累计 10 lifetime XP 入 1 钻石，`reason='xp_milestone'`、
+  `ref_type='lifetime_xp'`、`ref_id=floor(lifetime_xp / 10)`，幂等键为
+  `xp-diamond:{player_id}:{milestone}`，按里程碑去重。经验宝生效时这部分钻石按当前
+  倍率入账，但 XP 本身不变；历史 XP 用
+  `python3 scripts/backfill_xp_diamonds.py [--dry-run]` 补齐，补齐不追溯经验宝倍率。
 - 钻石是**软上限**：余额可以超过上限，超出部分 `diamond_excess = max(0, diamonds - cap)`
   不删、不拒绝入账，按完整小时 1% 复利损耗；只有完整小时计费，重复读取同一小时不会
   重复扣。服务器离线后按 `last_decay_at` 在下次钱包读写或 `diamond-decay` job 补算。
 - `diamond_boost` 是当前生效的经验宝状态：`expires_at` 是到期时间，`remaining_seconds`
   是服务端时钟下的剩余秒数，`multiplier` 是生效倍率。未生效/已过期时 `expires_at=null`、
-  `remaining_seconds=0`、`multiplier=1`。倍率只作用于正常游戏钻石入账，初始钱包和管理
-  发钻不乘。
+  `remaining_seconds=0`、`multiplier=1`。倍率只作用于 XP 里程碑；宿敌奖励、下注派彩、
+  组注派彩、初始钱包、管理发钻和历史补齐都不乘。
 - `inventory` 至少包含 `star`、`seasonal_star` 与 `ember`。`inventory.star` 读取通用物品栏
   `inventory_items`，是普通星数量；`inventory.seasonal_star` 是季节星数量；
   `inventory.ember` 直接读取现有 `ember_balance.balance`，不复制到 `inventory_items`。
@@ -784,6 +788,18 @@ curl -sS "https://your-host.example/v1/me/status" \
   `python3 -m ghost_league.game.jobs diamond-decay --at <iso>` 统一补算。
 - 充值/奖励不因超过上限被拒绝；下注等未来消耗也不受上限阻塞。
 
+XP 里程碑是自动、常驻的钻石来源：每累计 10 lifetime XP 入 1 钻石，写入
+`diamond_ledger` 的 `reason='xp_milestone'`，`ref_type='lifetime_xp'`，`ref_id` 为新的
+里程碑。新 XP 走 `ingest_activity` 的同一事务；历史 XP 用一次性脚本补齐，按
+`(player_id, target milestone)` 幂等，重复执行不会重复入账。经验宝只作用于新 XP
+里程碑，并在生效期间按倍率入账；历史补齐固定按 1 倍，不追溯经验宝。宿敌奖励、
+下注派彩、组注派彩固定 1 倍。
+
+```bash
+python3 scripts/backfill_xp_diamonds.py --dry-run
+python3 scripts/backfill_xp_diamonds.py
+```
+
 本地管理命令仍可用于测试或未来奖励接入：
 
 ```bash
@@ -807,7 +823,7 @@ python3 -m ghost_league.game.jobs grant-diamonds --player <id> --amount 3000 --r
 
 | key | 种子值 | 含义 |
 | --- | --- | --- |
-| `diamond_boost_multiplier` | `2` | 生效期间正常钻石入账倍率 |
+| `diamond_boost_multiplier` | `2` | 生效期间 XP 里程碑倍率 |
 | `diamond_boost_25_price` | `25` | 25 档价格 |
 | `diamond_boost_25_minutes` | `25` | 25 档分钟数 |
 | `diamond_boost_60_price` | `60` | 60 档价格 |
@@ -825,8 +841,9 @@ sqlite3 data/league/league.db \
 
 购买成功会扣对应价格；已有未到期经验宝时从原到期时间顺延分钟数，否则从现在开始。
 `diamond_boosts` 每个玩家一行，记录当前 `multiplier`、`expires_at`、`updated_at`。
-生效期间宿敌奖励、下注派彩等正常钻石入账按配置倍率入账；初始 1000 钱包和管理/测试
-`grant-diamonds` 不乘。经验宝只改钻石入账，不改 XP、打卡、战力或 WakaTime 数据。
+生效期间新 XP 里程碑按配置倍率入账；宿敌奖励、下注派彩、组注派彩、初始 1000 钱包、
+管理/测试 `grant-diamonds` 和历史 XP 补齐不乘。经验宝只改 XP 换钻石，不改 XP、打卡、
+战力或 WakaTime 数据。
 
 上限阶梯：
 

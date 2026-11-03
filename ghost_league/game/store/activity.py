@@ -161,6 +161,7 @@ class ActivityMixin:
                     ),
                 }
 
+            before_lifetime_xp = self._lifetime_xp_with(conn, player_id)
             group = conn.execute(
                 "SELECT g.id FROM groups g JOIN group_members gm ON gm.group_id = g.id "
                 "WHERE g.week_start = ? AND gm.player_id = ? "
@@ -188,6 +189,23 @@ class ActivityMixin:
                     "group_id = COALESCE(?, group_id) "
                     "WHERE week_start = ? AND player_id = ?",
                     (week_seconds, week_xp, group_id, week_iso, player_id),
+                )
+
+            after_lifetime_xp = self._lifetime_xp_with(conn, player_id)
+            milestone = after_lifetime_xp // 10
+            milestone_delta = milestone - before_lifetime_xp // 10
+            # Diamonds are a human wallet; AI ghosts keep their XP-only rows.
+            if milestone_delta > 0 and str(player["kind"]) == "human":
+                self._credit_diamonds_with(  # type: ignore[attr-defined]
+                    conn,
+                    player_id=player_id,
+                    amount=milestone_delta,
+                    reason="xp_milestone",
+                    ref_type="lifetime_xp",
+                    ref_id=str(milestone),
+                    idempotency_key=f"xp-diamond:{player_id}:{milestone}",
+                    now=local_now,
+                    boost=True,
                 )
 
             checkin = self._auto_checkin(
@@ -235,6 +253,17 @@ class ActivityMixin:
                 "day_xp": xp_for_seconds(day_seconds),
                 "checkin": checkin,
             }
+
+    @staticmethod
+    def _lifetime_xp_with(
+        conn: sqlite3.Connection, player_id: str
+    ) -> int:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(xp), 0) AS total FROM weekly_scores "
+            "WHERE player_id = ?",
+            (player_id,),
+        ).fetchone()
+        return int(row["total"]) if row is not None else 0
 
     @staticmethod
     def _day_seconds(conn: sqlite3.Connection, player_id: str, day: date) -> int:
