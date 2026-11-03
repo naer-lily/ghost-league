@@ -24,6 +24,7 @@ import {
   describeRivalError,
   formatCountdown,
   weekNumber,
+  type RivalBetTab,
 } from '../lib/rival'
 import { useServerNow } from '../lib/useServerNow'
 import { useUiStore } from '../store/useUiStore'
@@ -140,7 +141,7 @@ export function RivalPage() {
   const selectMutation = useSelectRival()
   const notify = useUiStore((state) => state.notify)
   const [showSelection, setShowSelection] = useState(false)
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const [dialogKind, setDialogKind] = useState<RivalBetTab | null>(null)
   const [profileId, setProfileId] = useState<string | null>(null)
 
   const data = rivalQuery.data
@@ -218,7 +219,7 @@ export function RivalPage() {
             state={data}
             now={now}
             onOpenProfile={setProfileId}
-            onOpenBets={() => setDialogOpen(true)}
+            onOpenBets={setDialogKind}
           />
 
           <p className={styles.footNote}>
@@ -226,11 +227,13 @@ export function RivalPage() {
           </p>
         </div>
         <RivalBetDialog
-          open={dialogOpen}
-          onOpenChange={setDialogOpen}
+          open={dialogKind !== null}
+          onOpenChange={(open) => {
+            if (!open) setDialogKind(null)
+          }}
           state={data}
           now={now}
-          initialTab="weekly"
+          onlyKind={dialogKind ?? undefined}
         />
         <UserProfileSheet
           userId={profileId}

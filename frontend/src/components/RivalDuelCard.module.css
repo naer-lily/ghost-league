@@ -85,17 +85,6 @@
   font-weight: 900;
 }
 
-.playerToday {
-  margin-top: 2px;
-  color: var(--rival-purple);
-  font-size: 0.66rem;
-  font-weight: 800;
-}
-
-.playerMe .playerToday {
-  color: var(--rival-mint);
-}
-
 .playerPower {
   margin-top: 3px;
   color: var(--muted);
@@ -238,6 +227,124 @@
   align-items: center;
   gap: 8px;
   margin-top: 14px;
+}
+
+.todayScore {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(13, 23, 28, 0.45);
+  font-size: 0.76rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.todayMine {
+  color: var(--rival-mint);
+}
+
+.todayRival {
+  color: var(--rival-purple);
+}
+
+.betSurfaces {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.betSurface {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: rgba(13, 23, 28, 0.45);
+}
+
+.betSurfacePlaced {
+  border-color: rgba(127, 255, 212, 0.38);
+  background: rgba(127, 255, 212, 0.06);
+}
+
+.betSurfaceClosed {
+  border-color: rgba(255, 196, 107, 0.28);
+}
+
+.betSurfaceHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 6px;
+}
+
+.betSurfaceKind {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.betSurfaceStatus {
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.betSurfaceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.betSurfaceGrid dt {
+  color: var(--muted);
+  font-size: 0.55rem;
+  font-weight: 800;
+}
+
+.betSurfaceGrid dd {
+  margin-top: 1px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.betSurfaceNote {
+  margin-top: 8px;
+  color: var(--muted-2);
+  font-size: 0.52rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.betSurfaceClosedCopy {
+  margin-top: 9px;
+  color: var(--rival-orange);
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.betSurface .betButton {
+  width: 100%;
+  margin-top: 10px;
+  margin-left: 0;
+  min-height: 40px;
+  padding: 0 8px;
+  font-size: 0.82rem;
 }
 
 .betStatuses {

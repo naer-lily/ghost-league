@@ -136,10 +136,10 @@ interface RivalBetDialogProps {
   onOpenChange: (open: boolean) => void
   state: RivalState
   now: Date
-  /** Open on this tab; the rival page uses weekly. */
+  /** Fallback tab when the caller does not lock the dialog to one kind. */
   initialTab?: RivalBetTab
-  /** Lock the dialog to one kind, used by the home daily-only entry. */
-  onlyKind?: RivalBetTab
+  /** Lock the dialog to one kind; the rival page and home entries use this. */
+  onlyKind?: RivalBetTab | undefined
 }
 
 export function RivalBetDialog({
@@ -156,7 +156,7 @@ export function RivalBetDialog({
   const betsQuery = useBets(open)
   const placeBet = usePlaceBet()
   const notify = useUiStore((store) => store.notify)
-  const [tab, setTab] = useState<RivalBetTab>(
+  const [selectedTab, setSelectedTab] = useState<RivalBetTab>(
     onlyKind ?? initialTab ?? 'weekly',
   )
   const [targets, setTargets] = useState<Record<RivalBetTab, number>>({
@@ -176,8 +176,10 @@ export function RivalBetDialog({
   useEffect(() => {
     if (!open) return
     setError(null)
-    setTab(onlyKind ?? initialTab ?? 'weekly')
+    setSelectedTab(onlyKind ?? initialTab ?? 'weekly')
   }, [open, onlyKind, initialTab])
+
+  const tab = onlyKind ?? selectedTab
 
   const bets = betsQuery.data?.bets ?? state.bets
   const betOptions = betsQuery.data?.bet_options ?? state.bet_options
@@ -312,7 +314,7 @@ export function RivalBetDialog({
                       .filter(Boolean)
                       .join(' ')}
                     onClick={() => {
-                      setTab(item.kind)
+                      setSelectedTab(item.kind)
                       setError(null)
                     }}
                   >

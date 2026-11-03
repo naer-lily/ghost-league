@@ -412,38 +412,79 @@ describe('RivalPage', () => {
     expect(document.body.textContent ?? '').not.toMatch(/0\s*:\s*0/)
   })
 
-  it('opens the bet dialog with weekly/daily target options and no group tab', async () => {
-    const user = userEvent.setup()
-    const withBets = makeState({
-      bets: {
-        weekly: null,
-        daily: bet({
-          id: 2,
-          kind: 'daily',
-          period_key: '2026-11-02',
-          target_margin: 150,
-          odds: 2,
-          stake: 20,
-          free_stake: 20,
-          paid_stake: 0,
-        }),
-        group: null,
-      },
-    })
-    installApi({ state: withBets })
+  it('shows both today XP values above the bet surfaces', async () => {
+    installApi({ state: makeState() })
 
     renderRivalPage()
 
-    await user.click(await screen.findByRole('button', { name: '下注' }))
+    const today = await screen.findByTestId('rival-today-score')
+    expect(today).toHaveTextContent('今日 我 129 XP')
+    expect(today).toHaveTextContent('宿敌 120 XP')
+    expect(screen.getByTestId('rival-today-me')).toHaveTextContent(
+      '今日 我 129 XP',
+    )
+    expect(screen.getByTestId('rival-today-rival')).toHaveTextContent(
+      '宿敌 120 XP',
+    )
+    expect(screen.getByRole('button', { name: '下注周注' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '下注日注' })).toBeVisible()
+    expect(screen.queryByText(/今日 \+/)).not.toBeInTheDocument()
+  })
+
+  it('replaces the daily bet entry with the current daily surface once placed', async () => {
+    installApi({
+      state: makeState({
+        bets: {
+          weekly: null,
+          daily: bet({
+            id: 2,
+            kind: 'daily',
+            period_key: '2026-11-02',
+            target_margin: 150,
+            odds: 2,
+            stake: 20,
+            free_stake: 20,
+            paid_stake: 0,
+          }),
+          group: null,
+        },
+      }),
+    })
+
+    renderRivalPage()
+
+    const daily = await screen.findByTestId('rival-bet-status-日注')
+    expect(daily).toHaveTextContent('日注 · 已下注')
+    expect(screen.getByTestId('rival-bet-target-daily')).toHaveTextContent(
+      '+150 XP',
+    )
+    expect(screen.getByTestId('rival-bet-odds-daily')).toHaveTextContent(
+      '×2.00',
+    )
+    expect(screen.getByTestId('rival-bet-stake-daily')).toHaveTextContent('20')
+    expect(screen.getByTestId('rival-bet-return-daily')).toHaveTextContent('40')
+    expect(
+      screen.queryByRole('button', { name: '下注日注' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '下注周注' })).toBeVisible()
+  })
+
+  it('opens the weekly-only bet dialog from the weekly surface', async () => {
+    const user = userEvent.setup()
+    installApi({ state: makeState() })
+
+    renderRivalPage()
+
+    await user.click(await screen.findByRole('button', { name: '下注周注' }))
     const dialog = await screen.findByTestId('rival-bet-dialog')
     expect(
       within(dialog).getByRole('heading', { name: '下注' }),
     ).toBeInTheDocument()
-    expect(within(dialog).getByRole('tab', { name: /周注/ })).toBeInTheDocument()
-    expect(within(dialog).getByRole('tab', { name: /日注/ })).toBeInTheDocument()
-    expect(
-      within(dialog).queryByRole('tab', { name: /组注/ }),
-    ).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('tab')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('tabpanel')).toHaveAttribute(
+      'data-kind',
+      'weekly',
+    )
 
     expect(within(dialog).getByTestId('rival-target-0')).toHaveTextContent(
       '+0 XP',
@@ -476,28 +517,6 @@ describe('RivalPage', () => {
     expect(within(dialog).getByTestId('rival-bet-odds')).toHaveTextContent(
       '×2.00',
     )
-
-    await user.click(within(dialog).getByRole('tab', { name: /日注/ }))
-    expect(
-      within(dialog).getByText('押「今天我比宿敌多多少 XP」'),
-    ).toBeInTheDocument()
-    expect(within(dialog).getByTestId('rival-target-150')).toHaveTextContent(
-      '+150 XP',
-    )
-    expect(within(dialog).getByTestId('rival-bet-placed')).toHaveTextContent(
-      '目标+150 XP',
-    )
-    expect(within(dialog).getByTestId('rival-bet-placed')).toHaveTextContent(
-      '总返40',
-    )
-    expect(within(dialog).getAllByText('已下注')).toHaveLength(1)
-    expect(
-      within(dialog).queryByText('本周期已经下过，不能重复提交。'),
-    ).not.toBeInTheDocument()
-    expect(within(dialog).getByTestId('rival-bet-paid-input')).toBeVisible()
-    expect(
-      within(dialog).getByRole('button', { name: '本期已下注' }),
-    ).toBeDisabled()
   })
 
   it('lets the weekly bet use paid stakes 0 and 500 with server odds', async () => {
@@ -506,7 +525,7 @@ describe('RivalPage', () => {
 
     renderRivalPage()
 
-    await user.click(await screen.findByRole('button', { name: '下注' }))
+    await user.click(await screen.findByRole('button', { name: '下注周注' }))
     const dialog = await screen.findByTestId('rival-bet-dialog')
     const paidInput = within(dialog).getByTestId('rival-bet-paid-input')
 
@@ -553,9 +572,13 @@ describe('RivalPage', () => {
 
     renderRivalPage()
 
-    await user.click(await screen.findByRole('button', { name: '下注' }))
+    await user.click(await screen.findByRole('button', { name: '下注日注' }))
     const dialog = await screen.findByTestId('rival-bet-dialog')
-    await user.click(within(dialog).getByRole('tab', { name: /日注/ }))
+    expect(within(dialog).queryByRole('tab')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('tabpanel')).toHaveAttribute(
+      'data-kind',
+      'daily',
+    )
 
     expect(within(dialog).getByTestId('rival-target-1')).toHaveTextContent(
       '+1 XP',
@@ -600,9 +623,13 @@ describe('RivalPage', () => {
 
     renderRivalPage()
 
-    await user.click(await screen.findByRole('button', { name: '下注' }))
+    await user.click(await screen.findByRole('button', { name: '下注日注' }))
     const dialog = await screen.findByTestId('rival-bet-dialog')
-    await user.click(within(dialog).getByRole('tab', { name: /日注/ }))
+    expect(within(dialog).queryByRole('tab')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('tabpanel')).toHaveAttribute(
+      'data-kind',
+      'daily',
+    )
 
     expect(within(dialog).queryByTestId('rival-target-0')).toBeNull()
     expect(within(dialog).getByTestId('rival-target-1')).toHaveAttribute(
@@ -626,8 +653,7 @@ describe('RivalPage', () => {
     ).toBeEnabled()
   })
 
-  it('disables the daily bet after 21:00 and shows the real closed copy', async () => {
-    const user = userEvent.setup()
+  it('shows the closed daily surface after 21:00 without a bet entry', async () => {
     const closed = makeState({
       bet_windows: {
         weekly_locks_at: futureIso(4),
@@ -639,14 +665,33 @@ describe('RivalPage', () => {
 
     renderRivalPage()
 
-    await user.click(await screen.findByRole('button', { name: '下注' }))
-    const dialog = await screen.findByTestId('rival-bet-dialog')
-    await user.click(within(dialog).getByRole('tab', { name: /日注/ }))
-
-    expect(within(dialog).getAllByText('今天的注已截止')).toHaveLength(1)
+    const daily = await screen.findByTestId('rival-bet-status-日注')
+    expect(daily).toHaveTextContent('日注 · 已截止')
+    expect(daily).toHaveTextContent('今天的注已截止')
     expect(
-      within(dialog).getByRole('button', { name: '今天的注已截止' }),
-    ).toBeDisabled()
+      screen.queryByRole('button', { name: '下注日注' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '下注周注' })).toBeVisible()
+  })
+
+  it('shows the closed weekly surface after the weekly lock without a bet entry', async () => {
+    const closed = makeState({
+      bet_windows: {
+        weekly_locks_at: futureIso(-1),
+        daily_locks_at: futureIso(2),
+        daily_settles_at: futureIso(3),
+      },
+    })
+    installApi({ state: closed })
+
+    renderRivalPage()
+
+    const weekly = await screen.findByTestId('rival-bet-status-周注')
+    expect(weekly).toHaveTextContent('周注 · 已截止')
+    expect(weekly).toHaveTextContent('本周的注已截止')
+    expect(
+      screen.queryByRole('button', { name: '下注周注' }),
+    ).not.toBeInTheDocument()
   })
 
   it('places a weekly bet with paid_stake and no stake field', async () => {
@@ -672,7 +717,7 @@ describe('RivalPage', () => {
 
     renderRivalPage()
 
-    await user.click(await screen.findByRole('button', { name: '下注' }))
+    await user.click(await screen.findByRole('button', { name: '下注周注' }))
     const dialog = await screen.findByTestId('rival-bet-dialog')
     await user.click(within(dialog).getByTestId('rival-target-150'))
     const paidInput = within(dialog).getByTestId('rival-bet-paid-input')
@@ -723,7 +768,7 @@ describe('RivalPage', () => {
 
     renderRivalPage()
 
-    await user.click(await screen.findByRole('button', { name: '下注' }))
+    await user.click(await screen.findByRole('button', { name: '下注周注' }))
     const dialog = await screen.findByTestId('rival-bet-dialog')
     await user.click(
       within(dialog).getByRole('button', { name: '确认下注' }),

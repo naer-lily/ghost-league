@@ -79,9 +79,13 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
   - 周注/日注请求体只发送 `kind`、`target_margin`、`paid_stake`、`request_id`；
     `stake`（`free_stake + paid_stake`）和赔率都由服务端返回，前端只读
     `bet_options` 的 `target_options` 档位与赔率。
-  - 首页 `RivalDuelCard` 用 `variant="summary"`：只显示双方本周 XP、差距、日注倒计时和
-    日注状态；首页下注按钮固定打开 `onlyKind="daily"` 的 dialog。`/rival` 保留完整卡和
-    周注/日注切换，复用同一套 `RivalDuelCard` / `RivalCandidatePicker` 组件。
+  - 首页 `RivalDuelCard` 用 `variant="summary"`：只显示双方本周 XP、差距、日注倒计时、
+    日注状态和一个下注入口；首页下注按钮固定打开 `onlyKind="daily"` 的 dialog。
+  - `/rival` 的完整卡显示双方今日 XP 比分，并把底部改成周注/日注两个独立注面：
+    未下注且未截止时分别显示「下注周注 / 下注日注」，已下注时显示该注面的目标、赔率、
+    总本金和总返，截止后只显示截止状态。两个入口分别用 `onlyKind="weekly"` /
+    `onlyKind="daily"` 直接打开对应 dialog，不再先展示另一个 tab；复用同一套
+    `RivalDuelCard` / `RivalCandidatePicker` 组件。
 - 小组/好友榜：
   - 小组：`GET /v1/league/standings`
   - 好友：`GET /v1/me/friends/standings`，保留本人和已关注的人，按 XP 排序；
@@ -149,8 +153,9 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
   紧邻的下一段位作为预览保留，再往后的未到达段位用迷雾/问号遮住名称；到达最高段位时不再
   有迷雾。本周 XP、今日 XP、本周排名、当前/最长连胜；物品栏、历史、设置入口。设置和音量
   从顶栏移到这里，音量在现有 `SettingsDialog` 内；页面支持下拉刷新。
-- **宿敌深链 `/rival`**：三态（选候选 / 已有宿敌 / 锁定空态）与周注/日注 dialog；周注仍
-  只在宿敌页和日注并列出现。组注不出现在宿敌卡或宿敌 dialog，只在 `/league` 的小组 tab。
+- **宿敌深链 `/rival`**：三态（选候选 / 已有宿敌 / 锁定空态）；完整卡显示今日 XP 比分和
+  周注/日注两个注面，每个注面各自打开对应注种的 dialog（`onlyKind`），不再需要先切换 tab。
+  组注不出现在宿敌卡或宿敌 dialog，只在 `/league` 的小组 tab。
 
 ## PWA shell
 
@@ -186,8 +191,9 @@ PYTHONPATH=. pytest -q tests/test_api.py
 PYTHONPATH=. pytest -q tests/test_pwa.py tests/test_pwa_design.py tests/test_pwa_next.py
 ```
 
-前端单测覆盖：首页有/无宿敌、首页仅日注状态与日注 dialog、宿敌页保留周注、真实更新时间、
-下拉刷新、周注/日注目标档位、自付 0/500 与总返、15 人小组前 4/后 4 晋升/下降标识、组注三盘口
+前端单测覆盖：首页有/无宿敌、首页仅日注状态与日注 dialog、宿敌页今日 XP 比分与
+周注/日注独立注面、真实更新时间、下拉刷新、周注/日注目标档位、自付 0/500 与总返、
+15 人小组前 4/后 4 晋升/下降标识、组注三盘口
 独立显示与 `market` payload、小组/好友切换和空态、动态 tab、作者/榜单/对比卡头像资料、
 本周对比与关注后好友榜更新、历史盘口简称与六类筛选、物品四类、商店商品分类、边框/称号/
 背景/徽章装备与卸下、同槽位换装、无槽位物品不显示装备按钮、我的段位迷雾、钻石/连胜、
