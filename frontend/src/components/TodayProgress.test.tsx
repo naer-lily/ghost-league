@@ -34,9 +34,8 @@ describe('TodayProgress', () => {
     expect(screen.getByText('129')).toBeVisible()
     expect(screen.getByText('12')).toBeVisible()
     expect(screen.queryByTestId('today-current-tier')).not.toBeInTheDocument()
-    expect(screen.getByTestId('today-remaining')).toHaveTextContent(
-      '还差 171 XP',
-    )
+    expect(screen.queryByTestId('today-remaining')).not.toBeInTheDocument()
+    expect(screen.queryByText(/还差/)).not.toBeInTheDocument()
 
     const tiers = screen.getAllByTestId('today-tier')
     expect(tiers).toHaveLength(6)
@@ -65,7 +64,7 @@ describe('TodayProgress', () => {
     expect(bar).toHaveAttribute('aria-valuemin', '0')
     expect(bar).toHaveAttribute('aria-valuemax', '2400')
     expect(bar).toHaveAttribute('aria-valuenow', '129')
-    expect(bar).toHaveAttribute('aria-valuetext', '129 XP，还差 171 XP')
+    expect(bar).toHaveAttribute('aria-valuetext', '129 XP')
     expect(bar).toHaveAttribute('data-progress', '0.1908')
     expect(screen.getByTestId('today-progress-fill')).toBeInTheDocument()
     expect(document.querySelectorAll('[class*="card"]')).toHaveLength(0)
@@ -81,7 +80,7 @@ describe('TodayProgress', () => {
     renderProgress({ updatedAt: STALE })
 
     expect(screen.queryByTestId('recent-update')).not.toBeInTheDocument()
-    expect(screen.getByText('还差 171 XP')).toBeVisible()
+    expect(screen.queryByText(/还差/)).not.toBeInTheDocument()
   })
 
   it('never fakes freshness when the API has no activity timestamp', () => {
@@ -124,9 +123,7 @@ describe('TodayProgress', () => {
   it('starts at tier one with zero progress', () => {
     renderProgress({ todayXp: 0, todaySeconds: 0 })
 
-    expect(screen.getByTestId('today-remaining')).toHaveTextContent(
-      '还差 100 XP',
-    )
+    expect(screen.queryByTestId('today-remaining')).not.toBeInTheDocument()
     const bar = screen.getByRole('progressbar', { name: '今日 XP 目标' })
     expect(bar).toHaveAttribute('aria-valuenow', '0')
     expect(bar).toHaveAttribute('data-progress', '0.0000')
@@ -139,11 +136,10 @@ describe('TodayProgress', () => {
   it('shows an all-complete state without inventing another tier', () => {
     renderProgress({ todayXp: 2500, todaySeconds: 15_000 })
 
-    expect(screen.getByTestId('today-remaining')).toHaveTextContent(
-      '六档全部达成',
-    )
+    expect(screen.queryByTestId('today-remaining')).not.toBeInTheDocument()
     const bar = screen.getByRole('progressbar', { name: '今日 XP 目标' })
     expect(bar).toHaveAttribute('aria-valuenow', '2400')
+    expect(bar).toHaveAttribute('aria-valuetext', '2500 XP')
     expect(bar).toHaveAttribute('data-progress', '1.0000')
     expect(
       screen

@@ -141,9 +141,7 @@ export function buildTodayProgress(
     : Math.max(0, currentTier.xp - todayXp)
   const nextTier = allComplete ? null : currentTier
 
-  const valueText = allComplete
-    ? `${todayXp} XP，六档目标全部达成`
-    : `${todayXp} XP，还差 ${remainingXp} XP`
+  const valueText = `${todayXp} XP`
 
   return {
     todayXp,

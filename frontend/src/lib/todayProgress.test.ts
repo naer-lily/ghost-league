@@ -53,7 +53,7 @@ describe('buildTodayProgress', () => {
     ])
     expect(view.progress).toBeCloseTo((1 + 29 / 200) / 6, 10)
     expect(view.percent).toBe(19)
-    expect(view.valueText).toBe('129 XP，还差 171 XP')
+    expect(view.valueText).toBe('129 XP')
     expect(view.updateLabel).toBe('5 分钟前更新')
   })
 
@@ -99,7 +99,7 @@ describe('buildTodayProgress', () => {
     expect(view.remainingXp).toBe(0)
     expect(view.progress).toBe(1)
     expect(view.tiers.every((tier) => tier.state === 'complete')).toBe(true)
-    expect(view.valueText).toBe('2500 XP，六档目标全部达成')
+    expect(view.valueText).toBe('2500 XP')
   })
 
   it('derives minutes by flooring today_seconds and clamps bad values', () => {

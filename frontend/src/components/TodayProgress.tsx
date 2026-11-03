@@ -183,18 +183,6 @@ export function TodayProgress({
           ))}
         </ol>
       </div>
-
-      <div className={styles.footer}>
-        <span
-          className={styles.remaining}
-          data-testid="today-remaining"
-          data-complete={view.allComplete ? 'true' : undefined}
-        >
-          {view.allComplete
-            ? '六档全部达成'
-            : `还差 ${view.remainingXp} XP`}
-        </span>
-      </div>
     </section>
   )
 }
