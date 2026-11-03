@@ -39,10 +39,11 @@ The intended chain is:
 
 ```text
 drawing session -> real seconds -> XP -> tier and weekly standing
-drawing session -> diamond rewards -> stars and other sinks -> visible collection
+drawing session -> XP and rank -> rival / group / bet settlement -> diamonds
+diamonds -> stars and other sinks -> visible collection
 ```
 
-Competition, bets, and boosts are supporting mechanics around that chain. They are not the chain itself.
+Competition, bets, and boosts are supporting mechanics around that chain. They are not a separate source of diamonds. A bet is a claim on an XP or rank outcome, not a diamond-only slot.
 
 A player should be able to answer "why do I want more diamonds?" with a concrete use: a star for the wall, an ember to protect a streak, or a boost before a planned drawing session. "The number went up" alone is not a durable motivation.
 
@@ -56,8 +57,8 @@ A player should be able to answer "why do I want more diamonds?" with a concrete
 Signals that a mechanic is misaligned:
 
 - The player checks bets more often than the drawing canvas.
-- The main way to earn diamonds is unrelated to drawing effort.
 - A boost mainly increases casino activity rather than drawing activity.
+- A payout can be won with no drawing output at all.
 - The player wants diamonds only because the counter rose.
 
 ## Betting and leverage
@@ -65,16 +66,16 @@ Signals that a mechanic is misaligned:
 - Betting and leverage are optional, bounded, and small relative to the core loop.
 - No real money, no debt, and no loss-chasing.
 - The intended function is a commitment device: stake something on your own planned drawing output, then show up to earn it back.
+- Settlement is not a house game. Every rival bet is judged on the XP gap, every group bet on the group's XP ranking, and the opponent has no separate diamond income. The free stake is a participation subsidy, not a second faucet.
 - A boost should make a planned drawing window more valuable. It should not turn the game into a self-contained money loop.
 
 ## Diamond sources and sinks
 
-Current and intended sources should remain legible:
+Diamonds enter through the settlement of XP and rank outcomes, not through a separate casino:
 
-- real drawing output and XP-linked milestones;
-- rival and group competition bonuses;
-- bounded bet payouts;
-- initial wallet balance for new players.
+- rival and group settlement payouts, which are derived from real XP and rank;
+- initial wallet balance for new players;
+- free stake on each bet, as a bounded subsidy.
 
 Current and intended sinks:
 
@@ -84,7 +85,7 @@ Current and intended sinks:
 - time-boxed boosts;
 - bets.
 
-Competition and bets may add upside, but they should not become the main faucet. If the main faucet is disconnected from drawing, the economy stops expressing the player's effort.
+A diamond payout should always be traceable to an XP or rank result. If a payout can be won without any drawing output, that is a settlement bug or an open rule, not a second economy.
 
 ## Balance tuning
 
@@ -110,7 +111,7 @@ Useful telemetry:
 
 ## Open items
 
-- The primary diamond faucet should be tied more directly to real drawing output; the exact conversion and cadence are still open.
+- Define the no-output rule for group settlements: if the whole group has zero XP, no group bet should pay out.
 - Stars need a real display path, not only an inventory grid.
 - The boost should be evaluated against drawing behavior, not only against bet volume.
 - The economy should be tuned only after the small loop has real usage data.
