@@ -111,7 +111,6 @@ Useful telemetry:
 
 ## Open items
 
-- Define the no-output rule for group settlements: if the whole group has zero XP, no group bet should pay out.
 - Stars need a real display path, not only an inventory grid.
 - The boost should be evaluated against drawing behavior, not only against bet volume.
 - The economy should be tuned only after the small loop has real usage data.
