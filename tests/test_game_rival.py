@@ -9,7 +9,7 @@ from ghost_league.game.rival import (
     RivalNotFound,
     RivalSelectionRejected,
     RivalWindowClosed,
-    projected_today_xp,
+    projected_daily_xp,
 )
 from ghost_league.game.store import GameStore
 from ghost_league.schedule import TZ
@@ -330,7 +330,7 @@ def test_settle_rivals_rewards_once_per_outcome(tmp_path: Path) -> None:
     assert state["result"]["reward_diamonds"] == 120
 
 
-def test_projection_uses_settled_percentile_and_daily_ratio(
+def test_projection_uses_settled_percentile_and_stable_daily_spread(
     tmp_path: Path,
 ) -> None:
     store = make_store(tmp_path)
@@ -360,9 +360,9 @@ def test_projection_uses_settled_percentile_and_daily_ratio(
     assert state["bets"]["group"] is None
     assert state["projection"] == {
         "rival_week_estimate": 300,
-        "rival_today_estimate": 100,
+        "rival_today_estimate": 40,
         "weekly_target_max": 600,
-        "daily_target_max": 200,
+        "daily_target_max": 80,
     }
     weekly_options = state["bet_options"]["weekly"]
     daily_options = state["bet_options"]["daily"]
@@ -374,7 +374,7 @@ def test_projection_uses_settled_percentile_and_daily_ratio(
         "odds": 1.2,
     }
     assert weekly_options["target_options"][-1]["margin"] == 600
-    assert daily_options["target_options"][-1]["margin"] == 200
+    assert daily_options["target_options"][-1]["margin"] == 80
 
 
 def test_projection_falls_back_without_settled_week(tmp_path: Path) -> None:
@@ -390,15 +390,63 @@ def test_projection_falls_back_without_settled_week(tmp_path: Path) -> None:
     state = store.rival_state("h1", now=MONDAY)
     assert state["projection"] == {
         "rival_week_estimate": 100,
-        "rival_today_estimate": 0,
+        "rival_today_estimate": 10,
         "weekly_target_max": 200,
         "daily_target_max": 50,
     }
 
 
-def test_projected_today_xp_clamps_ratio() -> None:
-    assert projected_today_xp(0, datetime(2026, 11, 2, 0, 5, tzinfo=TZ)) == 0
-    assert projected_today_xp(100, datetime(2026, 11, 2, 11, 0, tzinfo=TZ)) == 200
-    assert projected_today_xp(100, datetime(2026, 11, 2, 0, 5, tzinfo=TZ)) == 500
-    assert projected_today_xp(100, datetime(2026, 11, 2, 22, 30, tzinfo=TZ)) == 100
-    assert projected_today_xp(100, datetime(2026, 11, 2, 23, 0, tzinfo=TZ)) == 100
+def test_projected_daily_xp_spreads_weekly_estimate() -> None:
+    assert projected_daily_xp(0) == 0
+    assert projected_daily_xp(100) == 10
+    assert projected_daily_xp(300) == 40
+    assert projected_daily_xp(700) == 100
+    assert projected_daily_xp(3400) == 490
+
+
+def test_daily_lines_do_not_drift_with_live_xp(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    add_player(store, "h1", power=500)
+    add_player(store, "rival", power=1000)
+    store.create_group(WEEK, tier="Bronze", player_ids=["h1"], now=MONDAY)
+    store.create_group(WEEK, tier="Bronze", player_ids=["rival"], now=MONDAY)
+    set_week_xp(store, "h1", 100)
+    set_week_xp(store, "rival", 100)
+    store.select_rival("h1", "rival", now=MONDAY, request_id="stable-daily")
+    store.ensure_week(PREVIOUS_WEEK, status="settled")
+    for index, xp in enumerate((100, 200, 300, 400, 500), start=1):
+        set_week_xp(store, f"past-{index}", xp, week=PREVIOUS_WEEK)
+
+    morning = datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ)
+    evening = datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ)
+    store.ingest_activity(
+        "rival",
+        event_id="rival-morning",
+        seconds=600,
+        occurred_at=morning,
+        source="local_increment",
+        now=morning,
+    )
+    morning_state = store.rival_state("h1", now=morning)
+    store.ingest_activity(
+        "rival",
+        event_id="rival-evening",
+        seconds=1800,
+        occurred_at=evening,
+        source="local_increment",
+        now=evening,
+    )
+    evening_state = store.rival_state("h1", now=evening)
+
+    assert evening_state["rival"]["today_xp"] > morning_state["rival"]["today_xp"]
+    assert evening_state["projection"] == morning_state["projection"]
+    morning_daily = morning_state["bet_options"]["daily"]
+    evening_daily = evening_state["bet_options"]["daily"]
+    assert evening_daily == morning_daily
+    assert [
+        (entry["margin"], entry["odds"])
+        for entry in evening_daily["target_options"]
+    ] == [
+        (entry["margin"], entry["odds"])
+        for entry in morning_daily["target_options"]
+    ]

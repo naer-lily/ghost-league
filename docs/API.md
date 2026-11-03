@@ -1018,7 +1018,8 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 `invalid_target`（`422`）。
 
 - 周注上界：`max(100, round_to_50(rival_week_estimate * 2))`。
-- 日注上界：`max(50, round_to_10(rival_today_estimate * 2))`。
+- 日注上界：`max(50, round_to_10(rival_today_estimate * 2))`，其中
+  `rival_today_estimate` 由稳定的周估算按 7 天摊平得到，不读取当天实时 XP。
 - 动态锚点由双方战力和宿敌估计共同决定；周注/日注使用同一套逻辑：
 
 ```text
@@ -1152,17 +1153,18 @@ odds = round(odds, 2)
 ```json
 {
   "rival_week_estimate": 3400,
-  "rival_today_estimate": 100,
+  "rival_today_estimate": 490,
   "weekly_target_max": 6800,
-  "daily_target_max": 200
+  "daily_target_max": 980
 }
 ```
 
 周估计：用宿敌 `power / 2000` 作百分位，取最近一个 `weeks.status='settled'` 周的
 `weekly_scores.xp` 分位值，四舍五入到百位；没有已结算周时退化到宿敌本周 XP。
-日估计：用当前 `today_xp / 已过比例` 外推到当天 `22:30`，比例最低按 `20%` 计算，
-四舍五入到十位；当天没有 XP 时估计为 `0`。`weekly_target_max` / `daily_target_max`
-就是上面的动态目标上界。
+日估计：把稳定的 `rival_week_estimate` 按 7 天摊平（`week_estimate / 7`），
+四舍五入到十位；不读取当天实时 XP，因此同一天 `09:00` 与 `21:00` 的
+`projection`、`target_options` 和赔率完全一致（前提是周估算不变）。
+`weekly_target_max` / `daily_target_max` 就是上面的动态目标上界。
 
 ### `GET /v1/me/rival/candidates`
 

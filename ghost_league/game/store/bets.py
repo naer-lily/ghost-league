@@ -599,7 +599,7 @@ class BetsMixin:
                 conn, week_iso, rival_id, day_iso
             )
             projection = self._projection_with(  # type: ignore[attr-defined]
-                conn, local_now, rival
+                conn, rival
             )
             assert projection is not None
             week_estimate = int(projection["rival_week_estimate"])

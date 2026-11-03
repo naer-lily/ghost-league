@@ -27,7 +27,7 @@ from ..rival import (
     daily_bet_locks_at,
     daily_bet_settles_at,
     odds_reference,
-    projected_today_xp,
+    projected_daily_xp,
     projected_week_xp,
     rival_outcome,
     rival_reward,
@@ -228,13 +228,14 @@ class RivalMixin:
     @staticmethod
     def _projection_with(
         conn: sqlite3.Connection,
-        local_now: datetime,
         rival: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
         """Estimate the lines shown on the betting screen.
 
-        These values are display-only.  Settlement keeps using the actual
-        final XP, never this projection.
+        These values are display-only.  The daily line spreads the stable
+        weekly estimate over seven days instead of reading the rival's live
+        XP, so the same day always quotes the same targets and odds.  Settlement
+        keeps using the actual final XP, never this projection.
         """
 
         if rival is None:
@@ -258,9 +259,7 @@ class RivalMixin:
             settled_xps,
             int(rival["week_xp"]),
         )
-        today_estimate = projected_today_xp(
-            int(rival["today_xp"]), local_now
-        )
+        today_estimate = projected_daily_xp(week_estimate)
         return {
             "rival_week_estimate": week_estimate,
             "rival_today_estimate": today_estimate,
@@ -413,7 +412,7 @@ class RivalMixin:
                 "ORDER BY week_start DESC LIMIT 1",
                 (player_id,),
             ).fetchone()
-            projection = self._projection_with(conn, local_now, rival)
+            projection = self._projection_with(conn, rival)
 
         locked = bool(assignment and assignment["locked_at"])
         selection_open = selection_window_open(local_now, week_date) and not locked

@@ -529,21 +529,21 @@ def test_daily_settlement_ignores_activity_after_2230(tmp_path: Path) -> None:
         store,
         "h1",
         event_id="h1-before",
-        seconds=1200,
+        seconds=600,
         occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     add_activity(
         store,
         "h2",
         event_id="h2-before",
-        seconds=600,
+        seconds=1200,
         occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     store.place_bet(
         "h1",
         "daily",
         paid_stake=0,
-        target_margin=300,
+        target_margin=50,
         now=MONDAY,
         request_id="daily-cutoff",
     )
@@ -562,7 +562,7 @@ def test_daily_settlement_ignores_activity_after_2230(tmp_path: Path) -> None:
         "2026-11-02", now=datetime(2026, 11, 2, 23, 30, 0, tzinfo=TZ)
     )
     assert settled["results"][0]["status"] == "lost"
-    assert settled["results"][0]["result_diff"] == 100
+    assert settled["results"][0]["result_diff"] == -100
     assert settled["results"][0]["payout"] == 0
     assert (
         store.get_diamond_balance(

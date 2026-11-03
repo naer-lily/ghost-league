@@ -17,6 +17,7 @@ CHANNEL = "rival-channel"
 NOW = datetime(2026, 11, 2, 8, 0, 0, tzinfo=TZ)
 TUESDAY = datetime(2026, 11, 3, 0, 0, 0, tzinfo=TZ)
 WEEK_START = "2026-11-02"
+PREVIOUS_WEEK = "2026-10-26"
 
 
 def auth(token: str = TOKEN) -> dict[str, str]:
@@ -208,6 +209,62 @@ class RivalStateAPITests(RivalAPITestBase):
         ).json()
         self.assertEqual(sorted_payload["candidates"][0]["user_id"], ai_ids[1])
         self.assertEqual(sorted_payload["candidates"][0]["power"], 600)
+
+    def test_daily_target_options_do_not_drift_during_the_day(self) -> None:
+        client = self.client()
+        selected = self.select_first(client)
+        rival_id = selected["rival"]["user_id"]
+        store = self.store(client)
+        with store.transaction() as conn:
+            conn.execute("UPDATE players SET power = 500 WHERE id = 'owner'")
+            conn.execute(
+                "UPDATE players SET power = 1000 WHERE id = ?", (rival_id,)
+            )
+        store.ensure_week(PREVIOUS_WEEK, status="settled")
+        with store.transaction() as conn:
+            for index, xp in enumerate((100, 200, 300, 400, 500), start=1):
+                conn.execute(
+                    "INSERT INTO weekly_scores "
+                    "(week_start, player_id, seconds, xp) VALUES (?, ?, ?, ?)",
+                    (PREVIOUS_WEEK, f"past-{index}", xp * 6, xp),
+                )
+
+        morning = datetime(2026, 11, 2, 9, 0, 0, tzinfo=TZ)
+        evening = datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ)
+        self.clock["now"] = morning
+        store.ingest_activity(
+            rival_id,
+            event_id="api-rival-morning",
+            seconds=600,
+            occurred_at=morning,
+            source="local_increment",
+            now=morning,
+        )
+        morning_payload = client.get("/v1/me/rival", headers=auth()).json()
+        self.clock["now"] = evening
+        store.ingest_activity(
+            rival_id,
+            event_id="api-rival-evening",
+            seconds=1800,
+            occurred_at=evening,
+            source="local_increment",
+            now=evening,
+        )
+        evening_payload = client.get("/v1/me/rival", headers=auth()).json()
+
+        self.assertEqual(
+            morning_payload["projection"]["rival_today_estimate"], 40
+        )
+        self.assertGreater(
+            len(morning_payload["bet_options"]["daily"]["target_options"]), 2
+        )
+        self.assertEqual(
+            evening_payload["projection"], morning_payload["projection"]
+        )
+        self.assertEqual(
+            evening_payload["bet_options"]["daily"],
+            morning_payload["bet_options"]["daily"],
+        )
 
 
 class RivalSelectionAPITests(RivalAPITestBase):

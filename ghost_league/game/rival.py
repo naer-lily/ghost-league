@@ -83,12 +83,6 @@ ODDS_EXPONENT: Final = 1.4
 # settlement always uses the real weekly/daily XP.
 PROJECTION_POWER_SCALE: Final = 2000
 PROJECTION_WEEK_STEP: Final = 100
-PROJECTION_DAY_STEP: Final = 10
-# Extrapolate to the 22:30 daily settlement cutoff, expressed in hours.
-PROJECTION_DAY_WINDOW_HOURS: Final = (
-    DAILY_BET_SETTLE_TIME.hour + DAILY_BET_SETTLE_TIME.minute / 60
-)
-PROJECTION_MIN_DAY_RATIO: Final = 0.2
 
 RIVAL_WIN_REWARD: Final = 120
 RIVAL_DRAW_REWARD: Final = 40
@@ -625,20 +619,15 @@ def projected_week_xp(
     return round_to_step(raw, PROJECTION_WEEK_STEP)
 
 
-def projected_today_xp(today_xp: int, now: datetime) -> int:
-    """Extrapolate today's XP to the 22:30 cutoff, rounded to tens.
+def projected_daily_xp(week_estimate: int) -> int:
+    """Spread a stable weekly estimate over seven days, rounded to tens.
 
-    The elapsed fraction is measured against the 22.5-hour window and clamped
-    to at least 20% so a very early single event does not explode the estimate.
+    The daily line is derived only from the weekly estimate, never from the
+    rival's live XP, so the morning and evening betting screens quote the same
+    target options and odds for the whole day.
     """
 
-    if today_xp <= 0:
-        return 0
-    local_now = cal.as_local(now)
-    elapsed = (local_now - cal.day_start_at(local_now.date())).total_seconds()
-    ratio = elapsed / (PROJECTION_DAY_WINDOW_HOURS * 3600)
-    ratio = max(PROJECTION_MIN_DAY_RATIO, min(1.0, ratio))
-    return round_to_step(today_xp / ratio, PROJECTION_DAY_STEP)
+    return round_to_step(max(0, int(week_estimate)) / 7, DAILY_TARGET_STEP)
 
 
 __all__ = [
@@ -676,9 +665,6 @@ __all__ = [
     "POWER_GAP_SCALE",
     "POWER_RATIO_MAX",
     "POWER_RATIO_MIN",
-    "PROJECTION_DAY_STEP",
-    "PROJECTION_DAY_WINDOW_HOURS",
-    "PROJECTION_MIN_DAY_RATIO",
     "PROJECTION_POWER_SCALE",
     "PROJECTION_WEEK_STEP",
     "RIVAL_DRAW_REWARD",
@@ -710,7 +696,7 @@ __all__ = [
     "percentile_value",
     "power_anchor_factor",
     "power_ratio",
-    "projected_today_xp",
+    "projected_daily_xp",
     "projected_week_xp",
     "rival_outcome",
     "rival_reward",
