@@ -12,6 +12,7 @@ import type {
   GroupMarketOption,
   PlaceBetResult,
   RivalState,
+  UserSummary,
 } from '../api/types'
 import { formatNumber } from '../lib/home'
 import {
@@ -35,7 +36,7 @@ function response(payload: unknown, status = 200): Response {
   } as Response
 }
 
-const PUBLIC_USER = {
+const PUBLIC_USER: UserSummary = {
   user_id: 'ch-kookouse',
   handle: null,
   display_name: '@kookouse',
@@ -200,6 +201,7 @@ function rivalStateFrom(bets: BetsState): RivalState {
 interface MockOptions {
   bets?: BetsState
   place?: (body: Record<string, unknown>) => PlaceBetResult
+  profile?: UserSummary
   snapshot?: ReturnType<typeof makeSnapshot>
 }
 
@@ -213,7 +215,9 @@ function mockApi(friends: FriendSummary[], options: MockOptions = {}) {
     if (url.includes('/v1/me/friends/standings')) {
       return response({ week_start: '2026-10-26', members: friends })
     }
-    if (url.includes('/v1/users/')) return response(PUBLIC_USER)
+    if (url.includes('/v1/users/')) {
+      return response(options.profile ?? PUBLIC_USER)
+    }
     if (url.includes('/v1/me/bets') && method === 'POST') {
       if (!options.place) return response({ detail: 'not configured' }, 500)
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<
@@ -321,6 +325,7 @@ describe('LeaguePage tabs', () => {
     expect(
       within(sheet).getByRole('heading', { name: '@kookouse' }),
     ).toBeInTheDocument()
+    expect(within(sheet).getByTestId('profile-power')).toHaveTextContent('2,000')
     expect(within(sheet).getByTestId('profile-comparison')).toHaveTextContent(
       '我和他的本周对比',
     )
@@ -332,6 +337,23 @@ describe('LeaguePage tabs', () => {
       ),
     ).not.toBeInTheDocument()
     expect(within(sheet).queryByText('720')).not.toBeInTheDocument()
+  })
+
+  it('shows a dash for a public profile without power', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal(
+      'fetch',
+      mockApi([], { profile: { ...PUBLIC_USER, power: null } }),
+    )
+
+    renderLeague()
+
+    const list = await screen.findByRole('list', { name: '完整小组榜' })
+    const rows = within(list).getAllByRole('listitem')
+    await user.click(within(rows[3]!).getByTestId('standing-avatar'))
+
+    const sheet = await screen.findByTestId('user-profile-sheet')
+    expect(within(sheet).getByTestId('profile-power')).toHaveTextContent('—')
   })
 
   it('shows followed people plus me in the friends board, ranked by XP', async () => {

@@ -151,6 +151,12 @@ export function UserProfileSheet({ userId, onOpenChange }: UserProfileSheetProps
                   <dd data-testid="profile-xp">{formatNumber(data.xp)}</dd>
                 </div>
                 <div>
+                  <dt>战力</dt>
+                  <dd data-testid="profile-power">
+                    {data.power === null ? '—' : formatNumber(data.power)}
+                  </dd>
+                </div>
+                <div>
                   <dt>组内排名</dt>
                   <dd data-testid="profile-rank">
                     {rankLabel(data.rank, data.group_size)}

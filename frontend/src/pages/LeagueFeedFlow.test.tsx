@@ -173,6 +173,7 @@ describe('League feed and public profile', () => {
     await user.click(within(feed).getByTestId('feed-item'))
     const sheet = await screen.findByTestId('user-profile-sheet')
     expect(within(sheet).getByTestId('profile-xp')).toHaveTextContent('900')
+    expect(within(sheet).getByTestId('profile-power')).toHaveTextContent('450')
     expect(within(sheet).getByTestId('profile-rank')).toHaveTextContent(
       '第 4 / 15 名',
     )
