@@ -409,7 +409,7 @@ def test_projection_uses_settled_week_and_daily_distribution(
     assert projection["daily_sd_rival"] == 212.13
     assert projection["daily_mu_diff"] == 0.0
     assert projection["daily_sigma_diff"] == 300.0
-    assert projection["daily_target_margins"] == [150, 300, 450]
+    assert projection["daily_target_margins"] == [1, 150, 300, 450]
 
     weekly_options = state["bet_options"]["weekly"]
     daily_options = state["bet_options"]["daily"]
@@ -421,12 +421,13 @@ def test_projection_uses_settled_week_and_daily_distribution(
         "odds": 1.2,
     }
     assert weekly_options["target_options"][-1]["margin"] == 600
-    assert daily_options["min_target_margin"] == 150
+    assert daily_options["min_target_margin"] == 1
     assert daily_options["max_target_margin"] == 450
     assert [
         entry["margin"] for entry in daily_options["target_options"]
     ] == projection["daily_target_margins"]
     assert [entry["odds"] for entry in daily_options["target_options"]] == [
+        daily_bet_odds(1, 0.0, 300.0),
         daily_bet_odds(150, 0.0, 300.0),
         daily_bet_odds(300, 0.0, 300.0),
         daily_bet_odds(450, 0.0, 300.0),
@@ -439,7 +440,7 @@ def test_projection_uses_settled_week_and_daily_distribution(
     ]
     assert [
         entry["expected_xp"] for entry in daily_options["target_options"]
-    ] == [500, 650, 800]
+    ] == [350, 500, 650, 800]
 
 
 def test_projection_falls_back_without_settled_week(tmp_path: Path) -> None:
@@ -462,7 +463,7 @@ def test_projection_falls_back_without_settled_week(tmp_path: Path) -> None:
     assert projection["daily_sd_rival"] == DAILY_PRIOR_SD_XP
     assert projection["daily_mu_diff"] == 0.0
     assert projection["daily_sigma_diff"] == 212.13
-    assert projection["daily_target_margins"] == [150, 300, 450]
+    assert projection["daily_target_margins"] == [1, 150, 300, 450]
 
 
 def test_daily_history_ignores_today_and_short_players(tmp_path: Path) -> None:
@@ -492,7 +493,7 @@ def test_daily_history_ignores_today_and_short_players(tmp_path: Path) -> None:
     assert projection["daily_mu_rival"] == 200.0
     assert projection["daily_sd_rival"] == 0.0
     assert projection["daily_sigma_diff"] == 0.0
-    assert projection["daily_target_margins"] == [150, 300, 450]
+    assert projection["daily_target_margins"] == [1, 150, 300]
 
 
 def test_power_band_uses_250_width() -> None:
@@ -557,25 +558,62 @@ def test_daily_targets_are_positive_stepped_and_at_least_three() -> None:
         assert 3 <= len(margins) <= 6
         assert margins == sorted(set(margins))
         assert all(margin > 0 for margin in margins)
-        assert all(margin % DAILY_TARGET_STEP == 0 for margin in margins)
+        assert margins[0] == 1
+        assert all(
+            margin == 1 or margin % DAILY_TARGET_STEP == 0
+            for margin in margins
+        )
 
-    # Expected first three tiers for a 350-point expected lead.
-    assert daily_target_margins(850, 100, 500, 100) == [450, 600, 750]
+    # A 350-point expected lead fills every 15-minute tier up to the
+    # quantile ceiling, plus the narrow-win 1 XP tier.
+    assert daily_target_margins(850, 100, 500, 100) == [
+        1,
+        150,
+        300,
+        450,
+        600,
+        750,
+    ]
+
+    # When the quantile ceiling lies above the canonical 15-minute steps, the
+    # ladder keeps the canonical low tiers and the quantile ceiling itself.
+    strong = daily_target_margins(5000, 600, 100, 50)
+    assert strong[:5] == [1, 150, 300, 450, 600]
+    assert strong[-1] > 750
+    assert strong[-1] % DAILY_TARGET_STEP == 0
 
 
 def test_daily_target_options_match_odds_and_stay_monotonic() -> None:
     options = daily_target_options(850, 100, 500, 100)
-    assert [entry["margin"] for entry in options] == [450, 600, 750]
+    assert [entry["margin"] for entry in options] == [
+        1,
+        150,
+        300,
+        450,
+        600,
+        750,
+    ]
     assert [entry["odds"] for entry in options] == [
+        daily_bet_odds(1, 350, 141.42),
+        daily_bet_odds(150, 350, 141.42),
+        daily_bet_odds(300, 350, 141.42),
         daily_bet_odds(450, 350, 141.42),
         daily_bet_odds(600, 350, 141.42),
         daily_bet_odds(750, 350, 141.42),
     ]
     # Expected XP is the rival's daily mean plus the target gap, not my XP.
     assert [entry["expected_xp"] for entry in options] == [
-        round_to_step(500 + margin, 10) for margin in (450, 600, 750)
+        round_to_step(500 + margin, 10)
+        for margin in (1, 150, 300, 450, 600, 750)
     ]
-    assert [entry["expected_xp"] for entry in options] == [950, 1100, 1250]
+    assert [entry["expected_xp"] for entry in options] == [
+        500,
+        650,
+        800,
+        950,
+        1100,
+        1250,
+    ]
     odds = [entry["odds"] for entry in options]
     assert odds == sorted(odds)
     assert odds[0] >= 1.2

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from ghost_league.accounts import AccountsStore
 from ghost_league.api import create_app
+from ghost_league.game.rival import round_to_step
 from ghost_league.schedule import TZ
 
 TOKEN = "rival-token"
@@ -270,7 +271,11 @@ class RivalStateAPITests(RivalAPITestBase):
         self.assertTrue(
             all(
                 isinstance(entry["expected_xp"], int)
-                and entry["expected_xp"] >= entry["margin"]
+                and entry["expected_xp"]
+                == round_to_step(
+                    morning_projection["daily_mu_rival"] + entry["margin"],
+                    10,
+                )
                 for entry in morning_daily["target_options"]
             )
         )
@@ -279,13 +284,18 @@ class RivalStateAPITests(RivalAPITestBase):
         )
         self.assertGreaterEqual(len(daily_margins), 3)
         self.assertLessEqual(len(daily_margins), 6)
-        self.assertGreater(daily_margins[0], 0)
+        self.assertEqual(daily_margins[0], 1)
         self.assertEqual(daily_margins[0], morning_daily["min_target_margin"])
         self.assertEqual(daily_margins[-1], morning_daily["max_target_margin"])
         self.assertEqual(
             daily_margins, sorted(set(daily_margins))
         )
-        self.assertTrue(all(margin % 150 == 0 for margin in daily_margins))
+        self.assertTrue(
+            all(
+                margin == 1 or margin % 150 == 0
+                for margin in daily_margins
+            )
+        )
         self.assertEqual(
             evening_payload["projection"], morning_payload["projection"]
         )

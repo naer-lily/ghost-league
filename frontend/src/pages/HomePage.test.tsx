@@ -242,17 +242,17 @@ describe('HomePage rework', () => {
     expect(
       within(dialog).getByText('押「今天我比宿敌多多少 XP」'),
     ).toBeInTheDocument()
-    expect(within(dialog).getByTestId('rival-target-150')).toBeInTheDocument()
+    expect(within(dialog).getByTestId('rival-target-1')).toBeInTheDocument()
     expect(within(dialog).queryByTestId('rival-target-0')).not.toBeInTheDocument()
-    expect(within(dialog).getByTestId('rival-target-150')).toHaveAttribute(
+    expect(within(dialog).getByTestId('rival-target-1')).toHaveAttribute(
       'aria-pressed',
       'true',
     )
     expect(within(dialog).getByTestId('rival-bet-target')).toHaveTextContent(
-      '+150 XP',
+      '+1 XP',
     )
     expect(within(dialog).getByTestId('rival-bet-odds')).toHaveTextContent(
-      '×2.00',
+      '×1.20',
     )
     expect(
       within(dialog).queryByText(/目标不在服务端档位里/),

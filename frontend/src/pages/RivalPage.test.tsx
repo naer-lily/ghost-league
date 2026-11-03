@@ -94,7 +94,7 @@ function makeState(overrides: Partial<RivalState> = {}): RivalState {
       daily_sd_rival: 150,
       daily_mu_diff: 110.5,
       daily_sigma_diff: 234.5,
-      daily_target_margins: [150, 300, 600],
+      daily_target_margins: [1, 150, 300, 600],
     },
     bet_windows: {
       weekly_locks_at: futureIso(4),
@@ -557,17 +557,23 @@ describe('RivalPage', () => {
     const dialog = await screen.findByTestId('rival-bet-dialog')
     await user.click(within(dialog).getByRole('tab', { name: /日注/ }))
 
+    expect(within(dialog).getByTestId('rival-target-1')).toHaveTextContent(
+      '+1 XP',
+    )
+    expect(within(dialog).getByTestId('rival-target-1')).toHaveTextContent(
+      '预计 510 XP',
+    )
     expect(within(dialog).getByTestId('rival-target-150')).toHaveTextContent(
       '+150 XP',
     )
     expect(within(dialog).getByTestId('rival-target-150')).toHaveTextContent(
-      '预计 650 XP',
+      '预计 660 XP',
     )
     expect(within(dialog).getByTestId('rival-target-300')).toHaveTextContent(
       '赔率 ×3.10',
     )
     expect(within(dialog).getByTestId('rival-target-300')).toHaveTextContent(
-      '预计 800 XP',
+      '预计 810 XP',
     )
     expect(within(dialog).getByTestId('rival-target-600')).toBeInTheDocument()
     expect(within(dialog).queryByTestId('rival-target-0')).toBeNull()
@@ -581,7 +587,7 @@ describe('RivalPage', () => {
       '+300 XP',
     )
     expect(within(dialog).getByTestId('rival-bet-expected')).toHaveTextContent(
-      '800 XP',
+      '810 XP',
     )
     expect(within(dialog).getByTestId('rival-bet-odds')).toHaveTextContent(
       '×3.10',
@@ -599,15 +605,18 @@ describe('RivalPage', () => {
     await user.click(within(dialog).getByRole('tab', { name: /日注/ }))
 
     expect(within(dialog).queryByTestId('rival-target-0')).toBeNull()
-    expect(within(dialog).getByTestId('rival-target-150')).toHaveAttribute(
+    expect(within(dialog).getByTestId('rival-target-1')).toHaveAttribute(
       'aria-pressed',
       'true',
     )
     expect(within(dialog).getByTestId('rival-bet-target')).toHaveTextContent(
-      '+150 XP',
+      '+1 XP',
+    )
+    expect(within(dialog).getByTestId('rival-bet-expected')).toHaveTextContent(
+      '510 XP',
     )
     expect(within(dialog).getByTestId('rival-bet-odds')).toHaveTextContent(
-      '×2.00',
+      '×1.20',
     )
     expect(
       within(dialog).queryByText('目标不在服务端档位里，请从上面的档位里选一个。'),

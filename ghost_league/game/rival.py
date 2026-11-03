@@ -68,6 +68,9 @@ DAILY_BAND_MIN_SAMPLES: Final = 20
 DAILY_PRIOR_MEAN_XP: Final = 0.0
 DAILY_PRIOR_SD_XP: Final = 150.0
 DAILY_TARGET_STEP: Final = 150
+# The narrow-win tier is the smallest positive D, so it is always 1 XP; the
+# remaining tiers stay on whole 15-minute (150 XP) boundaries.
+DAILY_NARROW_WIN_MARGIN: Final = 1
 # ``expected_xp`` is the rival's daily mean plus the target margin, rounded to
 # this step.  It previews the total XP needed to reach a daily tier.
 DAILY_EXPECTED_XP_STEP: Final = 10
@@ -559,14 +562,18 @@ def daily_target_margins(
     *,
     step: int = DAILY_TARGET_STEP,
 ) -> list[int]:
-    """Return the positive daily target ceilings derived from the two normals.
+    """Return the daily target tiers derived from the two normals.
 
-    ``raw = muD + z_q * sigmaD`` for the requested quantiles; only positive
-    values survive, each is rounded up to ``step`` (150 XP), then the tiers are
-    de-duplicated and sorted.  The base ladder is ``0.50..0.90``.  If that
-    yields fewer than three tiers we continue with higher quantiles, and as a
-    final guard extend by whole steps above the last tier.  At most six tiers
-    are returned.
+    The first tier is always ``1``: the narrow-win line, i.e. the smallest
+    positive difference ``D > 0``.  The remaining tiers are whole ``step``
+    (150 XP / 15 minute) multiples starting at ``step``.  The highest tier is
+    still the positive quantile ceiling from ``muD + z_q * sigmaD`` rounded up
+    to ``step``; the ladder fills in the 15-minute tiers below it.
+
+    The result holds at least three and at most six tiers.  When the quantile
+    ceiling lies above the first four canonical steps (150/300/450/600), the
+    ladder keeps those four and adds the ceiling itself, so the result stays
+    within six tiers while the highest tier never drifts from the quantile.
     """
 
     if step <= 0:
@@ -575,31 +582,43 @@ def daily_target_margins(
         mu_me, sd_me, mu_rival, sd_rival
     )
     normal = NormalDist()
-    margins: list[int] = []
+    ceilings: list[int] = []
 
     def add_raw(raw: float) -> None:
         if raw <= 0:
             return
-        margin = round_up_to_step(raw, step)
-        if margin > 0 and margin not in margins:
-            margins.append(margin)
+        ceiling = round_up_to_step(raw, step)
+        if ceiling > 0 and ceiling not in ceilings:
+            ceilings.append(ceiling)
 
     for quantile in _daily_quantile_ladder():
-        if len(margins) >= DAILY_TARGET_MAX_OPTIONS:
+        if len(ceilings) >= DAILY_TARGET_MAX_OPTIONS:
             break
         add_raw(mu_diff + normal.inv_cdf(quantile) * sigma_diff)
         if (
             quantile >= DAILY_TARGET_QUANTILES[-1]
-            and len(margins) >= DAILY_TARGET_MIN_OPTIONS
+            and len(ceilings) >= DAILY_TARGET_MIN_OPTIONS
         ):
             break
 
-    # Degenerate spread (sigmaD == 0) or a very small sigma can keep every
-    # quantile in one bucket.  Keep the ladder honest by adding further
-    # positive steps until the minimum number of tiers exists.
-    while len(margins) < DAILY_TARGET_MIN_OPTIONS:
+    top = max(ceilings) if ceilings else 0
+    # One slot is reserved for the narrow-win tier, and one for the quantile
+    # ceiling when it lies above the canonical 15-minute steps.
+    canonical_steps = DAILY_TARGET_MAX_OPTIONS - 2
+    canonical_top = step * canonical_steps
+    margins = list(
+        range(step, min(top, canonical_top) + step, step)
+    )
+    if top > canonical_top:
+        margins.append(top)
+
+    # Degenerate spread (sigmaD == 0) or a very small sigma can leave too few
+    # positive ceilings.  Extend by whole steps until the minimum tier count
+    # exists; the narrow-win tier is added on top.
+    while len(margins) < DAILY_TARGET_MIN_OPTIONS - 1:
         margins.append(margins[-1] + step if margins else step)
-    return sorted(margins)[:DAILY_TARGET_MAX_OPTIONS]
+
+    return [DAILY_NARROW_WIN_MARGIN] + margins
 
 
 def daily_expected_xp(mu_rival: float, margin: int) -> int:
@@ -886,6 +905,7 @@ __all__ = [
     "DAILY_HISTORY_DAYS",
     "DAILY_EXPECTED_XP_STEP",
     "DAILY_MIN_HISTORY_DAYS",
+    "DAILY_NARROW_WIN_MARGIN",
     "DAILY_ODDS_MAX",
     "DAILY_ODDS_MIN",
     "DAILY_PRIOR_MEAN_XP",

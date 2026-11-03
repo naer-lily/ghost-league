@@ -1039,11 +1039,16 @@ anchor = clamp(0, upper_bound, round_to_step(upper_bound * 0.5 * power_factor))
 σD = sqrt(σ我² + σ他²)
 ```
 
-  分位点先取 `q = 0.50, 0.60, 0.70, 0.80, 0.90`；只保留
-  `raw = μD + z_q * σD > 0` 的值，按 150 XP 向上取整，去重升序。档位不足 3 个时
-  继续取 `0.95` 及更高分位；最多 6 个，最少 3 个。日注不返回 `0` 档，所有档位都是
-  “我比他多”的正差值。同一份历史、同一天内，档位和赔率固定；今天的 checkins
-  不参与计算。
+  第一档固定为 `1 XP`：险胜档，即 `D > 0` 的最小差值。其余档位只落在整
+  15 分钟（150 XP）边界上：`150 / 300 / 450 / 600 / …`，不会出现 `151`、`301`
+  这类尾数。分位点先取 `q = 0.50, 0.60, 0.70, 0.80, 0.90`；只保留
+  `raw = μD + z_q * σD > 0` 的值，按 150 XP 向上取整，去重升序。最高档仍由这些
+  分位点的最大正 ceiling 决定：默认从 150 开始按 150 递增补齐到该 ceiling；若
+  ceiling 高于 `600`（第 4 个 15 分钟档），则保留 `150 / 300 / 450 / 600` 和该
+  ceiling，避免超过 6 档；档位不足 3 个时补到 `150 / 300`。最多 6 个，最少 3 个
+  （含 `1 XP` 险胜档）。日注不返回 `0` 档，所有档位都是“我比他多”的正差值。
+  同一份历史、同一天内，档位和赔率固定；
+  今天的 checkins 不参与计算。
 
 - 每个选项同时返回锁注赔率，供 UI 预览：
 
@@ -1164,7 +1169,7 @@ odds = round(odds, 2)
   `target_options`（每项 `margin` + 锁注赔率 `odds`；日注还带 `expected_xp`）、
   `min_target_margin`、`max_target_margin`、`min_paid_stake`、`max_paid_stake`、
   `free_stake` 和
-  `reference`；日注的 `min_target_margin` 就是第一个正档位，`reference` 是
+  `reference`；日注的 `min_target_margin` 就是第一档 `1`（险胜），`reference` 是
   `μD` 的整数近似（赔率不再使用它）。日注的 `expected_xp` 是
   `round_to_10(daily_mu_rival + margin)`，即“预计宿敌日均 + 目标差值”，不是
   我的当前 XP 或实时估算；周注不返回该字段。组注对象保留旧的 `target_rank: 3`、
@@ -1184,7 +1189,7 @@ odds = round(odds, 2)
   "daily_sd_rival": 150.0,
   "daily_mu_diff": 110.5,
   "daily_sigma_diff": 234.5,
-  "daily_target_margins": [150, 300, 600]
+  "daily_target_margins": [1, 150, 300, 450]
 }
 ```
 
@@ -1194,7 +1199,8 @@ odds = round(odds, 2)
 
 日估计：`daily_mu_*` / `daily_sd_*` 是按上面“目标差值与赔率”的战力分段历史分布
 算出的双方均值与样本标准差；`daily_mu_diff` / `daily_sigma_diff` 是差值的 μD/σD；
-`daily_target_margins` 是当天实际可下的正档位。每个档位的 `expected_xp` 由
+`daily_target_margins` 是当天实际可下的正档位，固定以 `1` 开头，其余为 150 的倍数。
+每个档位的 `expected_xp` 由
 `daily_mu_rival + margin` 四舍五入到 10 得到，表示达到该档位预计需要的总 XP。
 只读今天之前的 checkins，且不读
 当天实时 XP，因此同一天 `09:00` 与 `21:00` 的 `projection`、`target_options`（含
@@ -1337,11 +1343,12 @@ odds = round(odds, 2)
 日注：
 
 ```json
-{"kind": "daily", "target_margin": 150, "paid_stake": 80, "request_id": "daily-20261102"}
+{"kind": "daily", "target_margin": 1, "paid_stake": 80, "request_id": "daily-20261102"}
 ```
 
 - `target_margin` 是“我当天 `22:30` 的打卡 XP 比宿敌高多少”，只能选当天
-  `projection.daily_target_margins` 中的正档位；赔率随档位和 `σD` 固定不变。
+  `projection.daily_target_margins` 中的正档位；第一档 `1` 是险胜档，也是前端默认
+  选中的档位；其余档位都是 150 的倍数。赔率随档位和 `σD` 固定不变。
 - 判定与周注一致；结算使用当天 `22:30` 的打卡 XP，不使用之后的最终日 XP。
 - 当天 `21:00` 前可下，`21:00` 锁注，`22:30` 结算。
 

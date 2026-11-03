@@ -172,7 +172,11 @@ def test_daily_target_options_are_positive_and_stepped() -> None:
     assert 3 <= len(margins) <= 6
     assert margins == sorted(set(margins))
     assert all(margin > 0 for margin in margins)
-    assert all(margin % DAILY_TARGET_STEP == 0 for margin in margins)
+    assert margins[0] == 1
+    assert all(
+        margin == 1 or margin % DAILY_TARGET_STEP == 0
+        for margin in margins
+    )
     assert margins == daily_target_margins(850, 100, 500, 100)
     assert all(entry["odds"] >= 1.2 for entry in options)
     assert [entry["odds"] for entry in options] == sorted(

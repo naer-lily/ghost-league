@@ -78,11 +78,12 @@ export function makeBetOptions(
     },
     daily: {
       target_options: [
-        { margin: 150, odds: 2, expected_xp: 650 },
-        { margin: 300, odds: 3.1, expected_xp: 800 },
-        { margin: 600, odds: 5, expected_xp: 1100 },
+        { margin: 1, odds: 1.2, expected_xp: 510 },
+        { margin: 150, odds: 2, expected_xp: 660 },
+        { margin: 300, odds: 3.1, expected_xp: 810 },
+        { margin: 600, odds: 5, expected_xp: 1110 },
       ],
-      min_target_margin: 150,
+      min_target_margin: 1,
       max_target_margin: 600,
       min_paid_stake: 0,
       max_paid_stake: 500,
