@@ -537,19 +537,17 @@ describe('InventoryPage', () => {
     expect(await screen.findByText('还没有其他物品')).toBeInTheDocument()
   })
 
-  it('disables a draw when diamonds are short and shows the exact gap', async () => {
+  it('disables a draw when diamonds are short', async () => {
     mockApi({ status: { diamonds: 200 } })
     renderInventory()
 
     const starItem = await screen.findByTestId('shop-item-star')
     expect(within(starItem).getByRole('button', { name: '抽取一颗' })).toBeDisabled()
-    expect(starItem).toHaveTextContent('还差 100 钻石')
 
     const seasonalItem = screen.getByTestId('shop-item-seasonal_star')
     expect(
       within(seasonalItem).getByRole('button', { name: '抽取季节星' }),
     ).toBeDisabled()
-    expect(seasonalItem).toHaveTextContent('还差 300 钻石')
   })
 
   it('posts one purchase with a request id and reveals the real star', async () => {

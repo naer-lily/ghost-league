@@ -224,9 +224,6 @@ function DrawEntry({
       >
         {label}
       </button>
-      {shortfall > 0 && !unavailable ? (
-        <p className={styles.shortfall}>还差 {formatNumber(shortfall)} 钻石</p>
-      ) : null}
     </article>
   )
 }
@@ -329,9 +326,6 @@ function ProductCard({
       >
         {label}
       </button>
-      {shortfall > 0 && !unavailable ? (
-        <p className={styles.shortfall}>还差 {formatNumber(shortfall)} 钻石</p>
-      ) : null}
     </article>
   )
 }
