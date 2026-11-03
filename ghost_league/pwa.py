@@ -24,6 +24,18 @@ ACTIVE_WEB_ROOT = Path(_configured_root).expanduser() if _configured_root else W
 
 STATIC_PREFIXES = frozenset({"v1", "avatars", "assets", "icons"})
 
+# The HTML shell points at hashed assets, so it must never be reused from a
+# browser or intermediary cache. Static assets keep their normal caching.
+HTML_CACHE_CONTROL = "no-cache, no-store, must-revalidate"
+
+
+def _html_response(path: Path) -> FileResponse:
+    return FileResponse(
+        path,
+        media_type="text/html",
+        headers={"Cache-Control": HTML_CACHE_CONTROL},
+    )
+
 
 def mount_web(app: FastAPI, web_root: str | Path = WEB_ROOT) -> FastAPI:
     root = Path(web_root).resolve()
@@ -71,16 +83,18 @@ def mount_web(app: FastAPI, web_root: str | Path = WEB_ROOT) -> FastAPI:
         if candidate != root and root not in candidate.parents:
             raise HTTPException(status_code=404, detail="Not Found")
         if candidate.is_file():
+            if candidate.suffix.lower() == ".html":
+                return _html_response(candidate)
             return FileResponse(candidate)
         if candidate.is_dir():
             directory_index = candidate / "index.html"
             if directory_index.is_file():
-                return FileResponse(directory_index, media_type="text/html")
+                return _html_response(directory_index)
 
         prefix = full_path.split("/", 1)[0]
         if prefix in STATIC_PREFIXES or Path(full_path).suffix:
             raise HTTPException(status_code=404, detail="Not Found")
-        return FileResponse(index, media_type="text/html")
+        return _html_response(index)
 
     # Registered last: API routes win, then the SPA fallback and static files.
     app.mount("/", StaticFiles(directory=root, html=True), name="pwa-web")

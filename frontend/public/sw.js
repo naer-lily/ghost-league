@@ -1,5 +1,5 @@
 /* Ghost League PWA shell. API responses and avatars are never cached. */
-const CACHE_VERSION = 'gl-next-v1-2026-11-02'
+const CACHE_VERSION = 'gl-next-v1-2026-11-03-2'
 const CACHE_NAME = `ghost-league-${CACHE_VERSION}`
 const PRECACHE_URLS = [
   '/',

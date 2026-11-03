@@ -32,10 +32,20 @@ createRoot(root).render(
   </StrictMode>,
 )
 
+let reloadingForNewServiceWorker = false
+
 if ('serviceWorker' in navigator) {
+  const hadServiceWorkerController = Boolean(navigator.serviceWorker.controller)
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadServiceWorkerController || reloadingForNewServiceWorker) return
+    reloadingForNewServiceWorker = true
+    window.location.reload()
+  })
+
   window.addEventListener('load', () => {
     void navigator.serviceWorker
-      .register('/sw.js')
+      .register('/sw.js', { updateViaCache: 'none' })
       .then((registration) => registration.update())
       .catch(() => {
         // A failed registration must not block the app shell.

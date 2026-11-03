@@ -517,6 +517,20 @@ class PWAStaticTests(unittest.TestCase):
             self.assertEqual(api.status_code, 200)
             self.assertEqual(api.json(), {"ok": True})
 
+    def test_05b_html_shell_is_never_cached(self) -> None:
+        app = FastAPI()
+        mount_web(app)
+        expected = "no-cache, no-store, must-revalidate"
+        with TestClient(app) as client:
+            for path in ("/", "/rival"):
+                response = client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("text/html", response.headers["content-type"])
+                self.assertEqual(response.headers["cache-control"], expected)
+            static_asset = client.get("/assets/tiers/bronze.png")
+            self.assertEqual(static_asset.status_code, 200)
+            self.assertNotEqual(static_asset.headers.get("cache-control"), expected)
+
     def test_06_launcher_and_service_template(self) -> None:
         launcher = ROOT / "scripts" / "run_pwa.sh"
         unit = ROOT / "deploy" / "ghost-league-web.service"
