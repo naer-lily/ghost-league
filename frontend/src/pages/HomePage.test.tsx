@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
-import type { RivalPlayer, RivalState } from '../api/types'
+import type { Bet, RivalPlayer, RivalState } from '../api/types'
 import { makeBetOptions, makeSnapshot } from '../test/fixtures'
 import { HomePage } from './HomePage'
 
@@ -36,6 +36,27 @@ function player(overrides: Partial<RivalPlayer> = {}): RivalPlayer {
   }
 }
 
+function bet(overrides: Partial<Bet> = {}): Bet {
+  return {
+    id: 1,
+    kind: 'weekly',
+    period_key: '2026-10-26',
+    rival_id: 'ch-rival',
+    stake: 40,
+    free_stake: 20,
+    paid_stake: 20,
+    target_margin: 0,
+    odds: 2,
+    status: 'placed',
+    placed_at: new Date().toISOString(),
+    locked_at: null,
+    settled_at: null,
+    payout: 0,
+    result_diff: null,
+    ...overrides,
+  }
+}
+
 function rivalState(overrides: Partial<RivalState> = {}): RivalState {
   return {
     server_now: new Date().toISOString(),
@@ -57,23 +78,7 @@ function rivalState(overrides: Partial<RivalState> = {}): RivalState {
     }),
     result: null,
     bets: {
-      weekly: {
-        id: 1,
-        kind: 'weekly',
-        period_key: '2026-10-26',
-        rival_id: 'ch-rival',
-        stake: 40,
-        free_stake: 20,
-        paid_stake: 20,
-        target_margin: 0,
-        odds: 2,
-        status: 'placed',
-        placed_at: new Date().toISOString(),
-        locked_at: null,
-        settled_at: null,
-        payout: 0,
-        result_diff: null,
-      },
+      weekly: bet(),
       daily: null,
       group: null,
     },
@@ -191,32 +196,46 @@ describe('HomePage rework', () => {
     vi.unstubAllGlobals()
   })
 
-  it('shows the duel card and drops the home group board and group label', async () => {
+  it('shows the full duel card with weekly and daily surfaces on the home page', async () => {
     vi.stubGlobal('fetch', mockApi())
 
     renderHome()
 
     const card = await screen.findByTestId('rival-duel-card')
+    expect(card).toHaveAttribute('data-variant', 'full')
     expect(card).toHaveTextContent('林间')
     expect(screen.getByTestId('rival-me-xp')).toHaveTextContent('524 XP')
     expect(screen.getByTestId('rival-rival-xp')).toHaveTextContent('760 XP')
     expect(screen.getByTestId('rival-gap')).toHaveTextContent('落后 236 XP')
+
+    const today = within(card).getByTestId('rival-today-score')
+    expect(today).toHaveTextContent('今日 我 129 XP')
+    expect(today).toHaveTextContent('宿敌 120 XP')
+    expect(screen.getByTestId('rival-week-countdown')).toBeVisible()
+    expect(screen.getByTestId('rival-daily-countdown')).toBeVisible()
+
+    expect(screen.getByTestId('rival-bet-status-周注')).toHaveTextContent(
+      '周注 · 已下注',
+    )
+    expect(screen.getByTestId('rival-bet-target-weekly')).toHaveTextContent(
+      '+0 XP',
+    )
+    expect(screen.getByTestId('rival-bet-odds-weekly')).toHaveTextContent(
+      '×2.00',
+    )
     expect(screen.getByTestId('rival-bet-status-日注')).toHaveTextContent(
       '日注 · 未下注',
     )
+    expect(screen.getByRole('button', { name: '下注日注' })).toBeVisible()
     expect(
-      screen.queryByTestId('rival-bet-status-周注'),
+      screen.queryByRole('button', { name: '下注周注' }),
     ).not.toBeInTheDocument()
-    expect(screen.queryByTestId('rival-week-countdown')).not.toBeInTheDocument()
-    expect(screen.getByTestId('rival-daily-countdown')).toBeVisible()
-    expect(card).not.toHaveTextContent('周注')
-    expect(screen.getByRole('button', { name: '下注' })).toBeVisible()
+    expect(card).toHaveTextContent('战力')
     expect(
       screen.queryByTestId('rival-bet-status-组注'),
     ).not.toBeInTheDocument()
     expect(card).not.toHaveTextContent('组注')
     expect(card).not.toHaveTextContent('今日 +')
-    expect(card).not.toHaveTextContent('战力')
 
     expect(screen.queryByText('小组榜')).not.toBeInTheDocument()
     expect(screen.queryByText(/G01|我的组|组号/)).not.toBeInTheDocument()
@@ -226,13 +245,13 @@ describe('HomePage rework', () => {
     expect(screen.queryByTestId('today-current-tier')).not.toBeInTheDocument()
   })
 
-  it('opens a daily-only bet dialog from the home button', async () => {
+  it('opens a daily-only bet dialog from the daily surface', async () => {
     const user = userEvent.setup()
     vi.stubGlobal('fetch', mockApi())
 
     renderHome()
 
-    await user.click(await screen.findByRole('button', { name: '下注' }))
+    await user.click(await screen.findByRole('button', { name: '下注日注' }))
     const dialog = await screen.findByTestId('rival-bet-dialog')
     expect(within(dialog).queryByRole('tab')).not.toBeInTheDocument()
     expect(within(dialog).getByRole('tabpanel')).toHaveAttribute(
@@ -266,6 +285,78 @@ describe('HomePage rework', () => {
     expect(
       within(dialog).getByText('21:00 锁注 · 22:30 结算'),
     ).toBeInTheDocument()
+  })
+
+  it('opens a weekly-only bet dialog from the weekly surface', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal(
+      'fetch',
+      mockApi({
+        rival: rivalState({
+          bets: { weekly: null, daily: null, group: null },
+        }),
+      }),
+    )
+
+    renderHome()
+
+    await user.click(await screen.findByRole('button', { name: '下注周注' }))
+    const dialog = await screen.findByTestId('rival-bet-dialog')
+    expect(within(dialog).queryByRole('tab')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('tabpanel')).toHaveAttribute(
+      'data-kind',
+      'weekly',
+    )
+    expect(
+      within(dialog).getByText('押「我本周最终 XP 比宿敌高多少」'),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).queryByText('押「今天我比宿敌多多少 XP」'),
+    ).not.toBeInTheDocument()
+    expect(
+      within(dialog).getByText('周一 23:59:59 截止 · 次周一结算'),
+    ).toBeInTheDocument()
+  })
+
+  it('replaces the daily entry with the placed daily surface and keeps the weekly entry', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockApi({
+        rival: rivalState({
+          bets: {
+            weekly: null,
+            daily: bet({
+              id: 2,
+              kind: 'daily',
+              period_key: '2026-10-26',
+              target_margin: 150,
+              odds: 2,
+              stake: 20,
+              free_stake: 20,
+              paid_stake: 0,
+            }),
+            group: null,
+          },
+        }),
+      }),
+    )
+
+    renderHome()
+
+    const daily = await screen.findByTestId('rival-bet-status-日注')
+    expect(daily).toHaveTextContent('日注 · 已下注')
+    expect(screen.getByTestId('rival-bet-target-daily')).toHaveTextContent(
+      '+150 XP',
+    )
+    expect(screen.getByTestId('rival-bet-odds-daily')).toHaveTextContent(
+      '×2.00',
+    )
+    expect(screen.getByTestId('rival-bet-stake-daily')).toHaveTextContent('20')
+    expect(screen.getByTestId('rival-bet-return-daily')).toHaveTextContent('40')
+    expect(
+      screen.queryByRole('button', { name: '下注日注' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '下注周注' })).toBeVisible()
   })
 
   it('opens the rival public profile from the duel avatar and shows the week comparison', async () => {

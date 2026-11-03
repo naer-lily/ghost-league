@@ -79,9 +79,8 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
   - 周注/日注请求体只发送 `kind`、`target_margin`、`paid_stake`、`request_id`；
     `stake`（`free_stake + paid_stake`）和赔率都由服务端返回，前端只读
     `bet_options` 的 `target_options` 档位与赔率。
-  - 首页 `RivalDuelCard` 用 `variant="summary"`：只显示双方本周 XP、差距、日注倒计时、
-    日注状态和一个下注入口；首页下注按钮固定打开 `onlyKind="daily"` 的 dialog。
-  - `/rival` 的完整卡显示双方今日 XP 比分，并把底部改成周注/日注两个独立注面：
+  - 首页与 `/rival` 共用 `variant="full"` 的 `RivalDuelCard`：显示双方本周 XP、今日 XP
+    比分、对撞条、差距、本周剩余/日注锁注两个时间，以及周注/日注两个独立注面。
     未下注且未截止时分别显示「下注周注 / 下注日注」，已下注时显示该注面的目标、赔率、
     总本金和总返，截止后只显示截止状态。两个入口分别用 `onlyKind="weekly"` /
     `onlyKind="daily"` 直接打开对应 dialog，不再先展示另一个 tab；复用同一套
@@ -125,7 +124,8 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
 - **首页**：删除了小组排行榜和小组号展示；今日进度不再显示“第 N 档 X 分钟”。更新标记
   按 `status.last_activity_at` 计算，超过 1 小时不显示“刚刚更新”。顶部没有刷新按钮，
   页面容器支持 touch 下拉刷新（调用真实 refetch）。未选宿敌时显示内联候选；选好后首页
-  只显示双方本周 XP、对撞条、差距、日注倒计时和日注状态，下注按钮只进入日注。
+  显示完整宿敌卡：双方本周/今日 XP、对撞条、差距、本周剩余/日注锁注两个时间，以及
+  周注/日注两个独立注面，两个下注按钮分别打开对应 dialog。
 - **周注/日注 dialog**：目标差值只从服务端 `bet_options[tab].target_options` 渲染，
   显示 `+margin XP` 与该档赔率；自付钻石用数字输入 + `0–500` 滑杆，总本金为
   `free_stake + paid_stake`，总返为 `round(stake × 服务端赔率)`。自付 0 合法，默认只
@@ -191,14 +191,15 @@ PYTHONPATH=. pytest -q tests/test_api.py
 PYTHONPATH=. pytest -q tests/test_pwa.py tests/test_pwa_design.py tests/test_pwa_next.py
 ```
 
-前端单测覆盖：首页有/无宿敌、首页仅日注状态与日注 dialog、宿敌页今日 XP 比分与
-周注/日注独立注面、真实更新时间、下拉刷新、周注/日注目标档位、自付 0/500 与总返、
+前端单测覆盖：首页有/无宿敌、首页完整宿敌卡（今日 XP、周注/日注注面与两个 dialog）、
+宿敌页今日 XP 比分与周注/日注独立注面、真实更新时间、下拉刷新、周注/日注目标档位、
+自付 0/500 与总返、
 15 人小组前 4/后 4 晋升/下降标识、组注三盘口
 独立显示与 `market` payload、小组/好友切换和空态、动态 tab、作者/榜单/对比卡头像资料、
 本周对比与关注后好友榜更新、历史盘口简称与六类筛选、物品四类、商店商品分类、边框/称号/
 背景/徽章装备与卸下、同槽位换装、无槽位物品不显示装备按钮、我的段位迷雾、钻石/连胜、
 设置入口、导航和顶栏收敛。
-`e2e/home.spec.ts` 用真实 token 在 390×844 与 1440×1000 走一遍首页、日注 dialog、无宿敌、
+`e2e/home.spec.ts` 用真实 token 在 390×844 与 1440×1000 走一遍首页、周注/日注 dialog、无宿敌、
 下拉刷新、小组组注与好友榜、无组注空态、物品分类与商店商品分类、我的与设置，并把截图写到
 `artifacts/ghost-ui-group1/`。历史与动态/关注走查截图在 `artifacts/ghost-history-feed/`；
 `e2e/inventory.spec.ts` 单独走物品/商店分类并把截图写到 `artifacts/ghost-inventory-shop/`。

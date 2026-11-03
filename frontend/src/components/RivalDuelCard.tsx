@@ -112,9 +112,9 @@ function BetSurface({
 
 /**
  * The reusable duel body used by both `/rival` and the home page. The full
- * variant carries both weekly and daily status/timers for the rival page; the
- * home `summary` variant only shows weekly XP, the gap, the daily countdown
- * and the daily bet state. Group bets live on the league board.
+ * variant carries both weekly and daily XP, timers, and bet surfaces; the
+ * `summary` variant remains a compact weekly-only fallback. Group bets live on
+ * the league board.
  */
 export function RivalDuelCard({
   state,

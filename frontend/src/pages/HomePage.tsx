@@ -22,7 +22,7 @@ import {
   describeApiError,
   tierStyleVars,
 } from '../lib/home'
-import { describeRivalError } from '../lib/rival'
+import { describeRivalError, type RivalBetTab } from '../lib/rival'
 import { useServerNow } from '../lib/useServerNow'
 import { useUiStore } from '../store/useUiStore'
 import styles from './HomePage.module.css'
@@ -33,7 +33,7 @@ export function HomePage() {
   const selectMutation = useSelectRival()
   const notify = useUiStore((state) => state.notify)
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const [dialogKind, setDialogKind] = useState<RivalBetTab | null>(null)
   const [profileId, setProfileId] = useState<string | null>(null)
 
   const data = rivalQuery.data
@@ -165,9 +165,9 @@ export function HomePage() {
               <RivalDuelCard
                 state={data}
                 now={now}
-                variant="summary"
+                variant="full"
                 onOpenProfile={setProfileId}
-                onOpenBets={() => setDialogOpen(true)}
+                onOpenBets={(kind) => setDialogKind(kind)}
               />
               {pickerOpen && selectionOpen ? (
                 <RivalCandidatePicker
@@ -250,12 +250,13 @@ export function HomePage() {
 
       {data?.rival ? (
         <RivalBetDialog
-          open={dialogOpen}
-          onOpenChange={setDialogOpen}
+          open={dialogKind !== null}
+          onOpenChange={(open) => {
+            if (!open) setDialogKind(null)
+          }}
           state={data}
           now={now}
-          initialTab="daily"
-          onlyKind="daily"
+          onlyKind={dialogKind ?? undefined}
         />
       ) : null}
 
