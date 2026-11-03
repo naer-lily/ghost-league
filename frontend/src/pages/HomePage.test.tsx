@@ -242,11 +242,11 @@ describe('HomePage rework', () => {
     expect(
       within(dialog).getByText('押「今天我比宿敌多多少 XP」'),
     ).toBeInTheDocument()
-    expect(within(dialog).getByTestId('rival-target-50')).toBeInTheDocument()
+    expect(within(dialog).getByTestId('rival-target-150')).toBeInTheDocument()
+    expect(within(dialog).queryByTestId('rival-target-0')).not.toBeInTheDocument()
     expect(
       within(dialog).queryByText('押「我本周最终 XP 比宿敌高多少」'),
     ).not.toBeInTheDocument()
-    expect(within(dialog).queryByTestId('rival-target-150')).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/本周宿敌：/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/每注自带/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/本周剩余/)).not.toBeInTheDocument()

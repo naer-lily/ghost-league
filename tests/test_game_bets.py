@@ -12,9 +12,13 @@ from ghost_league.game.rival import (
     BetRejected,
     BetWindowClosed,
     RivalUnavailable,
+    DAILY_TARGET_STEP,
     bet_odds,
     daily_bet_locks_at,
+    daily_bet_odds,
     daily_bet_settles_at,
+    daily_target_margins,
+    daily_target_options,
     group_market_odds_table,
     payout_for_win,
     power_anchor_factor,
@@ -113,7 +117,7 @@ def make_rival_pair(
 def test_bet_odds_are_monotonic_reference_and_clamped() -> None:
     # Equal power and target == reference gives the documented ~2.0 point.
     assert bet_odds("weekly", 500, 500, 0, 500, 500) == 2.0
-    assert bet_odds("daily", 50, 0, 50, 500, 500) == 2.0
+    assert daily_bet_odds(50, 50, 50) == 2.0
     assert bet_odds("weekly", 0, 500, 0, 500, 500) == 1.2
 
     previous = 0.0
@@ -133,7 +137,7 @@ def test_bet_odds_are_monotonic_reference_and_clamped() -> None:
     assert wager_result(100, 100) == "won"
 
 
-def test_target_options_cover_range_and_preview_odds() -> None:
+def test_weekly_target_options_cover_range_and_preview_odds() -> None:
     weekly = target_options("weekly", 100, 0, 500, 500)
     weekly_margins = [entry["margin"] for entry in weekly]
     assert weekly_margins == sorted(set(weekly_margins))
@@ -142,9 +146,6 @@ def test_target_options_cover_range_and_preview_odds() -> None:
     assert weekly_margins == [0, 50, 100, 150, 200]
     odds = [entry["odds"] for entry in weekly]
     assert odds == sorted(odds)
-
-    daily = target_options("daily", 0, 0, 500, 500)
-    assert [entry["margin"] for entry in daily] == [0, 10, 20, 30, 40, 50]
 
     large = target_options("weekly", 1000, 0, 500, 500)
     assert [entry["margin"] for entry in large] == [
@@ -160,63 +161,82 @@ def test_target_options_cover_range_and_preview_odds() -> None:
     assert target_in_range("weekly", 0, 100, 0)
     assert target_in_range("weekly", 200, 100, 0)
     assert not target_in_range("weekly", 201, 100, 0)
-    assert not target_in_range("daily", -1, 0, 0)
+    with pytest.raises(ValueError):
+        target_options("daily", 0, 0, 500, 500)
 
 
-def test_daily_target_options_have_midpoints_when_estimate_is_zero() -> None:
-    margins = [
-        entry["margin"] for entry in target_options("daily", 0, 0, 500, 500)
-    ]
-    assert len(margins) > 2
-    assert margins[-1] == target_upper_bound("daily")
-    assert any(0 < margin < margins[-1] for margin in margins)
-    assert all(margin % target_step("daily") == 0 for margin in margins)
+def test_daily_target_options_are_positive_and_stepped() -> None:
+    options = daily_target_options(850, 100, 500, 100)
+    margins = [entry["margin"] for entry in options]
+    assert 3 <= len(margins) <= 6
+    assert margins == sorted(set(margins))
+    assert all(margin > 0 for margin in margins)
+    assert all(margin % DAILY_TARGET_STEP == 0 for margin in margins)
+    assert margins == daily_target_margins(850, 100, 500, 100)
+    assert all(entry["odds"] >= 1.2 for entry in options)
+    assert [entry["odds"] for entry in options] == sorted(
+        entry["odds"] for entry in options
+    )
+    # No daily projection can offer a zero tier.
+    assert 0 not in margins
 
 
-def test_power_gap_moves_dynamic_anchor() -> None:
-    strong = target_anchor("daily", my_power=10_000, rival_power=0)
-    even = target_anchor("daily", my_power=500, rival_power=500)
-    weak = target_anchor("daily", my_power=0, rival_power=10_000)
+def test_power_gap_moves_weekly_dynamic_anchor() -> None:
+    strong = target_anchor(
+        "weekly", 1000, my_power=10_000, rival_power=0
+    )
+    even = target_anchor("weekly", 1000, my_power=500, rival_power=500)
+    weak = target_anchor("weekly", 1000, my_power=0, rival_power=10_000)
     assert strong > even > weak
     assert power_anchor_factor(10_000, 0) == 1.5
     assert power_anchor_factor(0, 10_000) == 0.5
 
     strong_margins = [
         entry["margin"]
-        for entry in target_options("daily", 0, 0, 10_000, 0)
+        for entry in target_options(
+            "weekly", 1000, my_power=10_000, rival_power=0
+        )
     ]
     weak_margins = [
         entry["margin"]
-        for entry in target_options("daily", 0, 0, 0, 10_000)
+        for entry in target_options(
+            "weekly", 1000, my_power=0, rival_power=10_000
+        )
     ]
     assert strong_margins != weak_margins
     assert strong in strong_margins
     assert weak in weak_margins
 
 
-def test_target_options_are_unique_sorted_bounded_and_odds_monotonic() -> None:
+def test_weekly_target_options_are_unique_sorted_bounded_and_odds_monotonic() -> None:
     cases = [
-        ("weekly", 100, 0, 500, 500),
-        ("weekly", 1000, 0, 500, 500),
-        ("weekly", 0, 0, 10_000, 0),
-        ("weekly", 0, 0, 0, 10_000),
-        ("daily", 0, 0, 500, 500),
-        ("daily", 0, 0, 10_000, 0),
-        ("daily", 0, 0, 0, 10_000),
-        ("daily", 0, 500, 500, 500),
+        (100, 500, 500),
+        (1000, 500, 500),
+        (0, 10_000, 0),
+        (0, 0, 10_000),
     ]
-    for kind, week, day, my_power, rival_power in cases:
-        entries = target_options(kind, week, day, my_power, rival_power)
+    for week, my_power, rival_power in cases:
+        entries = target_options(
+            "weekly", week, my_power=my_power, rival_power=rival_power
+        )
         margins = [entry["margin"] for entry in entries]
         odds = [entry["odds"] for entry in entries]
-        limit = target_upper_bound(kind, week, day)
-        step = target_step(kind)
+        limit = target_upper_bound("weekly", week)
+        step = target_step("weekly")
         assert margins == sorted(set(margins))
         assert margins[0] == 0
         assert margins[-1] == limit
         assert all(0 <= margin <= limit for margin in margins)
         assert all(margin % step == 0 for margin in margins)
-        assert target_anchor(kind, week, day, my_power, rival_power) in margins
+        assert (
+            target_anchor(
+                "weekly",
+                week,
+                my_power=my_power,
+                rival_power=rival_power,
+            )
+            in margins
+        )
         assert odds == sorted(odds)
 
 
@@ -410,20 +430,26 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
     make_rival_pair(store, "h1", "h2")
     make_rival_pair(store, "h3", "h4")
 
+    daily = store.rival_state("h1", now=MONDAY)["bet_options"]["daily"]
+    margins = [entry["margin"] for entry in daily["target_options"]]
+    target = margins[0]
+    preview_odds = daily["target_options"][0]["odds"]
+    assert target > 0
+
     bet = store.place_bet(
         "h1",
         "daily",
         paid_stake=80,
-        target_margin=50,
+        target_margin=target,
         now=MONDAY_BEFORE_LOCK,
         request_id="daily-1",
     )
     assert bet["kind"] == "daily"
     assert bet["stake"] == 100
-    assert bet["target_margin"] == 50
+    assert bet["target_margin"] == target
     assert bet["free_stake"] == 20
     assert bet["paid_stake"] == 80
-    assert bet["odds"] == bet_odds("daily", 50, 0, 0, 500, 700)
+    assert bet["odds"] == preview_odds
     assert store.get_diamond_balance("h1", now=MONDAY_BEFORE_LOCK) == 920
 
     with pytest.raises(BetRejected):
@@ -431,7 +457,7 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
             "h3",
             "daily",
             paid_stake=0,
-            target_margin=100,
+            target_margin=target + 1,
             now=MONDAY,
             request_id="daily-bad-target",
         )
@@ -439,8 +465,17 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
         store.place_bet(
             "h3",
             "daily",
+            paid_stake=0,
+            target_margin=0,
+            now=MONDAY,
+            request_id="daily-zero-target",
+        )
+    with pytest.raises(BetRejected):
+        store.place_bet(
+            "h3",
+            "daily",
             paid_stake=501,
-            target_margin=50,
+            target_margin=target,
             now=MONDAY,
             request_id="daily-bad-stake",
         )
@@ -458,7 +493,7 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
             "h3",
             "daily",
             paid_stake=0,
-            target_margin=50,
+            target_margin=target,
             now=MONDAY_LOCK,
             request_id="daily-late",
         )
@@ -470,11 +505,14 @@ def test_daily_settlement_waits_for_2230_and_uses_2230_xp(
 ) -> None:
     store = make_store(tmp_path)
     make_rival_pair(store, "h1", "h2")
+    target = store.rival_state("h1", now=MONDAY)["bet_options"]["daily"][
+        "target_options"
+    ][0]["margin"]
     add_activity(
         store,
         "h1",
         event_id="h1-early",
-        seconds=1200,
+        seconds=1800,
         occurred_at=datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ),
     )
     add_activity(
@@ -488,7 +526,7 @@ def test_daily_settlement_waits_for_2230_and_uses_2230_xp(
         "h1",
         "daily",
         paid_stake=0,
-        target_margin=50,
+        target_margin=target,
         now=MONDAY,
         request_id="daily-win",
     )
@@ -505,7 +543,7 @@ def test_daily_settlement_waits_for_2230_and_uses_2230_xp(
     assert settled["settled"] == 1
     assert settled["results"][0]["status"] == "won"
     assert settled["results"][0]["payout"] == expected
-    assert settled["results"][0]["result_diff"] == 100
+    assert settled["results"][0]["result_diff"] == 200
     assert (
         store.get_diamond_balance("h1", now=MONDAY_SETTLE) == 1000 + expected
     )
@@ -525,6 +563,9 @@ def test_daily_settlement_waits_for_2230_and_uses_2230_xp(
 def test_daily_settlement_ignores_activity_after_2230(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     make_rival_pair(store, "h1", "h2")
+    target = store.rival_state("h1", now=MONDAY)["bet_options"]["daily"][
+        "target_options"
+    ][0]["margin"]
     add_activity(
         store,
         "h1",
@@ -543,7 +584,7 @@ def test_daily_settlement_ignores_activity_after_2230(tmp_path: Path) -> None:
         "h1",
         "daily",
         paid_stake=0,
-        target_margin=50,
+        target_margin=target,
         now=MONDAY,
         request_id="daily-cutoff",
     )
@@ -575,6 +616,9 @@ def test_daily_settlement_ignores_activity_after_2230(tmp_path: Path) -> None:
 def test_daily_loss_and_weekly_tie_refund(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     make_rival_pair(store, "daily", "daily-rival")
+    target = store.rival_state("daily", now=MONDAY)["bet_options"]["daily"][
+        "target_options"
+    ][0]["margin"]
     add_activity(
         store,
         "daily",
@@ -593,7 +637,7 @@ def test_daily_loss_and_weekly_tie_refund(tmp_path: Path) -> None:
         "daily",
         "daily",
         paid_stake=0,
-        target_margin=50,
+        target_margin=target,
         now=MONDAY,
         request_id="daily-loss",
     )
@@ -739,6 +783,9 @@ def test_rival_auto_and_daily_bet_jobs(tmp_path: Path) -> None:
 
     daily_store = GameStore(tmp_path / "daily.db", epoch_reason="test")
     make_rival_pair(daily_store, "h1", "h2")
+    daily_target = daily_store.rival_state("h1", now=MONDAY)[
+        "bet_options"
+    ]["daily"]["target_options"][0]["margin"]
     add_activity(
         daily_store,
         "h1",
@@ -757,7 +804,7 @@ def test_rival_auto_and_daily_bet_jobs(tmp_path: Path) -> None:
         "h1",
         "daily",
         paid_stake=0,
-        target_margin=50,
+        target_margin=daily_target,
         now=MONDAY,
         request_id="job-daily",
     )

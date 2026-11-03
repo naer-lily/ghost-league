@@ -87,9 +87,14 @@ function makeState(overrides: Partial<RivalState> = {}): RivalState {
     bet_options: makeBetOptions(),
     projection: {
       rival_week_estimate: 3400,
-      rival_today_estimate: 100,
       weekly_target_max: 6800,
-      daily_target_max: 200,
+      daily_mu_me: 620.5,
+      daily_sd_me: 180.2,
+      daily_mu_rival: 510,
+      daily_sd_rival: 150,
+      daily_mu_diff: 110.5,
+      daily_sigma_diff: 234.5,
+      daily_target_margins: [150, 300, 600],
     },
     bet_windows: {
       weekly_locks_at: futureIso(4),
@@ -416,8 +421,8 @@ describe('RivalPage', () => {
           id: 2,
           kind: 'daily',
           period_key: '2026-11-02',
-          target_margin: 50,
-          odds: 1.5,
+          target_margin: 150,
+          odds: 2,
           stake: 20,
           free_stake: 20,
           paid_stake: 0,
@@ -476,14 +481,14 @@ describe('RivalPage', () => {
     expect(
       within(dialog).getByText('押「今天我比宿敌多多少 XP」'),
     ).toBeInTheDocument()
-    expect(within(dialog).getByTestId('rival-target-50')).toHaveTextContent(
-      '+50 XP',
+    expect(within(dialog).getByTestId('rival-target-150')).toHaveTextContent(
+      '+150 XP',
     )
     expect(within(dialog).getByTestId('rival-bet-placed')).toHaveTextContent(
-      '目标+50 XP',
+      '目标+150 XP',
     )
     expect(within(dialog).getByTestId('rival-bet-placed')).toHaveTextContent(
-      '总返30',
+      '总返40',
     )
     expect(within(dialog).getAllByText('已下注')).toHaveLength(1)
     expect(
@@ -552,27 +557,25 @@ describe('RivalPage', () => {
     const dialog = await screen.findByTestId('rival-bet-dialog')
     await user.click(within(dialog).getByRole('tab', { name: /日注/ }))
 
-    expect(within(dialog).getByTestId('rival-target-0')).toHaveTextContent(
-      '+0 XP',
+    expect(within(dialog).getByTestId('rival-target-150')).toHaveTextContent(
+      '+150 XP',
     )
-    expect(within(dialog).getByTestId('rival-target-50')).toHaveTextContent(
-      '+50 XP',
+    expect(within(dialog).getByTestId('rival-target-300')).toHaveTextContent(
+      '赔率 ×3.10',
     )
-    expect(within(dialog).getByTestId('rival-target-100')).toHaveTextContent(
-      '赔率 ×1.90',
-    )
-    expect(within(dialog).getByTestId('rival-target-200')).toBeInTheDocument()
+    expect(within(dialog).getByTestId('rival-target-600')).toBeInTheDocument()
+    expect(within(dialog).queryByTestId('rival-target-0')).toBeNull()
     expect(within(dialog).getByTestId('rival-bet-paid-input')).toBeVisible()
     expect(within(dialog).getByTestId('rival-bet-stake')).toHaveTextContent(
       '20',
     )
 
-    await user.click(within(dialog).getByTestId('rival-target-50'))
+    await user.click(within(dialog).getByTestId('rival-target-300'))
     expect(within(dialog).getByTestId('rival-bet-target')).toHaveTextContent(
-      '+50 XP',
+      '+300 XP',
     )
     expect(within(dialog).getByTestId('rival-bet-odds')).toHaveTextContent(
-      '×1.40',
+      '×3.10',
     )
   })
 

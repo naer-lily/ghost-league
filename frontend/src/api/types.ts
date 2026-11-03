@@ -291,9 +291,14 @@ export interface BetOptions {
 
 export interface RivalProjection {
   rival_week_estimate: number
-  rival_today_estimate: number
   weekly_target_max: number
-  daily_target_max: number
+  daily_mu_me: number
+  daily_sd_me: number
+  daily_mu_rival: number
+  daily_sd_rival: number
+  daily_mu_diff: number
+  daily_sigma_diff: number
+  daily_target_margins: number[]
 }
 
 export interface RivalState {

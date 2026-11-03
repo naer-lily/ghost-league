@@ -1,15 +1,23 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from ghost_league.game.rival import (
+    DAILY_PRIOR_MEAN_XP,
+    DAILY_PRIOR_SD_XP,
+    DAILY_TARGET_STEP,
     RivalNotFound,
     RivalSelectionRejected,
     RivalWindowClosed,
-    projected_daily_xp,
+    band_distribution,
+    daily_bet_odds,
+    daily_target_margins,
+    daily_target_options,
+    power_band,
+    sample_mean_sd,
 )
 from ghost_league.game.store import GameStore
 from ghost_league.schedule import TZ
@@ -63,6 +71,33 @@ def set_week_xp(
             "seconds = excluded.seconds, xp = excluded.xp",
             (week, player_id, xp * 6, xp),
         )
+
+
+def add_checkin_history(
+    store: GameStore,
+    player_id: str,
+    xps: list[int],
+    *,
+    end_day: date = date(2026, 10, 31),
+) -> None:
+    with store.transaction() as conn:
+        for offset, xp in enumerate(xps):
+            day = end_day - timedelta(days=len(xps) - 1 - offset)
+            stamp = f"{day.isoformat()}T12:00:00+08:00"
+            conn.execute(
+                "INSERT OR REPLACE INTO checkins "
+                "(player_id, date, source, seconds, xp, checked_at, "
+                "repaired_at, repair_cost, status, created_at) "
+                "VALUES (?, ?, 'verified', ?, ?, ?, NULL, 0, 'verified', ?)",
+                (
+                    player_id,
+                    day.isoformat(),
+                    xp * 6,
+                    xp,
+                    stamp,
+                    int(datetime.fromisoformat(stamp).timestamp()),
+                ),
+            )
 
 
 def seed_assignment(
@@ -330,7 +365,7 @@ def test_settle_rivals_rewards_once_per_outcome(tmp_path: Path) -> None:
     assert state["result"]["reward_diamonds"] == 120
 
 
-def test_projection_uses_settled_percentile_and_stable_daily_spread(
+def test_projection_uses_settled_week_and_daily_distribution(
     tmp_path: Path,
 ) -> None:
     store = make_store(tmp_path)
@@ -340,6 +375,8 @@ def test_projection_uses_settled_percentile_and_stable_daily_spread(
     store.create_group(WEEK, tier="Bronze", player_ids=["rival"], now=MONDAY)
     set_week_xp(store, "h1", 100)
     set_week_xp(store, "rival", 100)
+    add_checkin_history(store, "h1", [100, 200, 300])
+    add_checkin_history(store, "rival", [400, 500, 600])
     store.select_rival("h1", "rival", now=MONDAY, request_id="projection")
     store.ensure_week(PREVIOUS_WEEK, status="settled")
     for index, xp in enumerate((100, 200, 300, 400, 500), start=1):
@@ -358,12 +395,21 @@ def test_projection_uses_settled_percentile_and_stable_daily_spread(
     )
     state = store.rival_state("h1", now=at)
     assert state["bets"]["group"] is None
-    assert state["projection"] == {
-        "rival_week_estimate": 300,
-        "rival_today_estimate": 40,
-        "weekly_target_max": 600,
-        "daily_target_max": 80,
-    }
+    projection = state["projection"]
+    assert projection["rival_week_estimate"] == 300
+    assert projection["weekly_target_max"] == 600
+    assert "rival_today_estimate" not in projection
+    assert "daily_target_max" not in projection
+    # The two players are the only samples, so both fall back to the same
+    # global mean/sample-std until each band has 20 players.
+    assert projection["daily_mu_me"] == 350.0
+    assert projection["daily_sd_me"] == 212.13
+    assert projection["daily_mu_rival"] == 350.0
+    assert projection["daily_sd_rival"] == 212.13
+    assert projection["daily_mu_diff"] == 0.0
+    assert projection["daily_sigma_diff"] == 300.0
+    assert projection["daily_target_margins"] == [150, 300, 450]
+
     weekly_options = state["bet_options"]["weekly"]
     daily_options = state["bet_options"]["daily"]
     assert weekly_options["min_paid_stake"] == 0
@@ -374,7 +420,16 @@ def test_projection_uses_settled_percentile_and_stable_daily_spread(
         "odds": 1.2,
     }
     assert weekly_options["target_options"][-1]["margin"] == 600
-    assert daily_options["target_options"][-1]["margin"] == 80
+    assert daily_options["min_target_margin"] == 150
+    assert daily_options["max_target_margin"] == 450
+    assert [
+        entry["margin"] for entry in daily_options["target_options"]
+    ] == projection["daily_target_margins"]
+    assert [entry["odds"] for entry in daily_options["target_options"]] == [
+        daily_bet_odds(150, 0.0, 300.0),
+        daily_bet_odds(300, 0.0, 300.0),
+        daily_bet_odds(450, 0.0, 300.0),
+    ]
 
 
 def test_projection_falls_back_without_settled_week(tmp_path: Path) -> None:
@@ -388,20 +443,129 @@ def test_projection_falls_back_without_settled_week(tmp_path: Path) -> None:
     store.select_rival("h1", "rival", now=MONDAY, request_id="fallback")
 
     state = store.rival_state("h1", now=MONDAY)
-    assert state["projection"] == {
-        "rival_week_estimate": 100,
-        "rival_today_estimate": 10,
-        "weekly_target_max": 200,
-        "daily_target_max": 50,
-    }
+    projection = state["projection"]
+    assert projection["rival_week_estimate"] == 100
+    assert projection["weekly_target_max"] == 200
+    assert projection["daily_mu_me"] == DAILY_PRIOR_MEAN_XP
+    assert projection["daily_sd_me"] == DAILY_PRIOR_SD_XP
+    assert projection["daily_mu_rival"] == DAILY_PRIOR_MEAN_XP
+    assert projection["daily_sd_rival"] == DAILY_PRIOR_SD_XP
+    assert projection["daily_mu_diff"] == 0.0
+    assert projection["daily_sigma_diff"] == 212.13
+    assert projection["daily_target_margins"] == [150, 300, 450]
 
 
-def test_projected_daily_xp_spreads_weekly_estimate() -> None:
-    assert projected_daily_xp(0) == 0
-    assert projected_daily_xp(100) == 10
-    assert projected_daily_xp(300) == 40
-    assert projected_daily_xp(700) == 100
-    assert projected_daily_xp(3400) == 490
+def test_daily_history_ignores_today_and_short_players(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    add_player(store, "h1", power=500)
+    add_player(store, "rival", power=1000)
+    store.create_group(WEEK, tier="Bronze", player_ids=["h1"], now=MONDAY)
+    store.create_group(WEEK, tier="Bronze", player_ids=["rival"], now=MONDAY)
+    set_week_xp(store, "h1", 100)
+    set_week_xp(store, "rival", 100)
+    # h1 qualifies with three completed days; today's huge value is ignored.
+    add_checkin_history(store, "h1", [100, 200, 300])
+    add_checkin_history(
+        store, "h1", [9999], end_day=MONDAY.date()
+    )
+    # A day older than the 28-day window is ignored too.
+    add_checkin_history(
+        store, "h1", [9999], end_day=date(2026, 9, 20)
+    )
+    # This rival has only two recorded days, so it is not a sample at all.
+    add_checkin_history(store, "rival", [1000, 2000])
+    store.select_rival("h1", "rival", now=MONDAY, request_id="history")
+
+    projection = store.rival_state("h1", now=MONDAY)["projection"]
+    assert projection["daily_mu_me"] == 200.0
+    assert projection["daily_sd_me"] == 0.0
+    assert projection["daily_mu_rival"] == 200.0
+    assert projection["daily_sd_rival"] == 0.0
+    assert projection["daily_sigma_diff"] == 0.0
+    assert projection["daily_target_margins"] == [150, 300, 450]
+
+
+def test_power_band_uses_250_width() -> None:
+    assert power_band(0) == 0
+    assert power_band(249) == 0
+    assert power_band(250) == 1
+    assert power_band(499) == 1
+    assert power_band(500) == 2
+    assert power_band(749) == 2
+    assert power_band(750) == 3
+
+
+def test_band_distribution_uses_its_band_then_neighbours_then_all() -> None:
+    same_band = [(100, 100.0), (120, 200.0), (140, 300.0)]
+    assert band_distribution(
+        same_band, 500, min_samples=3
+    ) == sample_mean_sd([100.0, 200.0, 300.0])
+
+    split = [
+        (500, 100.0),
+        (520, 200.0),
+        (800, 1000.0),
+        (820, 1100.0),
+    ]
+    low = band_distribution(split, 500, min_samples=2)
+    high = band_distribution(split, 800, min_samples=2)
+    assert low == sample_mean_sd([100.0, 200.0])
+    assert high == sample_mean_sd([1000.0, 1100.0])
+    assert low != high
+
+    exact = [(500, 10.0)]
+    adjacent = [(300, 20.0), (750, 30.0)]
+    assert band_distribution(
+        exact + adjacent, 500, min_samples=3
+    ) == sample_mean_sd([10.0, 20.0, 30.0])
+
+    far = [(500, 10.0), (2000, 99.0)]
+    assert band_distribution(
+        far, 500, min_samples=3
+    ) == sample_mean_sd([10.0, 99.0])
+
+
+def test_band_distribution_prior_without_any_history() -> None:
+    assert band_distribution([], 500) == (
+        DAILY_PRIOR_MEAN_XP,
+        DAILY_PRIOR_SD_XP,
+    )
+
+
+def test_daily_targets_are_positive_stepped_and_at_least_three() -> None:
+    cases = [
+        (0.0, 0.0, 0.0, 0.0),
+        (0.0, 150.0, 0.0, 150.0),
+        (850.0, 100.0, 500.0, 100.0),
+        (0.0, 100.0, 400.0, 100.0),
+        (5000.0, 600.0, 100.0, 50.0),
+    ]
+    for mu_me, sd_me, mu_rival, sd_rival in cases:
+        margins = daily_target_margins(
+            mu_me, sd_me, mu_rival, sd_rival
+        )
+        assert 3 <= len(margins) <= 6
+        assert margins == sorted(set(margins))
+        assert all(margin > 0 for margin in margins)
+        assert all(margin % DAILY_TARGET_STEP == 0 for margin in margins)
+
+    # Expected first three tiers for a 350-point expected lead.
+    assert daily_target_margins(850, 100, 500, 100) == [450, 600, 750]
+
+
+def test_daily_target_options_match_odds_and_stay_monotonic() -> None:
+    options = daily_target_options(850, 100, 500, 100)
+    assert [entry["margin"] for entry in options] == [450, 600, 750]
+    assert [entry["odds"] for entry in options] == [
+        daily_bet_odds(450, 350, 141.42),
+        daily_bet_odds(600, 350, 141.42),
+        daily_bet_odds(750, 350, 141.42),
+    ]
+    odds = [entry["odds"] for entry in options]
+    assert odds == sorted(odds)
+    assert odds[0] >= 1.2
+    assert odds[-1] <= 15.0
+    assert daily_bet_odds(350, 350, 100) == 2.0
 
 
 def test_daily_lines_do_not_drift_with_live_xp(tmp_path: Path) -> None:

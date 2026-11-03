@@ -9,13 +9,15 @@ result, and any diamond rewards.
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from .. import calendar as cal
 from ..rival import (
     AUTO_POWER_BAND_MAX,
     AUTO_POWER_BAND_MIN,
+    DAILY_HISTORY_DAYS,
+    DAILY_MIN_HISTORY_DAYS,
     FREE_BET_STAKE,
     GROUP_TARGET_RANK,
     MAX_PAID_STAKE,
@@ -24,10 +26,13 @@ from ..rival import (
     RivalSelectionRejected,
     RivalWindowClosed,
     auto_select_at,
+    band_distribution,
     daily_bet_locks_at,
+    daily_bet_odds,
     daily_bet_settles_at,
+    daily_distribution_parameters,
+    daily_target_margins,
     odds_reference,
-    projected_daily_xp,
     projected_week_xp,
     rival_outcome,
     rival_reward,
@@ -226,16 +231,79 @@ class RivalMixin:
         }
 
     @staticmethod
-    def _projection_with(
+    def _daily_distribution_samples_with(
         conn: sqlite3.Connection,
+        day_iso: str,
+    ) -> list[tuple[int, float]]:
+        """Return ``(power, mean_daily_xp)`` samples from completed days only.
+
+        Only check-ins strictly before ``day_iso`` inside the 28-day window are
+        read, so today's live XP can never move the daily tiers.  A player needs
+        at least three recorded days to become one sample.
+        """
+
+        day = date.fromisoformat(day_iso)
+        start_iso = (day - timedelta(days=DAILY_HISTORY_DAYS)).isoformat()
+        rows = conn.execute(
+            "SELECT COALESCE(p.power, 0) AS power, AVG(c.xp) AS mean_xp "
+            "FROM players p JOIN checkins c ON c.player_id = p.id "
+            "WHERE c.date >= ? AND c.date < ? "
+            "GROUP BY p.id, p.power "
+            "HAVING COUNT(*) >= ? "
+            "ORDER BY p.id",
+            (start_iso, day_iso, DAILY_MIN_HISTORY_DAYS),
+        ).fetchall()
+        return [
+            (int(row["power"]), float(row["mean_xp"])) for row in rows
+        ]
+
+    @staticmethod
+    def _daily_distribution_with(
+        conn: sqlite3.Connection,
+        day_iso: str,
+        my_power: int,
+        rival_power: int,
+    ) -> dict[str, Any]:
+        """Return the day's fixed daily distribution, parameters, and tiers."""
+
+        samples = RivalMixin._daily_distribution_samples_with(conn, day_iso)
+        mu_me, sd_me = band_distribution(samples, my_power)
+        mu_rival, sd_rival = band_distribution(samples, rival_power)
+        mu_me = round(mu_me, 2)
+        sd_me = round(sd_me, 2)
+        mu_rival = round(mu_rival, 2)
+        sd_rival = round(sd_rival, 2)
+        mu_diff, sigma_diff = daily_distribution_parameters(
+            mu_me, sd_me, mu_rival, sd_rival
+        )
+        mu_diff = round(mu_diff, 2)
+        sigma_diff = round(sigma_diff, 2)
+        return {
+            "daily_mu_me": mu_me,
+            "daily_sd_me": sd_me,
+            "daily_mu_rival": mu_rival,
+            "daily_sd_rival": sd_rival,
+            "daily_mu_diff": mu_diff,
+            "daily_sigma_diff": sigma_diff,
+            "daily_target_margins": daily_target_margins(
+                mu_me, sd_me, mu_rival, sd_rival
+            ),
+        }
+
+    def _projection_with(
+        self,
+        conn: sqlite3.Connection,
+        me: dict[str, Any],
         rival: dict[str, Any] | None,
+        day_iso: str,
     ) -> dict[str, Any] | None:
         """Estimate the lines shown on the betting screen.
 
-        These values are display-only.  The daily line spreads the stable
-        weekly estimate over seven days instead of reading the rival's live
-        XP, so the same day always quotes the same targets and odds.  Settlement
-        keeps using the actual final XP, never this projection.
+        The weekly line still uses the settled-week percentile.  The daily line
+        is sampled from each player's power-band daily-XP normal, using only
+        completed check-in days; its positive quantile tiers are returned as
+        ``daily_target_margins``.  Settlement keeps using the actual final XP,
+        never this projection.
         """
 
         if rival is None:
@@ -259,16 +327,18 @@ class RivalMixin:
             settled_xps,
             int(rival["week_xp"]),
         )
-        today_estimate = projected_daily_xp(week_estimate)
+        daily = self._daily_distribution_with(
+            conn,
+            day_iso,
+            int(me.get("power") or 0),
+            int(rival["power"]),
+        )
         return {
             "rival_week_estimate": week_estimate,
-            "rival_today_estimate": today_estimate,
             "weekly_target_max": target_upper_bound(
                 "weekly", rival_week_estimate=week_estimate
             ),
-            "daily_target_max": target_upper_bound(
-                "daily", rival_today_estimate=today_estimate
-            ),
+            **daily,
         }
 
     @staticmethod
@@ -292,7 +362,11 @@ class RivalMixin:
             my_power = int(me["power"])
             rival_power = int(rival["power"])
             week_estimate = int(projection["rival_week_estimate"])
-            day_estimate = int(projection["rival_today_estimate"])
+            daily_margins = [
+                int(margin) for margin in projection["daily_target_margins"]
+            ]
+            daily_mu_diff = float(projection["daily_mu_diff"])
+            daily_sigma_diff = float(projection["daily_sigma_diff"])
             common = {
                 "min_paid_stake": MIN_PAID_STAKE,
                 "max_paid_stake": MAX_PAID_STAKE,
@@ -310,27 +384,24 @@ class RivalMixin:
                 "target_options": target_options(
                     "weekly",
                     week_estimate,
-                    day_estimate,
-                    my_power,
-                    rival_power,
+                    my_power=my_power,
+                    rival_power=rival_power,
                 ),
             }
             daily = {
                 **common,
-                "reference": odds_reference(
-                    "daily", rival_today_estimate=day_estimate
-                ),
-                "min_target_margin": 0,
-                "max_target_margin": target_upper_bound(
-                    "daily", rival_today_estimate=day_estimate
-                ),
-                "target_options": target_options(
-                    "daily",
-                    week_estimate,
-                    day_estimate,
-                    my_power,
-                    rival_power,
-                ),
+                "reference": int(round(daily_mu_diff)),
+                "min_target_margin": min(daily_margins),
+                "max_target_margin": max(daily_margins),
+                "target_options": [
+                    {
+                        "margin": margin,
+                        "odds": daily_bet_odds(
+                            margin, daily_mu_diff, daily_sigma_diff
+                        ),
+                    }
+                    for margin in daily_margins
+                ],
             }
         markets = list(group_markets or [])
         top3 = next(
@@ -412,7 +483,9 @@ class RivalMixin:
                 "ORDER BY week_start DESC LIMIT 1",
                 (player_id,),
             ).fetchone()
-            projection = self._projection_with(conn, rival)
+            projection = self._projection_with(
+                conn, me, rival, day_iso
+            )
 
         locked = bool(assignment and assignment["locked_at"])
         selection_open = selection_window_open(local_now, week_date) and not locked

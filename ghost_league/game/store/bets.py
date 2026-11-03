@@ -26,6 +26,7 @@ from ..rival import (
     RivalUnavailable,
     bet_odds,
     daily_bet_locks_at,
+    daily_bet_odds,
     daily_bet_settles_at,
     group_bet_settles_at,
     group_market_allowed,
@@ -599,28 +600,40 @@ class BetsMixin:
                 conn, week_iso, rival_id, day_iso
             )
             projection = self._projection_with(  # type: ignore[attr-defined]
-                conn, rival
+                conn, player, rival, day_iso
             )
             assert projection is not None
-            week_estimate = int(projection["rival_week_estimate"])
-            day_estimate = int(projection["rival_today_estimate"])
-            if not target_in_range(
-                kind,
-                target_margin,
-                week_estimate,
-                day_estimate,
-            ):
-                raise BetRejected(
-                    "invalid_target", "目标差值超出可选范围"
+            if kind == "daily":
+                daily_margins = {
+                    int(margin)
+                    for margin in projection["daily_target_margins"]
+                }
+                if target_margin not in daily_margins:
+                    raise BetRejected(
+                        "invalid_target", "目标差值不在今天的档位里"
+                    )
+                odds = daily_bet_odds(
+                    target_margin,
+                    float(projection["daily_mu_diff"]),
+                    float(projection["daily_sigma_diff"]),
                 )
-            odds = bet_odds(
-                kind,
-                target_margin,
-                week_estimate,
-                day_estimate,
-                int(player["power"] or 0),
-                int(rival["power"] or 0),
-            )
+            else:
+                week_estimate = int(projection["rival_week_estimate"])
+                if not target_in_range(
+                    "weekly",
+                    target_margin,
+                    week_estimate,
+                ):
+                    raise BetRejected(
+                        "invalid_target", "目标差值超出可选范围"
+                    )
+                odds = bet_odds(
+                    "weekly",
+                    target_margin,
+                    week_estimate,
+                    my_power=int(player["power"] or 0),
+                    rival_power=int(rival["power"] or 0),
+                )
 
             if paid_stake > 0:
                 self._debit_diamonds_with(  # type: ignore[attr-defined]

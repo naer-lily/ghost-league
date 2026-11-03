@@ -1014,13 +1014,11 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 
 ### 目标差值与赔率
 
-服务端返回 `target_options`，前端直接展示；也接受区间内的任意整数。目标越界返回
-`invalid_target`（`422`）。
+服务端返回 `target_options`，前端直接展示。周注仍接受区间内任意整数；日注只接受
+本次 `projection.daily_target_margins` 中的档位。越界或不在档位返回 `invalid_target`
+（`422`）。
 
-- 周注上界：`max(100, round_to_50(rival_week_estimate * 2))`。
-- 日注上界：`max(50, round_to_10(rival_today_estimate * 2))`，其中
-  `rival_today_estimate` 由稳定的周估算按 7 天摊平得到，不读取当天实时 XP。
-- 动态锚点由双方战力和宿敌估计共同决定；周注/日注使用同一套逻辑：
+- 周注上界：`max(100, round_to_50(rival_week_estimate * 2))`，并保留旧的动态锚点：
 
 ```text
 power_delta = my_power - rival_power
@@ -1028,31 +1026,52 @@ power_factor = clamp(0.5, 1.5, 1 + power_delta / 4000)
 anchor = clamp(0, upper_bound, round_to_step(upper_bound * 0.5 * power_factor))
 ```
 
-  战力更高时锚点更高，更低时锚点更低；`my_power`、`rival_power`、
-  `rival_week_estimate` / `rival_today_estimate` 都参与计算。
-- `target_options` 至少包含 `0`、动态锚点、区间上界，以及锚点与上界/零点之间的
-  中间档；周注、日注都去重、严格升序、按 step 取整。宿敌今日估计为 `0` 时日注
-  仍有中间档（例如 `0, 10, 20, 30, 40, 50`），而不是只有 `0` 和上界。每个选项
-  同时返回锁注赔率，供 UI 预览：
-
-```json
-{"margin": 120, "odds": 2.37}
-```
-
-赔率在锁注时用双方当前 `players.power` 计算一次，写入 `bets.odds`，之后不随 XP 变化：
+- 日注不再有“周估算摊平”或区间锚点。双方各取一条日均 XP 正态分布，再对差值
+  `D = 我的 XP - 他的 XP` 取样：
 
 ```text
-reference = weekly ? max(500, rival_week_estimate)
-                   : max(50, rival_today_estimate)
+历史样本：只读今天之前的 checkins，窗口 28 天
+         按玩家聚合 AVG(xp)，至少 3 个记录日才算一个样本
+战力分段：宽度 250；本段样本不足 20 时加入相邻段；
+         仍不足 20 时使用全部样本；都没有时使用中性先验 (0, 150)
+分布参数：μ 为段内样本均值，σ 为样本标准差（n-1）
+μD = μ我 - μ他
+σD = sqrt(σ我² + σ他²)
+```
+
+  分位点先取 `q = 0.50, 0.60, 0.70, 0.80, 0.90`；只保留
+  `raw = μD + z_q * σD > 0` 的值，按 150 XP 向上取整，去重升序。档位不足 3 个时
+  继续取 `0.95` 及更高分位；最多 6 个，最少 3 个。日注不返回 `0` 档，所有档位都是
+  “我比他多”的正差值。同一份历史、同一天内，档位和赔率固定；今天的 checkins
+  不参与计算。
+
+- 每个选项同时返回锁注赔率，供 UI 预览：
+
+```json
+{"margin": 150, "odds": 2.37}
+```
+
+  赔率在锁注时计算一次并写入 `bets.odds`，之后不随 XP 或历史变化。周注赔率仍用
+  周估计和战力差：
+
+```text
+reference = max(500, rival_week_estimate)
 power_ratio = clamp(0.5, 2.0, 1 + (rival_power - my_power) / 4000)
 effective_reference = reference * power_ratio
 ratio = target_margin / effective_reference
 odds = clamp(1.2, 15.0, 1.2 + 0.8 * ratio ** 1.4)
+```
+
+  日注赔率按档位和 `σD` 的正态生存概率计算：
+
+```text
+z = (target_margin - μD) / σD
+p = 1 - Φ(z)
+odds = clamp(1.2, 15.0, 1 / p)
 odds = round(odds, 2)
 ```
 
-因此 `target_margin` 越大赔率严格不降；双方战力相同且 `target_margin = reference`
-时赔率约为 `2.0`。
+  因此日注档位越高赔率严格不降；`target_margin = μD` 时约为 `2.0`。
 
 ### `GET /v1/me/rival`
 
@@ -1144,7 +1163,9 @@ odds = round(odds, 2)
   在没有宿敌时为 `null`；`group` 在没有小组时为 `null`。周注/日注对象包含
   `target_options`（每项 `margin` + 锁注赔率 `odds`）、`min_target_margin`、
   `max_target_margin`、`min_paid_stake`、`max_paid_stake`、`free_stake` 和
-  `reference`。组注对象保留旧的 `target_rank: 3`、`target_margin: 0` 和
+  `reference`；日注的 `min_target_margin` 就是第一个正档位，`reference` 是
+  `μD` 的整数近似（赔率不再使用它）。组注对象保留旧的 `target_rank: 3`、
+  `target_margin: 0` 和
   `odds`（前三盘口），并新增 `markets`；`markets` 与 `bets.groups` 是同结构、
   同顺序的可用盘口（Silver 等中间段位为三项；Bronze 不含 `no_demote`，Diamond
   不含 `promote`；示例中省略重复内容）。赔率全部由服务端计算，前端只显示。
@@ -1153,18 +1174,26 @@ odds = round(odds, 2)
 ```json
 {
   "rival_week_estimate": 3400,
-  "rival_today_estimate": 490,
   "weekly_target_max": 6800,
-  "daily_target_max": 980
+  "daily_mu_me": 620.5,
+  "daily_sd_me": 180.2,
+  "daily_mu_rival": 510.0,
+  "daily_sd_rival": 150.0,
+  "daily_mu_diff": 110.5,
+  "daily_sigma_diff": 234.5,
+  "daily_target_margins": [150, 300, 600]
 }
 ```
 
 周估计：用宿敌 `power / 2000` 作百分位，取最近一个 `weeks.status='settled'` 周的
 `weekly_scores.xp` 分位值，四舍五入到百位；没有已结算周时退化到宿敌本周 XP。
-日估计：把稳定的 `rival_week_estimate` 按 7 天摊平（`week_estimate / 7`），
-四舍五入到十位；不读取当天实时 XP，因此同一天 `09:00` 与 `21:00` 的
-`projection`、`target_options` 和赔率完全一致（前提是周估算不变）。
-`weekly_target_max` / `daily_target_max` 就是上面的动态目标上界。
+`weekly_target_max` 是周注上界。
+
+日估计：`daily_mu_*` / `daily_sd_*` 是按上面“目标差值与赔率”的战力分段历史分布
+算出的双方均值与样本标准差；`daily_mu_diff` / `daily_sigma_diff` 是差值的 μD/σD；
+`daily_target_margins` 是当天实际可下的正档位。只读今天之前的 checkins，且不读
+当天实时 XP，因此同一天 `09:00` 与 `21:00` 的 `projection`、`target_options` 和
+赔率完全一致（前提是同一份历史）。
 
 ### `GET /v1/me/rival/candidates`
 
@@ -1284,8 +1313,9 @@ odds = round(odds, 2)
 
 所有下注的请求体只接受 `paid_stake`（0–500 整数），旧的 `stake` 字段不再作为输入。
 `stake = 20 + paid_stake`，`free_stake = 20`，`paid_stake` 原样保存；下注只扣
-`paid_stake`。周注和日注必须带区间内的 `target_margin`，且不接受 `market`；
-组注不带 `target_margin`，`market` 缺省为 `top3`。
+`paid_stake`。周注必须带周注区间内的 `target_margin`；日注必须带本次 projection
+`daily_target_margins` 中的一个档位；两者都不接受 `market`。组注不带
+`target_margin`，`market` 缺省为 `top3`。
 
 周注：
 
@@ -1302,10 +1332,11 @@ odds = round(odds, 2)
 日注：
 
 ```json
-{"kind": "daily", "target_margin": 120, "paid_stake": 80, "request_id": "daily-20261102"}
+{"kind": "daily", "target_margin": 150, "paid_stake": 80, "request_id": "daily-20261102"}
 ```
 
-- `target_margin` 是“我当天 `22:30` 的打卡 XP 比宿敌高多少”，范围由当天估计动态给出。
+- `target_margin` 是“我当天 `22:30` 的打卡 XP 比宿敌高多少”，只能选当天
+  `projection.daily_target_margins` 中的正档位；赔率随档位和 `σD` 固定不变。
 - 判定与周注一致；结算使用当天 `22:30` 的打卡 XP，不使用之后的最终日 XP。
 - 当天 `21:00` 前可下，`21:00` 锁注，`22:30` 结算。
 

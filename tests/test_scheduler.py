@@ -332,7 +332,7 @@ def test_2130_does_not_settle_todays_daily_bet_but_2231_does(
         store,
         "h1",
         event_id="h1-morning",
-        seconds=1200,
+        seconds=1800,
         occurred_at=datetime(2026, 11, 2, 8, 30, tzinfo=TZ),
     )
     add_activity(
@@ -342,11 +342,14 @@ def test_2130_does_not_settle_todays_daily_bet_but_2231_does(
         seconds=600,
         occurred_at=datetime(2026, 11, 2, 8, 30, tzinfo=TZ),
     )
+    daily_target = store.rival_state(
+        "h1", now=datetime(2026, 11, 2, 8, 45, tzinfo=TZ)
+    )["bet_options"]["daily"]["target_options"][0]["margin"]
     bet = store.place_bet(
         "h1",
         "daily",
         paid_stake=0,
-        target_margin=50,
+        target_margin=daily_target,
         now=datetime(2026, 11, 2, 8, 45, tzinfo=TZ),
         request_id="daily-1",
     )
@@ -395,7 +398,7 @@ def test_daily_catchup_only_scans_past_days_with_pending_bets(
         store,
         "h1",
         event_id="h1-yesterday",
-        seconds=1200,
+        seconds=1800,
         occurred_at=datetime(2026, 11, 1, 8, 30, tzinfo=TZ),
     )
     add_activity(
@@ -405,11 +408,14 @@ def test_daily_catchup_only_scans_past_days_with_pending_bets(
         seconds=600,
         occurred_at=datetime(2026, 11, 1, 8, 30, tzinfo=TZ),
     )
+    daily_target = store.rival_state(
+        "h1", now=datetime(2026, 11, 1, 8, 45, tzinfo=TZ)
+    )["bet_options"]["daily"]["target_options"][0]["margin"]
     store.place_bet(
         "h1",
         "daily",
         paid_stake=0,
-        target_margin=50,
+        target_margin=daily_target,
         now=datetime(2026, 11, 1, 8, 45, tzinfo=TZ),
         request_id="daily-yesterday",
     )

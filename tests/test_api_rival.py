@@ -252,18 +252,32 @@ class RivalStateAPITests(RivalAPITestBase):
         )
         evening_payload = client.get("/v1/me/rival", headers=auth()).json()
 
+        morning_projection = morning_payload["projection"]
+        self.assertNotIn("rival_today_estimate", morning_projection)
+        self.assertNotIn("daily_target_max", morning_projection)
+        self.assertIn("daily_target_margins", morning_projection)
+        self.assertGreater(morning_projection["daily_sigma_diff"], 0)
+        morning_daily = morning_payload["bet_options"]["daily"]
+        daily_margins = [
+            entry["margin"] for entry in morning_daily["target_options"]
+        ]
         self.assertEqual(
-            morning_payload["projection"]["rival_today_estimate"], 40
+            daily_margins, morning_projection["daily_target_margins"]
         )
-        self.assertGreater(
-            len(morning_payload["bet_options"]["daily"]["target_options"]), 2
+        self.assertGreaterEqual(len(daily_margins), 3)
+        self.assertLessEqual(len(daily_margins), 6)
+        self.assertGreater(daily_margins[0], 0)
+        self.assertEqual(daily_margins[0], morning_daily["min_target_margin"])
+        self.assertEqual(daily_margins[-1], morning_daily["max_target_margin"])
+        self.assertEqual(
+            daily_margins, sorted(set(daily_margins))
         )
+        self.assertTrue(all(margin % 150 == 0 for margin in daily_margins))
         self.assertEqual(
             evening_payload["projection"], morning_payload["projection"]
         )
         self.assertEqual(
-            evening_payload["bet_options"]["daily"],
-            morning_payload["bet_options"]["daily"],
+            evening_payload["bet_options"]["daily"], morning_daily
         )
 
 
@@ -380,13 +394,16 @@ class BetAPITests(RivalAPITestBase):
         self.assertEqual(repeat.json()["bet"]["id"], weekly_payload["bet"]["id"])
         self.assertEqual(store.get_diamond_balance("owner", now=NOW), 1000)
 
+        daily_target = weekly_payload["state"]["bet_options"]["daily"][
+            "target_options"
+        ][0]["margin"]
         daily = client.post(
             "/v1/me/bets",
             headers=auth(),
             json={
                 "kind": "daily",
                 "paid_stake": 80,
-                "target_margin": 50,
+                "target_margin": daily_target,
                 "request_id": "d-1",
             },
         )
@@ -395,7 +412,7 @@ class BetAPITests(RivalAPITestBase):
         self.assertEqual(daily_bet["stake"], 100)
         self.assertEqual(daily_bet["free_stake"], 20)
         self.assertEqual(daily_bet["paid_stake"], 80)
-        self.assertEqual(daily_bet["target_margin"], 50)
+        self.assertEqual(daily_bet["target_margin"], daily_target)
         self.assertGreaterEqual(daily_bet["odds"], 1.2)
         self.assertLessEqual(daily_bet["odds"], 15.0)
         daily_options = daily.json()["state"]["bet_options"]["daily"]
@@ -406,11 +423,13 @@ class BetAPITests(RivalAPITestBase):
         daily_margins = [
             entry["margin"] for entry in daily_options["target_options"]
         ]
-        self.assertEqual(daily_margins[0], 0)
+        self.assertGreater(daily_margins[0], 0)
+        self.assertEqual(daily_margins[0], daily_options["min_target_margin"])
         self.assertEqual(daily_margins[-1], daily_options["max_target_margin"])
         self.assertEqual(daily_margins, sorted(set(daily_margins)))
-        self.assertGreater(len(daily_margins), 2)
-        self.assertEqual(preview[50], daily_bet["odds"])
+        self.assertGreaterEqual(len(daily_margins), 3)
+        self.assertLessEqual(len(daily_margins), 6)
+        self.assertEqual(preview[daily_target], daily_bet["odds"])
         self.assertEqual(store.get_diamond_balance("owner", now=NOW), 920)
 
         duplicate_daily = client.post(
@@ -419,7 +438,7 @@ class BetAPITests(RivalAPITestBase):
             json={
                 "kind": "daily",
                 "paid_stake": 0,
-                "target_margin": 0,
+                "target_margin": daily_target,
                 "request_id": "d-2",
             },
         )
@@ -605,6 +624,10 @@ class BetAPITests(RivalAPITestBase):
     def test_daily_bet_locks_at_2100(self) -> None:
         client = self.client()
         self.select_first(client)
+        state = client.get("/v1/me/rival", headers=auth()).json()
+        daily_target = state["bet_options"]["daily"]["target_options"][0][
+            "margin"
+        ]
         self.clock["now"] = datetime(2026, 11, 2, 21, 0, 0, tzinfo=TZ)
         response = client.post(
             "/v1/me/bets",
@@ -612,7 +635,7 @@ class BetAPITests(RivalAPITestBase):
             json={
                 "kind": "daily",
                 "paid_stake": 0,
-                "target_margin": 50,
+                "target_margin": daily_target,
                 "request_id": "late",
             },
         )
