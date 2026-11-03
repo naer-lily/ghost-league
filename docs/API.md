@@ -1161,10 +1161,13 @@ odds = round(odds, 2)
   `reward_diamonds`、`settled_at`），没有则为 `null`。
 - `bet_options` 与 `bets` 并列，存放前端可直接渲染的下注参数。`weekly` / `daily`
   在没有宿敌时为 `null`；`group` 在没有小组时为 `null`。周注/日注对象包含
-  `target_options`（每项 `margin` + 锁注赔率 `odds`）、`min_target_margin`、
-  `max_target_margin`、`min_paid_stake`、`max_paid_stake`、`free_stake` 和
+  `target_options`（每项 `margin` + 锁注赔率 `odds`；日注还带 `expected_xp`）、
+  `min_target_margin`、`max_target_margin`、`min_paid_stake`、`max_paid_stake`、
+  `free_stake` 和
   `reference`；日注的 `min_target_margin` 就是第一个正档位，`reference` 是
-  `μD` 的整数近似（赔率不再使用它）。组注对象保留旧的 `target_rank: 3`、
+  `μD` 的整数近似（赔率不再使用它）。日注的 `expected_xp` 是
+  `round_to_10(daily_mu_rival + margin)`，即“预计宿敌日均 + 目标差值”，不是
+  我的当前 XP 或实时估算；周注不返回该字段。组注对象保留旧的 `target_rank: 3`、
   `target_margin: 0` 和
   `odds`（前三盘口），并新增 `markets`；`markets` 与 `bets.groups` 是同结构、
   同顺序的可用盘口（Silver 等中间段位为三项；Bronze 不含 `no_demote`，Diamond
@@ -1191,9 +1194,11 @@ odds = round(odds, 2)
 
 日估计：`daily_mu_*` / `daily_sd_*` 是按上面“目标差值与赔率”的战力分段历史分布
 算出的双方均值与样本标准差；`daily_mu_diff` / `daily_sigma_diff` 是差值的 μD/σD；
-`daily_target_margins` 是当天实际可下的正档位。只读今天之前的 checkins，且不读
-当天实时 XP，因此同一天 `09:00` 与 `21:00` 的 `projection`、`target_options` 和
-赔率完全一致（前提是同一份历史）。
+`daily_target_margins` 是当天实际可下的正档位。每个档位的 `expected_xp` 由
+`daily_mu_rival + margin` 四舍五入到 10 得到，表示达到该档位预计需要的总 XP。
+只读今天之前的 checkins，且不读
+当天实时 XP，因此同一天 `09:00` 与 `21:00` 的 `projection`、`target_options`（含
+`expected_xp`）和赔率完全一致（前提是同一份历史）。
 
 ### `GET /v1/me/rival/candidates`
 

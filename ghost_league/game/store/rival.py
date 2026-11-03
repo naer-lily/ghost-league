@@ -31,6 +31,7 @@ from ..rival import (
     daily_bet_odds,
     daily_bet_settles_at,
     daily_distribution_parameters,
+    daily_expected_xp,
     daily_target_margins,
     odds_reference,
     projected_week_xp,
@@ -367,6 +368,7 @@ class RivalMixin:
             ]
             daily_mu_diff = float(projection["daily_mu_diff"])
             daily_sigma_diff = float(projection["daily_sigma_diff"])
+            daily_mu_rival = float(projection["daily_mu_rival"])
             common = {
                 "min_paid_stake": MIN_PAID_STAKE,
                 "max_paid_stake": MAX_PAID_STAKE,
@@ -398,6 +400,9 @@ class RivalMixin:
                         "margin": margin,
                         "odds": daily_bet_odds(
                             margin, daily_mu_diff, daily_sigma_diff
+                        ),
+                        "expected_xp": daily_expected_xp(
+                            daily_mu_rival, margin
                         ),
                     }
                     for margin in daily_margins

@@ -34,6 +34,7 @@ const DEFAULT_MAX_PAID = 500
 interface TargetOptionButtonProps {
   margin: number
   odds: number
+  expectedXp?: number | undefined
   selected: boolean
   disabled: boolean
   onSelect: () => void
@@ -42,6 +43,7 @@ interface TargetOptionButtonProps {
 function TargetOptionButton({
   margin,
   odds,
+  expectedXp,
   selected,
   disabled,
   onSelect,
@@ -58,6 +60,11 @@ function TargetOptionButton({
       onClick={onSelect}
     >
       <span className={styles.optionTitle}>+{formatXp(margin)} XP</span>
+      {expectedXp !== undefined ? (
+        <span className={styles.optionExpected}>
+          预计 {formatXp(expectedXp)} XP
+        </span>
+      ) : null}
       <span className={styles.optionLine}>赔率 ×{formatOdds(odds)}</span>
     </button>
   )
@@ -348,6 +355,7 @@ export function RivalBetDialog({
                       key={entry.margin}
                       margin={entry.margin}
                       odds={entry.odds}
+                      expectedXp={isDaily ? entry.expected_xp : undefined}
                       selected={entry.margin === selectedTarget?.margin}
                       disabled={Boolean(currentBet) || Boolean(closed)}
                       onSelect={() => {
@@ -428,6 +436,14 @@ export function RivalBetDialog({
                         : '—'}
                     </strong>
                   </div>
+                  {isDaily && selectedTarget ? (
+                    <div>
+                      <span>预计需要</span>
+                      <strong data-testid="rival-bet-expected">
+                        {formatXp(selectedTarget.expected_xp)} XP
+                      </strong>
+                    </div>
+                  ) : null}
                   <div>
                     <span>赔率</span>
                     <strong data-testid="rival-bet-odds">

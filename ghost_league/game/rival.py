@@ -68,6 +68,9 @@ DAILY_BAND_MIN_SAMPLES: Final = 20
 DAILY_PRIOR_MEAN_XP: Final = 0.0
 DAILY_PRIOR_SD_XP: Final = 150.0
 DAILY_TARGET_STEP: Final = 150
+# ``expected_xp`` is the rival's daily mean plus the target margin, rounded to
+# this step.  It previews the total XP needed to reach a daily tier.
+DAILY_EXPECTED_XP_STEP: Final = 10
 DAILY_TARGET_QUANTILES: Final[tuple[float, ...]] = (0.50, 0.60, 0.70, 0.80, 0.90)
 DAILY_TARGET_EXTENDED_QUANTILES: Final[tuple[float, ...]] = (
     0.95,
@@ -599,6 +602,18 @@ def daily_target_margins(
     return sorted(margins)[:DAILY_TARGET_MAX_OPTIONS]
 
 
+def daily_expected_xp(mu_rival: float, margin: int) -> int:
+    """Estimated total XP for a daily tier: rival mean plus the margin.
+
+    This is the rival's projected daily XP plus the required gap, not the
+    caller's current XP and not a live estimate.
+    """
+
+    return round_to_step(
+        float(mu_rival) + int(margin), DAILY_EXPECTED_XP_STEP
+    )
+
+
 def daily_bet_odds(
     target_margin: int,
     mu_diff: float,
@@ -631,7 +646,7 @@ def daily_target_options(
     mu_rival: float,
     sd_rival: float,
 ) -> list[dict[str, float | int]]:
-    """Return the positive daily tiers with their locked-in preview odds."""
+    """Return the positive daily tiers with odds and expected total XP."""
 
     mu_diff, sigma_diff = daily_distribution_parameters(
         mu_me, sd_me, mu_rival, sd_rival
@@ -640,6 +655,7 @@ def daily_target_options(
         {
             "margin": margin,
             "odds": daily_bet_odds(margin, mu_diff, sigma_diff),
+            "expected_xp": daily_expected_xp(mu_rival, margin),
         }
         for margin in daily_target_margins(
             mu_me, sd_me, mu_rival, sd_rival
@@ -868,6 +884,7 @@ __all__ = [
     "DAILY_BET_LOCK_TIME",
     "DAILY_BET_SETTLE_TIME",
     "DAILY_HISTORY_DAYS",
+    "DAILY_EXPECTED_XP_STEP",
     "DAILY_MIN_HISTORY_DAYS",
     "DAILY_ODDS_MAX",
     "DAILY_ODDS_MIN",
@@ -923,6 +940,7 @@ __all__ = [
     "daily_bet_odds",
     "daily_bet_settles_at",
     "daily_distribution_parameters",
+    "daily_expected_xp",
     "daily_target_margins",
     "daily_target_options",
     "group_bet_settles_at",

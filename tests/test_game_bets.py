@@ -23,6 +23,7 @@ from ghost_league.game.rival import (
     payout_for_win,
     power_anchor_factor,
     power_ratio,
+    round_to_step,
     target_anchor,
     target_in_range,
     target_options,
@@ -177,6 +178,9 @@ def test_daily_target_options_are_positive_and_stepped() -> None:
     assert [entry["odds"] for entry in options] == sorted(
         entry["odds"] for entry in options
     )
+    assert [entry["expected_xp"] for entry in options] == [
+        round_to_step(500 + margin, 10) for margin in margins
+    ]
     # No daily projection can offer a zero tier.
     assert 0 not in margins
 

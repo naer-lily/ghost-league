@@ -17,6 +17,7 @@ from ghost_league.game.rival import (
     daily_target_margins,
     daily_target_options,
     power_band,
+    round_to_step,
     sample_mean_sd,
 )
 from ghost_league.game.store import GameStore
@@ -430,6 +431,15 @@ def test_projection_uses_settled_week_and_daily_distribution(
         daily_bet_odds(300, 0.0, 300.0),
         daily_bet_odds(450, 0.0, 300.0),
     ]
+    assert [
+        entry["expected_xp"] for entry in daily_options["target_options"]
+    ] == [
+        round_to_step(projection["daily_mu_rival"] + margin, 10)
+        for margin in projection["daily_target_margins"]
+    ]
+    assert [
+        entry["expected_xp"] for entry in daily_options["target_options"]
+    ] == [500, 650, 800]
 
 
 def test_projection_falls_back_without_settled_week(tmp_path: Path) -> None:
@@ -561,6 +571,11 @@ def test_daily_target_options_match_odds_and_stay_monotonic() -> None:
         daily_bet_odds(600, 350, 141.42),
         daily_bet_odds(750, 350, 141.42),
     ]
+    # Expected XP is the rival's daily mean plus the target gap, not my XP.
+    assert [entry["expected_xp"] for entry in options] == [
+        round_to_step(500 + margin, 10) for margin in (450, 600, 750)
+    ]
+    assert [entry["expected_xp"] for entry in options] == [950, 1100, 1250]
     odds = [entry["odds"] for entry in options]
     assert odds == sorted(odds)
     assert odds[0] >= 1.2

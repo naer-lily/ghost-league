@@ -261,6 +261,7 @@ export interface BetWindows {
 export interface TargetOption {
   margin: number
   odds: number
+  expected_xp: number
 }
 
 export interface RivalBetOption {

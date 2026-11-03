@@ -261,6 +261,19 @@ class RivalStateAPITests(RivalAPITestBase):
         daily_margins = [
             entry["margin"] for entry in morning_daily["target_options"]
         ]
+        self.assertTrue(
+            all(
+                "expected_xp" in entry
+                for entry in morning_daily["target_options"]
+            )
+        )
+        self.assertTrue(
+            all(
+                isinstance(entry["expected_xp"], int)
+                and entry["expected_xp"] >= entry["margin"]
+                for entry in morning_daily["target_options"]
+            )
+        )
         self.assertEqual(
             daily_margins, morning_projection["daily_target_margins"]
         )

@@ -560,8 +560,14 @@ describe('RivalPage', () => {
     expect(within(dialog).getByTestId('rival-target-150')).toHaveTextContent(
       '+150 XP',
     )
+    expect(within(dialog).getByTestId('rival-target-150')).toHaveTextContent(
+      '预计 650 XP',
+    )
     expect(within(dialog).getByTestId('rival-target-300')).toHaveTextContent(
       '赔率 ×3.10',
+    )
+    expect(within(dialog).getByTestId('rival-target-300')).toHaveTextContent(
+      '预计 800 XP',
     )
     expect(within(dialog).getByTestId('rival-target-600')).toBeInTheDocument()
     expect(within(dialog).queryByTestId('rival-target-0')).toBeNull()
@@ -573,6 +579,9 @@ describe('RivalPage', () => {
     await user.click(within(dialog).getByTestId('rival-target-300'))
     expect(within(dialog).getByTestId('rival-bet-target')).toHaveTextContent(
       '+300 XP',
+    )
+    expect(within(dialog).getByTestId('rival-bet-expected')).toHaveTextContent(
+      '800 XP',
     )
     expect(within(dialog).getByTestId('rival-bet-odds')).toHaveTextContent(
       '×3.10',

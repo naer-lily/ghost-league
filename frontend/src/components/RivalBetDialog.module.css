@@ -183,6 +183,13 @@
   font-weight: 900;
 }
 
+.optionExpected {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .optionLine {
   color: var(--rival-mint);
   font-size: 0.64rem;
@@ -287,7 +294,7 @@
 
 .summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
   gap: 6px;
   margin-top: 10px;
   padding: 9px;

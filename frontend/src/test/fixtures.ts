@@ -64,10 +64,10 @@ export function makeBetOptions(
   return {
     weekly: {
       target_options: [
-        { margin: 0, odds: 1.2 },
-        { margin: 150, odds: 1.5 },
-        { margin: 300, odds: 2 },
-        { margin: 600, odds: 3.2 },
+        { margin: 0, odds: 1.2, expected_xp: 500 },
+        { margin: 150, odds: 1.5, expected_xp: 650 },
+        { margin: 300, odds: 2, expected_xp: 800 },
+        { margin: 600, odds: 3.2, expected_xp: 1100 },
       ],
       min_target_margin: 0,
       max_target_margin: 600,
@@ -78,9 +78,9 @@ export function makeBetOptions(
     },
     daily: {
       target_options: [
-        { margin: 150, odds: 2 },
-        { margin: 300, odds: 3.1 },
-        { margin: 600, odds: 5 },
+        { margin: 150, odds: 2, expected_xp: 650 },
+        { margin: 300, odds: 3.1, expected_xp: 800 },
+        { margin: 600, odds: 5, expected_xp: 1100 },
       ],
       min_target_margin: 150,
       max_target_margin: 600,
