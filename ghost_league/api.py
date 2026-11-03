@@ -650,6 +650,7 @@ class GameService:
         week_seconds = int(snapshot.get("seconds") or 0)
         loadout = self.store.loadout_view(user_id)
         wallet = self.store.get_diamond_wallet(user_id, now=now)
+        diamond_boost = self.store.diamond_boost_state(user_id, now=now)
         streak = snapshot.get("streak") or {
             "current": 0,
             "longest": 0,
@@ -690,6 +691,7 @@ class GameService:
             "diamond_cap": wallet["diamond_cap"],
             "diamond_cap_level": wallet["diamond_cap_level"],
             "diamond_excess": wallet["diamond_excess"],
+            "diamond_boost": diamond_boost,
             "inventory": self._inventory_summary(user_id),
             "stars": self.store.list_player_stars(user_id),
             "equipped_title": loadout["title"],
@@ -725,6 +727,7 @@ class GameService:
                 "diamond_cap",
                 "diamond_cap_level",
                 "diamond_excess",
+                "diamond_boost",
                 "inventory",
                 "stars",
             ):

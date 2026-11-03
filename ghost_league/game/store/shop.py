@@ -256,11 +256,14 @@ class ShopMixin:
         ref_id: str | None,
         idempotency_key: str,
         now: datetime,
+        boost: bool = False,
     ) -> dict[str, Any]:
         """Credit inside an existing transaction, keyed for idempotency.
 
         Settlement code (rival rewards, bet payouts) shares a transaction with
         its own status update, so it must not open a nested transaction.
+        ``boost`` is opt-in: normal game income asks for the configured
+        multiplier, while operator/test grants keep the base amount.
         """
 
         prior = self._ledger_by_key_with(conn, idempotency_key)
@@ -268,24 +271,29 @@ class ShopMixin:
             self._require_same_ledger(
                 prior,
                 player_id=player_id,
-                delta=int(amount),
+                delta=None if boost else int(amount),
                 reason=reason,
                 ref_type=ref_type,
                 ref_id=ref_id,
             )
             return self._ledger_result(prior, duplicate=True)
 
+        credited = int(amount)
+        if boost:
+            credited *= self._active_boost_multiplier_with(
+                conn, player_id, now
+            )
         created_at = cal.iso_ts(now)
         row = self._sync_diamond_decay_with(
             conn, player_id, now, create_for_unknown=True
         )
         balance = 0 if row is None else int(row["balance"])
-        new_balance = balance + int(amount)
+        new_balance = balance + credited
         self._set_diamond_balance_with(conn, player_id, new_balance, created_at)
         ledger_id = self._insert_diamond_ledger_with(
             conn,
             player_id=player_id,
-            delta=int(amount),
+            delta=credited,
             balance_after=new_balance,
             reason=reason,
             ref_type=ref_type,
@@ -295,7 +303,7 @@ class ShopMixin:
         )
         return {
             "player_id": player_id,
-            "delta": int(amount),
+            "delta": credited,
             "balance": new_balance,
             "ledger_id": ledger_id,
             "duplicate": False,
@@ -517,14 +525,14 @@ class ShopMixin:
         prior: sqlite3.Row,
         *,
         player_id: str,
-        delta: int,
+        delta: int | None,
         reason: str,
         ref_type: str | None,
         ref_id: str | None,
     ) -> None:
         same = (
             str(prior["player_id"]) == player_id
-            and int(prior["delta"]) == delta
+            and (delta is None or int(prior["delta"]) == delta)
             and str(prior["reason"]) == reason
             and (prior["ref_type"] or None) == (ref_type or None)
             and (prior["ref_id"] or None) == (ref_id or None)
@@ -762,6 +770,7 @@ class ShopMixin:
                             "available": True,
                         }
                     )
+            catalog.extend(self._boost_catalog_with(conn))
             return catalog
 
     @staticmethod
@@ -932,6 +941,7 @@ class ShopMixin:
                 EMBER_ITEM_ID,
             }
             or item_id.startswith(CAP_ITEM_PREFIX)
+            or self._is_boost_item(item_id)
         ) and quantity != SINGLE_PURCHASE_QUANTITY:
             raise ShopQuantityRejected(
                 "quantity_must_be_one",
@@ -968,6 +978,17 @@ class ShopMixin:
                 return payload
 
             self._ensure_diamond_owner_with(conn, player_id)
+
+            if self._is_boost_item(item_id):
+                return self._purchase_diamond_boost_with(
+                    conn,
+                    player_id=player_id,
+                    item_id=item_id,
+                    quantity=quantity,
+                    request_id=key,
+                    now=local_now,
+                    created_at=created_at,
+                )
 
             upgrade = self._cap_upgrade_with(conn, item_id)
             if upgrade is not None:

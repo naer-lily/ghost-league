@@ -755,6 +755,7 @@ class BetsMixin:
             ref_id=str(bet_id),
             idempotency_key=f"bet-payout:{bet_id}",
             now=now,
+            boost=True,
         )
 
     def _credit_group_payout_with(
@@ -777,6 +778,7 @@ class BetsMixin:
             ref_id=str(group_bet_id),
             idempotency_key=f"group-bet-payout:{group_bet_id}",
             now=now,
+            boost=True,
         )
 
     # ------------------------------------------------------------------

@@ -85,6 +85,36 @@ function makeCatalog(): ShopItem[] {
       available: true,
     },
     {
+      id: 'diamond_boost_25',
+      name: '经验宝 · 25 分钟',
+      description: '',
+      price_diamonds: 25,
+      currency: 'diamonds',
+      kind: 'boost',
+      active: true,
+      minutes: 25,
+      multiplier: 2,
+      owned_quantity: 0,
+      cooldown_seconds: 0,
+      cooldown_until: null,
+      available: true,
+    },
+    {
+      id: 'diamond_boost_60',
+      name: '经验宝 · 60 分钟',
+      description: '',
+      price_diamonds: 60,
+      currency: 'diamonds',
+      kind: 'boost',
+      active: true,
+      minutes: 60,
+      multiplier: 2,
+      owned_quantity: 0,
+      cooldown_seconds: 0,
+      cooldown_until: null,
+      available: true,
+    },
+    {
       id: 'diamond_cap_1',
       name: '仓库上限 1 级',
       description: '仓库上限 +500。',
@@ -405,6 +435,13 @@ describe('InventoryPage', () => {
         'shop-item-ember',
       ),
     ).toBeInTheDocument()
+    const boostsCategory = within(shop).getByTestId('shop-category-boosts')
+    expect(within(boostsCategory).getByTestId('shop-item-diamond_boost_25'))
+      .toBeInTheDocument()
+    expect(within(boostsCategory).getByTestId('shop-item-diamond_boost_60'))
+      .toBeInTheDocument()
+    expect(within(boostsCategory).queryByTestId('diamond-boost-status'))
+      .not.toBeInTheDocument()
     expect(
       within(within(shop).getByTestId('shop-category-cap')).getByTestId(
         'shop-item-diamond_cap_1',
@@ -711,6 +748,41 @@ describe('InventoryPage', () => {
     expect(within(row as HTMLElement).queryByRole('button')).toBeNull()
     expect(within(row as HTMLElement).getByText('没有装备槽的收藏品。'))
       .toBeInTheDocument()
+  })
+
+  it('shows the boost category and remaining time only while a boost is active', async () => {
+    const fetchMock = mockApi({
+      status: {
+        diamond_boost: {
+          expires_at: '2026-11-02T13:00:00+08:00',
+          remaining_seconds: 900,
+          multiplier: 2,
+        },
+      },
+    })
+    renderInventory()
+    await screen.findByRole('heading', { name: '物品' })
+
+    const category = await screen.findByTestId('shop-category-boosts')
+    expect(within(category).getByTestId('shop-item-diamond_boost_25'))
+      .toHaveTextContent('25 分钟')
+    expect(within(category).getByText('剩余 15 分钟')).toBeInTheDocument()
+
+    await userEvent.click(
+      within(category).getByTestId('shop-item-diamond_boost_25')
+        .querySelector('button') as HTMLButtonElement,
+    )
+    const purchaseCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).endsWith('/v1/shop/purchase'),
+    )
+    const body = JSON.parse(String(purchaseCall?.[1]?.body)) as {
+      item_id: string
+      quantity: number
+      request_id: string
+    }
+    expect(body.item_id).toBe('diamond_boost_25')
+    expect(body.quantity).toBe(1)
+    expect(body.request_id.length).toBeGreaterThan(8)
   })
 
   it('opens star details and closes them with Escape', async () => {

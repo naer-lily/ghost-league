@@ -447,6 +447,11 @@
   color: var(--blue);
 }
 
+.boostIcon {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
 .supplyHead h3 {
   font-size: 0.9rem;
   font-weight: 900;
@@ -578,6 +583,15 @@
   color: var(--muted);
   font-size: 0.68rem;
   line-height: 1.45;
+}
+
+.categoryText .boostStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--green);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
 }
 
 .collectionActions {

@@ -680,6 +680,11 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
   "diamond_cap": 1000,
   "diamond_cap_level": 0,
   "diamond_excess": 1700,
+  "diamond_boost": {
+    "expires_at": null,
+    "remaining_seconds": 0,
+    "multiplier": 1
+  },
   "inventory": {"star": 1, "seasonal_star": 1, "ember": 1},
   "stars": [
     {
@@ -724,6 +729,10 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 - 钻石是**软上限**：余额可以超过上限，超出部分 `diamond_excess = max(0, diamonds - cap)`
   不删、不拒绝入账，按完整小时 1% 复利损耗；只有完整小时计费，重复读取同一小时不会
   重复扣。服务器离线后按 `last_decay_at` 在下次钱包读写或 `diamond-decay` job 补算。
+- `diamond_boost` 是当前生效的经验宝状态：`expires_at` 是到期时间，`remaining_seconds`
+  是服务端时钟下的剩余秒数，`multiplier` 是生效倍率。未生效/已过期时 `expires_at=null`、
+  `remaining_seconds=0`、`multiplier=1`。倍率只作用于正常游戏钻石入账，初始钱包和管理
+  发钻不乘。
 - `inventory` 至少包含 `star`、`seasonal_star` 与 `ember`。`inventory.star` 读取通用物品栏
   `inventory_items`，是普通星数量；`inventory.seasonal_star` 是季节星数量；
   `inventory.ember` 直接读取现有 `ember_balance.balance`，不复制到 `inventory_items`。
@@ -733,10 +742,10 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
   `type_label`、`rarity`、`rarity_label`、`palette`、`visual_seed`、
   `companion_count`、`catalog_code`、`acquired_at` 和 `svg_url`。名字只给本人看；
   只按 `acquired_at` 升序返回本人数据。
-- 钻石、上限、物品栏和星星只在自己的 `/v1/me/status` 返回；`status_for_user`
+- 钻石、上限、经验宝、物品栏和星星只在自己的 `/v1/me/status` 返回；`status_for_user`
   （badge/widget 快照）、榜单、公开资料、`/v1/users/{id}` 和任何他人视角都不包含
-  `diamonds`、`diamond_cap`、`diamond_cap_level`、`diamond_excess`、`inventory`、
-  `stars`。
+  `diamonds`、`diamond_cap`、`diamond_cap_level`、`diamond_excess`、`diamond_boost`、
+  `inventory`、`stars`。
 - `power` 是 0–2000 的派生展示战力。计算窗口为最近 4 个自然周（含当前未结束周），
   权重从新到旧为 `0.4 / 0.3 / 0.2 / 0.1`，只按该玩家实际有 `weekly_scores` 行的周
   重新归一化；每周百分位 `p = (less_count + equal_count / 2) / total_count`，
@@ -781,6 +790,8 @@ curl -sS "https://your-host.example/v1/me/status" \
 python3 -m ghost_league.game.jobs grant-diamonds --player <id> --amount 3000 --reason test
 ```
 
+该命令是管理/测试发钻，不受经验宝倍率影响。
+
 当前商品：
 
 | id | kind | 名称 | 价格 | 发货 | 限制 |
@@ -789,6 +800,33 @@ python3 -m ghost_league.game.jobs grant-diamonds --player <id> --amount 3000 --r
 | `seasonal_star` | `seasonal_star` | 季节星抽卡 | 500 钻石/抽 | 随机一颗当季星写 `player_stars`，并递增 `inventory_items.seasonal_star` | 每个玩家每个自然月最多 1 颗；名字可省略 |
 | `ember` | `ember` | 余烬 | 800 钻石/个 | 进入现有 `ember_balance`，不写 `inventory_items` | 每次只能买 1 个；72 小时冷却 |
 | `diamond_cap_1` … `diamond_cap_5` | `cap` | 仓库上限升级 | 500 / 800 / 1200 / 1800 / 2600 | 扣钻石，上限 +500，等级 +1 | 只能按当前等级买下一级；5 级后不再出现 |
+| `diamond_boost_25` | `boost` | 经验宝 · 配置分钟数 | `diamond_boost_25_price` | 扣钻石，写入/顺延 `diamond_boosts` | 每次只能买 1 个；`diamond_boost_25_active=0` 时不可购买 |
+| `diamond_boost_60` | `boost` | 经验宝 · 配置分钟数 | `diamond_boost_60_price` | 扣钻石，写入/顺延 `diamond_boosts` | 每次只能买 1 个；`diamond_boost_60_active=0` 时不可购买 |
+
+经验宝是长期平衡参数，读取 `game_config`，不写死在代码里：
+
+| key | 种子值 | 含义 |
+| --- | --- | --- |
+| `diamond_boost_multiplier` | `2` | 生效期间正常钻石入账倍率 |
+| `diamond_boost_25_price` | `25` | 25 档价格 |
+| `diamond_boost_25_minutes` | `25` | 25 档分钟数 |
+| `diamond_boost_60_price` | `60` | 60 档价格 |
+| `diamond_boost_60_minutes` | `60` | 60 档分钟数 |
+| `diamond_boost_25_active` | `1` | 25 档是否上架 |
+| `diamond_boost_60_active` | `1` | 60 档是否上架 |
+
+种子只在缺失时插入，不覆盖运营改过的值。配置缺省或非法时，该商品不出现、购买返回
+`409 boost_config_invalid`，不会按 0 价格或 0 倍率成交。调整示例：
+
+```bash
+sqlite3 data/league/league.db \
+  "UPDATE game_config SET value='30', updated_at=datetime('now') WHERE key='diamond_boost_25_price';"
+```
+
+购买成功会扣对应价格；已有未到期经验宝时从原到期时间顺延分钟数，否则从现在开始。
+`diamond_boosts` 每个玩家一行，记录当前 `multiplier`、`expires_at`、`updated_at`。
+生效期间宿敌奖励、下注派彩等正常钻石入账按配置倍率入账；初始 1000 钱包和管理/测试
+`grant-diamonds` 不乘。经验宝只改钻石入账，不改 XP、打卡、战力或 WakaTime 数据。
 
 上限阶梯：
 
@@ -831,9 +869,11 @@ python3 -m ghost_league.game.jobs grant-diamonds --player <id> --amount 3000 --r
 ### `GET /v1/shop`
 
 Bearer 鉴权。返回当前可买商品数组。普通商品按 `sort` 排序；仓库升级只返回当前等级
-的下一级（5 级后无升级项）。字段包含 `kind`；季节星额外带 `season_key`；上限升级
-额外带 `required_cap_level`。`available` 综合考虑冷却、季节窗口和上限等级；余额是否
-足够仍在购买时单独校验。
+的下一级（5 级后无升级项）；经验宝不写 `shop_items`，每次由 `game_config` 生成两个
+固定 SKU。字段包含 `kind`；季节星额外带 `season_key`；上限升级额外带
+`required_cap_level`；经验宝额外带 `active`、`minutes`、`multiplier`，其中 `active`
+表示该档是否上架。`available` 综合考虑冷却、季节窗口、上限等级和经验宝上架状态；
+余额是否足够仍在购买时单独校验。
 
 ```json
 [
@@ -892,6 +932,36 @@ Bearer 鉴权。返回当前可买商品数组。普通商品按 `sort` 排序�
     "cooldown_seconds": 0,
     "cooldown_until": null,
     "available": true
+  },
+  {
+    "id": "diamond_boost_25",
+    "name": "经验宝 · 25 分钟",
+    "description": "",
+    "price_diamonds": 25,
+    "currency": "diamonds",
+    "kind": "boost",
+    "active": true,
+    "minutes": 25,
+    "multiplier": 2,
+    "owned_quantity": 0,
+    "cooldown_seconds": 0,
+    "cooldown_until": null,
+    "available": true
+  },
+  {
+    "id": "diamond_boost_60",
+    "name": "经验宝 · 60 分钟",
+    "description": "",
+    "price_diamonds": 60,
+    "currency": "diamonds",
+    "kind": "boost",
+    "active": true,
+    "minutes": 60,
+    "multiplier": 2,
+    "owned_quantity": 0,
+    "cooldown_seconds": 0,
+    "cooldown_until": null,
+    "available": true
   }
 ]
 ```
@@ -899,9 +969,10 @@ Bearer 鉴权。返回当前可买商品数组。普通商品按 `sort` 排序�
 ### `POST /v1/shop/purchase`
 
 Bearer 鉴权。`request_id` 必填，用于幂等；同一个 `request_id` 重复提交只扣一次款并
-返回同一购买结果（`replayed=true`），不会重新抽卡或重复扣钻石。`quantity` 缺省为 1；
-普通星/季节星/余烬/上限升级都只能一次买 1 个。普通星和季节星的 `name` 可省略；省略
-时由服务器生成默认名，显式空字符串仍返回 `422 invalid_star_name`。
+返回同一购买结果（`replayed=true`），不会重新抽卡、重复扣钻石或重复顺延经验宝。
+`quantity` 缺省为 1；普通星/季节星/余烬/上限升级/经验宝都只能一次买 1 个。普通星和
+季节星的 `name` 可省略；省略时由服务器生成默认名，显式空字符串仍返回
+`422 invalid_star_name`。
 
 ```json
 {
@@ -952,6 +1023,34 @@ Bearer 鉴权。`request_id` 必填，用于幂等；同一个 `request_id` 重�
 购买后会扣钻石、`diamond_cap += 500`、`diamond_cap_level += 1`，并重新计算
 `diamond_excess`。购买本身是消费，不受旧上限阻塞；余额不足仍然拒绝。
 
+经验宝示例：
+
+```json
+{"item_id": "diamond_boost_25", "quantity": 1, "request_id": "boost-1"}
+```
+
+成功响应额外带当前状态：
+
+```json
+{
+  "ok": true,
+  "item_id": "diamond_boost_25",
+  "quantity": 1,
+  "diamonds": 975,
+  "diamond_cap": 1000,
+  "diamond_cap_level": 0,
+  "diamond_excess": 0,
+  "inventory": {"star": 0, "seasonal_star": 0, "ember": 0},
+  "cooldown_until": null,
+  "replayed": false,
+  "diamond_boost": {
+    "expires_at": "2026-11-02T12:25:00+08:00",
+    "remaining_seconds": 1500,
+    "multiplier": 2
+  }
+}
+```
+
 扣款、抽卡结果、星记录、物品栏、冷却、流水和 request 记录在同一个 SQLite 事务内完成。
 任何一步失败都会回滚，普通星失败不会留下半颗星或半条流水。同一个 `request_id`
 重放时直接返回已保存的 `star`，不会再抽一次。
@@ -965,6 +1064,8 @@ Bearer 鉴权。`request_id` 必填，用于幂等；同一个 `request_id` 重�
   为 `insufficient_diamonds`。
 - 同月第二颗季节星：`409`，`detail.code='seasonal_star_owned'`，带 `season_key`。
 - 上限升级不是当前下一级或已经满级：`409`，`detail.code='cap_unavailable'`。
+- 经验宝已下架：`409`，`detail.code='boost_inactive'`。
+- 经验宝配置缺省或非法：`409`，`detail.code='boost_config_invalid'`，商品不会出现。
 - `ember` 冷却未到：`409`，响应顶层和 `detail` 都带 `cooldown_until`，
   `detail.code` 为 `cooldown`。
 - 同一 `request_id` 用于不同商品/数量：`409`。
@@ -999,7 +1100,8 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 - 押 `500`：总本金 `520`，自付 `500`。
 
 赢：按 **总本金 × 锁注赔率** 派彩；输：只失去 `paid_stake`；平/void：只退
-`paid_stake`。所有派彩都走 `credit_diamonds()` 的同一本账。
+`paid_stake`。所有派彩都走同一本钻石账；宿敌奖励、下注派彩属于正常游戏入账，生效中
+的经验宝会按配置倍率入账，管理/测试发钻不会。
 
 ### 时间口径（Asia/Shanghai）
 

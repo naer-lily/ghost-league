@@ -32,16 +32,9 @@ export function formatRate(value: number): string {
   return `${Number(percent.toFixed(2))}%`
 }
 
-export function formatRemaining(
-  until: string | null,
-  now: Date = new Date(),
-): string {
-  if (!until) return ''
-  const target = new Date(until)
-  if (Number.isNaN(target.getTime())) return ''
-  const diff = target.getTime() - now.getTime()
-  if (diff <= 0) return ''
-  const minutes = Math.ceil(diff / 60_000)
+export function formatRemainingSeconds(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return ''
+  const minutes = Math.ceil(seconds / 60)
   if (minutes < 60) return `${minutes} 分钟`
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60
@@ -49,6 +42,16 @@ export function formatRemaining(
   const days = Math.floor(hours / 24)
   const dayHours = hours % 24
   return dayHours ? `${days} 天 ${dayHours} 小时` : `${days} 天`
+}
+
+export function formatRemaining(
+  until: string | null,
+  now: Date = new Date(),
+): string {
+  if (!until) return ''
+  const target = new Date(until)
+  if (Number.isNaN(target.getTime())) return ''
+  return formatRemainingSeconds((target.getTime() - now.getTime()) / 1000)
 }
 
 export function formatSeasonKey(seasonKey: string | null | undefined): string {
@@ -109,6 +112,8 @@ export function describeShopError(error: unknown): string {
   }
   if (code === 'seasonal_star_owned') return '本月已经获得过季节星了，下个月再来。'
   if (code === 'cap_unavailable') return '仓库等级已经变化，刷新后再试。'
+  if (code === 'boost_inactive') return '这个经验宝现在不能购买。'
+  if (code === 'boost_config_invalid') return '这个经验宝现在不能购买。'
   if (code === 'unknown_item') return '商店里没有这个条目。'
   if (code === 'not_available') return '这个条目现在暂时不能购买。'
   if (code === 'not_allowed') return '当前账号不能购买这个条目。'

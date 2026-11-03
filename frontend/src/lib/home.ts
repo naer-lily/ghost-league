@@ -1,5 +1,6 @@
 import { ApiError } from '../api/client'
 import type {
+  DiamondBoost,
   HomeSnapshot,
   LeagueGroup,
   StandingRow,
@@ -241,6 +242,7 @@ export interface HomeView {
   diamondCap: number
   diamondCapLevel: number
   diamondExcess: number
+  diamondBoost: DiamondBoost
   stars: Star[]
   starCount: number
   seasonalStarCount: number
@@ -323,6 +325,7 @@ export function buildHomeView(
     diamondCap: Math.max(0, Math.trunc(status.diamond_cap)),
     diamondCapLevel: Math.max(0, Math.trunc(status.diamond_cap_level)),
     diamondExcess: Math.max(0, Math.trunc(status.diamond_excess)),
+    diamondBoost: status.diamond_boost,
     stars: status.stars,
     starCount: status.stars.length,
     seasonalStarCount: status.stars.filter((star) => star.kind === 'seasonal')

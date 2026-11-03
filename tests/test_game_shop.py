@@ -128,6 +128,8 @@ def test_new_human_wallet_and_catalog(tmp_path) -> None:
         "seasonal_star",
         "ember",
         "diamond_cap_1",
+        "diamond_boost_25",
+        "diamond_boost_60",
     }
     assert items["star"]["kind"] == "star"
     assert items["star"]["price_diamonds"] == 300
@@ -853,6 +855,7 @@ class ShopAPITests(unittest.TestCase):
                 "diamond_cap",
                 "diamond_cap_level",
                 "diamond_excess",
+                "diamond_boost",
                 "inventory",
                 "stars",
             }
@@ -876,7 +879,14 @@ class ShopAPITests(unittest.TestCase):
             items = {item["id"]: item for item in shop.json()}
             self.assertEqual(
                 set(items),
-                {"star", "seasonal_star", "ember", "diamond_cap_1"},
+                {
+                    "star",
+                    "seasonal_star",
+                    "ember",
+                    "diamond_cap_1",
+                    "diamond_boost_25",
+                    "diamond_boost_60",
+                },
             )
             self.assertEqual(items["star"]["kind"], "star")
             self.assertEqual(items["seasonal_star"]["kind"], "seasonal_star")
@@ -1179,6 +1189,110 @@ class ShopAPITests(unittest.TestCase):
 
             status = client.get("/v1/me/status", headers=auth()).json()
             self.assertEqual(status["inventory"]["ember"], 2)
+
+
+    def test_diamond_boost_shop_purchase_status_and_idempotency(self) -> None:
+        with self.client() as client:
+            service = client.app.state.game_service
+            store = service.store
+            store.set_game_config("diamond_boost_multiplier", "3", now=NOW)
+            store.set_game_config("diamond_boost_25_price", "30", now=NOW)
+            store.set_game_config("diamond_boost_25_minutes", "5", now=NOW)
+
+            shop = client.get("/v1/shop", headers=auth()).json()
+            items = {item["id"]: item for item in shop}
+            boost = items["diamond_boost_25"]
+            self.assertEqual(boost["kind"], "boost")
+            self.assertEqual(boost["name"], "经验宝 · 5 分钟")
+            self.assertEqual(boost["price_diamonds"], 30)
+            self.assertEqual(boost["minutes"], 5)
+            self.assertEqual(boost["multiplier"], 3)
+            self.assertTrue(boost["active"])
+            self.assertEqual(items["diamond_boost_60"]["minutes"], 60)
+
+            status = client.get("/v1/me/status", headers=auth()).json()
+            self.assertEqual(
+                status["diamond_boost"],
+                {
+                    "expires_at": None,
+                    "remaining_seconds": 0,
+                    "multiplier": 1,
+                },
+            )
+
+            response = client.post(
+                "/v1/shop/purchase",
+                headers=auth(),
+                json={
+                    "item_id": "diamond_boost_25",
+                    "quantity": 1,
+                    "request_id": "boost-1",
+                },
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            body = response.json()
+            self.assertEqual(body["diamonds"], 970)
+            self.assertEqual(
+                body["diamond_boost"],
+                {
+                    "expires_at": "2026-11-02T12:05:00+08:00",
+                    "remaining_seconds": 300,
+                    "multiplier": 3,
+                },
+            )
+
+            replay = client.post(
+                "/v1/shop/purchase",
+                headers=auth(),
+                json={
+                    "item_id": "diamond_boost_25",
+                    "quantity": 1,
+                    "request_id": "boost-1",
+                },
+            )
+            self.assertEqual(replay.status_code, 200, replay.text)
+            self.assertTrue(replay.json()["replayed"])
+            self.assertEqual(replay.json()["diamonds"], 970)
+
+            with store.transaction() as conn:
+                boosted = store._credit_diamonds_with(
+                    conn,
+                    player_id="owner",
+                    amount=10,
+                    reason="rival_reward",
+                    ref_type="rival",
+                    ref_id="api-normal",
+                    idempotency_key="api-normal",
+                    now=NOW,
+                    boost=True,
+                )
+            self.assertEqual(boosted["delta"], 30)
+            self.credit(client, 100, key="api-admin")
+            self.assertEqual(
+                client.get("/v1/me/status", headers=auth()).json()["diamonds"],
+                1100,
+            )
+            self.assertEqual(
+                [row["delta"] for row in store.diamond_ledger("owner")],
+                [-30, 30, 100],
+            )
+
+            store.set_game_config(
+                "diamond_boost_60_active", "0", now=NOW
+            )
+            inactive = {
+                item["id"]: item
+                for item in client.get("/v1/shop", headers=auth()).json()
+            }["diamond_boost_60"]
+            self.assertFalse(inactive["active"])
+            self.assertFalse(inactive["available"])
+            blocked = client.post(
+                "/v1/shop/purchase",
+                headers=auth(),
+                json={"item_id": "diamond_boost_60", "request_id": "off"},
+            )
+            self.assertEqual(blocked.status_code, 409, blocked.text)
+            self.assertEqual(blocked.json()["code"], "boost_inactive")
 
 
 if __name__ == "__main__":  # pragma: no cover

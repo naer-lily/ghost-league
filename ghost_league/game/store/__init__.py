@@ -27,6 +27,12 @@ from ..rules import (
 )
 from .activity import ActivityMixin
 from .bets import BetsMixin
+from .boosts import (
+    BOOST_ITEM_PREFIX,
+    BOOST_SKU_SUFFIXES,
+    DIAMOND_BOOST_MULTIPLIER_KEY,
+    BoostMixin,
+)
 from .channel import ChannelMixin
 from .checkins import CheckinsMixin
 from .core import (
@@ -124,6 +130,7 @@ class GameStore(
     SettlementMixin,
     PowerMixin,
     ShopMixin,
+    BoostMixin,
     RivalMixin,
     BetsMixin,
     JobRunMixin,
@@ -138,11 +145,14 @@ __all__ = [
     "BetError",
     "BetRejected",
     "BetWindowClosed",
+    "BOOST_ITEM_PREFIX",
+    "BOOST_SKU_SUFFIXES",
     "CATALOG_ITEMS",
     "CATALOG_TITLES",
     "CHECKIN_SECONDS",
     "CAP_ITEM_PREFIX",
     "DEFAULT_DB_PATH",
+    "DIAMOND_BOOST_MULTIPLIER_KEY",
     "DIAMOND_CAP_MAX_LEVEL",
     "DIAMOND_CAP_STEP",
     "DIAMOND_DECAY_RATE_PER_HOUR",

@@ -60,16 +60,25 @@ export interface ShopItem {
   description: string
   price_diamonds: number
   currency: 'diamonds'
-  kind: 'star' | 'seasonal_star' | 'ember' | 'cap' | 'inventory'
+  kind: 'star' | 'seasonal_star' | 'ember' | 'cap' | 'boost' | 'inventory'
   owned_quantity: number
   cooldown_seconds: number
   cooldown_until: string | null
   available: boolean
+  active?: boolean
+  minutes?: number
+  multiplier?: number
   gacha?: boolean
   rates?: Record<string, number>
   types?: string[]
   season_key?: string
   required_cap_level?: number
+}
+
+export interface DiamondBoost {
+  expires_at: string | null
+  remaining_seconds: number
+  multiplier: number
 }
 
 export interface StarPurchaseResult {
@@ -83,6 +92,7 @@ export interface StarPurchaseResult {
   inventory: Record<string, number>
   cooldown_until: string | null
   replayed: boolean
+  diamond_boost?: DiamondBoost
   star?: Star
   season_key?: string
 }
@@ -117,6 +127,7 @@ export interface Status {
   diamond_cap: number
   diamond_cap_level: number
   diamond_excess: number
+  diamond_boost: DiamondBoost
   inventory: Record<string, number>
   stars: Star[]
   equipped_title: string | null

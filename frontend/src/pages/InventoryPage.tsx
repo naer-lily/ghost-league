@@ -7,6 +7,7 @@ import {
   RotateCcw,
   Star,
   Timer,
+  Zap,
 } from 'lucide-react'
 import type { CSSProperties, ReactNode } from 'react'
 import { useState } from 'react'
@@ -41,6 +42,7 @@ import {
   formatAcquiredAt,
   formatRate,
   formatRemaining,
+  formatRemainingSeconds,
   formatSeasonKey,
   rarityColor,
   rarityLabel,
@@ -67,7 +69,7 @@ const SLOT_FIELDS: Record<string, LoadoutField> = {
   badge_accent: 'badge_accent_id',
 }
 
-type ShopCategoryId = 'stars' | 'embers' | 'cap' | 'other'
+type ShopCategoryId = 'stars' | 'embers' | 'boosts' | 'cap' | 'other'
 
 interface ShopCategory {
   id: ShopCategoryId
@@ -93,6 +95,14 @@ function groupShopItems(items: ShopItem[]): ShopCategory[] {
       items: items.filter((item) => item.kind === 'ember'),
     },
     {
+      id: 'boosts',
+      label: '增益',
+      icon: Zap,
+      items: items.filter(
+        (item) => item.kind === 'boost' && item.active !== false,
+      ),
+    },
+    {
       id: 'cap',
       label: '仓库上限',
       icon: Package,
@@ -107,6 +117,7 @@ function groupShopItems(items: ShopItem[]): ShopCategory[] {
           item.kind !== 'star' &&
           item.kind !== 'seasonal_star' &&
           item.kind !== 'ember' &&
+          item.kind !== 'boost' &&
           item.kind !== 'cap',
       ),
     },
@@ -250,13 +261,16 @@ function ProductCard({
   const capReady =
     item.kind !== 'cap' ||
     (item.required_cap_level ?? diamondCapLevel) === diamondCapLevel
-  const Icon = item.kind === 'ember' ? Flame : Package
+  const Icon =
+    item.kind === 'ember' ? Flame : item.kind === 'boost' ? Zap : Package
   const iconClass =
     item.kind === 'ember'
       ? styles.emberIcon
-      : item.kind === 'cap'
-        ? styles.capIcon
-        : styles.otherIcon
+      : item.kind === 'boost'
+        ? styles.boostIcon
+        : item.kind === 'cap'
+          ? styles.capIcon
+          : styles.otherIcon
 
   let label = '购买'
   if (item.kind === 'ember') label = '兑换余烬'
@@ -269,9 +283,11 @@ function ProductCard({
   const stats =
     item.kind === 'ember'
       ? `当前余烬 ${formatNumber(emberBalance)} / ${formatNumber(emberCap)}`
-      : item.kind === 'cap'
-        ? `当前仓库 ${diamondCapLevel} 级 · 上限 ${formatNumber(diamondCap)}`
-        : `已拥有 ${formatNumber(item.owned_quantity)}`
+      : item.kind === 'boost'
+        ? `${formatNumber(item.minutes ?? 0)} 分钟 · 钻石 ×${formatNumber(item.multiplier ?? 1)}`
+        : item.kind === 'cap'
+          ? `当前仓库 ${diamondCapLevel} 级 · 上限 ${formatNumber(diamondCap)}`
+          : `已拥有 ${formatNumber(item.owned_quantity)}`
 
   return (
     <article
@@ -487,6 +503,10 @@ export function InventoryPage() {
     items.find((item) => item.kind === 'ember')?.owned_quantity ??
     view.embersBalance
   const emberCap = home.data.status.embers.cap
+  const boostActive = view.diamondBoost.remaining_seconds > 0
+  const boostRemaining = boostActive
+    ? formatRemainingSeconds(view.diamondBoost.remaining_seconds)
+    : ''
   const collectionItems = collection.data?.items ?? []
   const frames = collectionItems.filter((item) => item.slot === 'frame')
   const otherItems = collectionItems.filter((item) => item.slot !== 'frame')
@@ -889,6 +909,7 @@ export function InventoryPage() {
                       className={[
                         styles.categoryIcon,
                         category.id === 'embers' ? styles.emberIcon : '',
+                        category.id === 'boosts' ? styles.boostIcon : '',
                         category.id === 'cap' ? styles.capIcon : '',
                       ]
                         .filter(Boolean)
@@ -901,6 +922,15 @@ export function InventoryPage() {
                       <h3 id={`shop-category-${category.id}-title`}>
                         {category.label}
                       </h3>
+                      {category.id === 'boosts' && boostRemaining ? (
+                        <p
+                          className={styles.boostStatus}
+                          data-testid="diamond-boost-status"
+                        >
+                          <Timer size={13} aria-hidden="true" />
+                          剩余 {boostRemaining}
+                        </p>
+                      ) : null}
                     </div>
                     <span className={styles.count}>
                       {category.items.length} 件

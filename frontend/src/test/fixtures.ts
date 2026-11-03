@@ -186,6 +186,11 @@ export function makeStatus(overrides: Partial<Status> = {}): Status {
     diamond_cap: 1000,
     diamond_cap_level: 0,
     diamond_excess: 0,
+    diamond_boost: {
+      expires_at: null,
+      remaining_seconds: 0,
+      multiplier: 1,
+    },
     inventory: { star: 1, seasonal_star: 0, ember: 0 },
     stars: [makeStar()],
     equipped_title: '小丑',

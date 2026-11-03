@@ -113,6 +113,8 @@ def dry_run(path: str | Path) -> dict[str, Any]:
                 "shop_purchase_requests",
                 "diamond_balance",
                 "diamond_ledger",
+                "game_config",
+                "diamond_boosts",
             ],
         },
         "writes_performed": 0,

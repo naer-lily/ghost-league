@@ -863,6 +863,7 @@ class RivalMixin:
                     ref_id=f"{week_iso}:{player_id}",
                     idempotency_key=f"rival-reward:{week_iso}:{player_id}",
                     now=local_now,
+                    boost=True,
                 )
             newly_settled += 1
             results.append(

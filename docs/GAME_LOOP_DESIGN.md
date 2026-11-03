@@ -704,6 +704,8 @@ diamond_balance(player_id, balance, diamond_cap, diamond_cap_level,
                 last_decay_at, updated_at)
 diamond_ledger(id, player_id, delta, balance_after, reason, ref_type, ref_id,
                idempotency_key UNIQUE, created_at)
+game_config(key PRIMARY KEY, value, updated_at)
+diamond_boosts(player_id PRIMARY KEY, multiplier, expires_at, updated_at)
 ```
 
 **关键约束**
@@ -716,6 +718,12 @@ diamond_ledger(id, player_id, delta, balance_after, reason, ref_type, ref_id,
   超出软上限的损耗由钱包读写和 `diamond-decay` job 共用同一纯函数，按完整小时复利；
   同一小时的损耗 key 幂等。`shop_purchase_requests` 以 `(player_id, request_id)` 唯一，
   重复请求返回原结果。
+- `game_config` 是经验宝的长期平衡参数：倍率、两档价格/分钟、两档上下架都在这里；
+  种子只在 key 缺失时插入，不覆盖运营值。缺省/非法时商品不出现、购买 fail closed，
+  不按 0 价格或 0 倍率成交。`diamond_boosts` 每真人一行；购买从配置读价、分钟和倍率，
+  未到期则从原 `expires_at` 顺延，否则从当前时间开始。
+- 正常游戏钻石入账（宿敌奖励、下注派彩）在生效期间乘 `diamond_boosts.multiplier`；
+  初始钱包、管理/测试发钻不乘。经验宝不改 XP、打卡、战力或 WakaTime 数据。
 - `inventory_items` 只存 `grant_kind='inventory'` 的商品；`ember` 的数量仍只以
   `ember_balance.balance` 为真相，不复制进行李栏。普通星/季节星同时写
   `player_stars`；`player_stars` 的 `UNIQUE(player_id, season_key)` 对普通星的

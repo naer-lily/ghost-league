@@ -23,7 +23,7 @@ from ..stars import (
     is_valid_palette,
 )
 
-SCHEMA_VERSION = "8"
+SCHEMA_VERSION = "9"
 ALGORITHM_VERSION = "phase1-v1"
 DEFAULT_DB_PATH = Path("data/league/league.db")
 SOURCE_AI = "wakatime_public_leaderboard"
@@ -447,6 +447,19 @@ CREATE TABLE IF NOT EXISTS diamond_ledger (
 CREATE INDEX IF NOT EXISTS idx_diamond_ledger_player
     ON diamond_ledger (player_id, id);
 
+CREATE TABLE IF NOT EXISTS game_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS diamond_boosts (
+    player_id TEXT PRIMARY KEY,
+    multiplier INTEGER NOT NULL CHECK (multiplier > 0),
+    expires_at TEXT,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS rival_assignments (
     week_start TEXT NOT NULL,
     player_id TEXT NOT NULL,
@@ -561,6 +574,8 @@ _TABLE_NAMES = (
     "shop_purchase_requests",
     "diamond_balance",
     "diamond_ledger",
+    "game_config",
+    "diamond_boosts",
     "rival_assignments",
     "rival_results",
     "bets",
@@ -627,6 +642,7 @@ class CoreMixin:
             )
             self._migrate_diamonds(conn, now=now)
             self._seed_catalog(conn)
+            self._seed_game_config(conn, now=now)
             self._seed_shop(conn, now=now)
             self._seed_progression_start(
                 conn,
