@@ -244,6 +244,19 @@ describe('HomePage rework', () => {
     ).toBeInTheDocument()
     expect(within(dialog).getByTestId('rival-target-150')).toBeInTheDocument()
     expect(within(dialog).queryByTestId('rival-target-0')).not.toBeInTheDocument()
+    expect(within(dialog).getByTestId('rival-target-150')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(within(dialog).getByTestId('rival-bet-target')).toHaveTextContent(
+      '+150 XP',
+    )
+    expect(within(dialog).getByTestId('rival-bet-odds')).toHaveTextContent(
+      '×2.00',
+    )
+    expect(
+      within(dialog).queryByText(/目标不在服务端档位里/),
+    ).not.toBeInTheDocument()
     expect(
       within(dialog).queryByText('押「我本周最终 XP 比宿敌高多少」'),
     ).not.toBeInTheDocument()

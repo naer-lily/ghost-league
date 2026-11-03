@@ -579,6 +579,35 @@ describe('RivalPage', () => {
     )
   })
 
+  it('defaults the daily target to the first positive server tier', async () => {
+    const user = userEvent.setup()
+    installApi({ state: makeState() })
+
+    renderRivalPage()
+
+    await user.click(await screen.findByRole('button', { name: '下注' }))
+    const dialog = await screen.findByTestId('rival-bet-dialog')
+    await user.click(within(dialog).getByRole('tab', { name: /日注/ }))
+
+    expect(within(dialog).queryByTestId('rival-target-0')).toBeNull()
+    expect(within(dialog).getByTestId('rival-target-150')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(within(dialog).getByTestId('rival-bet-target')).toHaveTextContent(
+      '+150 XP',
+    )
+    expect(within(dialog).getByTestId('rival-bet-odds')).toHaveTextContent(
+      '×2.00',
+    )
+    expect(
+      within(dialog).queryByText('目标不在服务端档位里，请从上面的档位里选一个。'),
+    ).not.toBeInTheDocument()
+    expect(
+      within(dialog).getByRole('button', { name: '确认下注' }),
+    ).toBeEnabled()
+  })
+
   it('disables the daily bet after 21:00 and shows the real closed copy', async () => {
     const user = userEvent.setup()
     const closed = makeState({

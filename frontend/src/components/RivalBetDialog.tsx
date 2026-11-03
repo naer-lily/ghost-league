@@ -178,10 +178,26 @@ export function RivalBetDialog({
   const currentBet = bets[tab]
   const option: RivalBetOption | null = betOptions[tab]
   const closed = closedCopy(tab, windows, now)
-  const targetMargin = targets[tab]
+  const optionTargets = option?.target_options ?? []
   const selectedTarget =
-    option?.target_options.find((entry) => entry.margin === targetMargin) ??
+    optionTargets.find((entry) => entry.margin === targets[tab]) ??
+    optionTargets[0] ??
     null
+
+  useEffect(() => {
+    if (!open || !option) return
+    const first = option.target_options[0]
+    if (!first) return
+    setTargets((current) => {
+      if (
+        option.target_options.some((entry) => entry.margin === current[tab])
+      ) {
+        return current
+      }
+      return { ...current, [tab]: first.margin }
+    })
+  }, [open, tab, option])
+
   const freeStake = option?.free_stake ?? DEFAULT_FREE_STAKE
   const minPaid = option?.min_paid_stake ?? 0
   const maxPaid = option?.max_paid_stake ?? DEFAULT_MAX_PAID
@@ -215,7 +231,7 @@ export function RivalBetDialog({
     const variables: PlaceBetVariables = {
       kind: tab,
       paidStake,
-      targetMargin,
+      targetMargin: selectedTarget.margin,
       requestId: createRequestId(),
     }
     try {
@@ -332,7 +348,7 @@ export function RivalBetDialog({
                       key={entry.margin}
                       margin={entry.margin}
                       odds={entry.odds}
-                      selected={entry.margin === targetMargin}
+                      selected={entry.margin === selectedTarget?.margin}
                       disabled={Boolean(currentBet) || Boolean(closed)}
                       onSelect={() => {
                         setTargets((current) => ({
@@ -407,7 +423,9 @@ export function RivalBetDialog({
                   <div>
                     <span>目标</span>
                     <strong data-testid="rival-bet-target">
-                      +{formatXp(targetMargin)} XP
+                      {selectedTarget
+                        ? `+${formatXp(selectedTarget.margin)} XP`
+                        : '—'}
                     </strong>
                   </div>
                   <div>
@@ -425,12 +443,6 @@ export function RivalBetDialog({
                     </strong>
                   </div>
                 </div>
-
-                {selectedTarget ? null : (
-                  <p className={styles.hint} role="status">
-                    目标不在服务端档位里，请从上面的档位里选一个。
-                  </p>
-                )}
               </>
             ) : (
               <p className={styles.hint} role="status">
