@@ -474,6 +474,8 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
   `ends_at ASC, sort_order ASC, created_at ASC, id ASC`；不再按 completed / 宝箱
   状态分组或沉底。展示排序（active、未领宝箱的 completed 靠前，已领取/作废/
   无宝箱的 completed 沉底）由前端在排序副本上完成，SQL 不写 UI 规则。
+  `weekly_chain` 的已领取段例外：直接从 feed 过滤，不进入已完成区；未领取
+  段仍留在原位。
 - `sort_order` 是该任务实例当前的排序值；每日手动任务随设置里的拖拽/重排更新，
   系统任务使用生成时的值。
 - `source`：`checkin` / `daily_manual` / `repair` / `weekend` /
