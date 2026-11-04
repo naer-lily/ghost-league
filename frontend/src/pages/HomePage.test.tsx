@@ -484,6 +484,7 @@ describe('HomePage rework', () => {
     vi.stubGlobal(
       'fetch',
       mockApi({
+        rival: rivalState({ server_now: '2026-11-04T14:51:00+08:00' }),
         tasks: [
           {
             id: 'ti_1',
