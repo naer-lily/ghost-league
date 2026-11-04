@@ -530,7 +530,7 @@ export type TaskStatus = 'active' | 'completed' | 'expired'
 
 export type ChestStatus = 'none' | 'available' | 'claimed' | 'forfeited'
 
-export type ChestRewardType = 'diamonds' | 'boost'
+export type ChestRewardType = 'diamonds' | 'boost' | 'star'
 
 export interface TaskProgress {
   current: number
@@ -544,6 +544,7 @@ export interface TaskItem {
   description: string
   difficulty: number
   chest_tier: number
+  chest_pool: string
   sort_order: number
   starts_at: string
   ends_at: string
@@ -554,6 +555,7 @@ export interface TaskItem {
   chest_amount: number | null
   chest_reward_type: ChestRewardType
   chest_boost_minutes: number | null
+  chest_star: Star | null
   proof_url: string | null
   progress: TaskProgress | null
 }
@@ -587,6 +589,7 @@ export interface TaskChestResult {
   duplicate: boolean
   reward_type: ChestRewardType
   boost_minutes: number | null
+  star: Star | null
   diamond_boost: DiamondBoost
 }
 

@@ -126,21 +126,46 @@ Current and intended sinks:
 
 ### Task chests
 
-The task system adds one bounded reward source. A task chest pays either
-diamonds or a time-boxed XP-to-diamond boost; it never pays XP and never writes
-`weekly_scores`.
+The task system adds one bounded reward source. Each completed task supplies a
+chest pool; completion draws one tier from that pool exactly once. A chest pays
+diamonds, a time-boxed XP-to-diamond boost, or (tier 5 only) one normal star; it
+never pays XP and never writes `weekly_scores`.
 
-| tier | name | diamonds (inclusive) | source |
+| tier | name | diamonds (inclusive) | boost |
 | --- | --- | --- | --- |
-| 1 | 木箱 | 3–6 | daily check-in, daily difficulty 1, repair |
-| 2 | 铜箱 | 6–10 | daily difficulty 2 |
-| 3 | 银箱 | 10–16 | daily difficulty 3 |
-| 4 | 金箱 | 18–28 | reserved |
-| 5 | 星箱 | 30–48 | weekend |
+| 1 | 木箱 | 3–6 | yes, before cutoff |
+| 2 | 铜箱 | 8–14 | yes, before cutoff |
+| 3 | 银箱 | 18–30 | yes, before cutoff |
+| 4 | 金箱 | 45–70 | never |
+| 5 | 星箱 | 100 or one normal star | never |
 
-- Each claim first rolls `game_config.task_chest_boost_chance` (integer percent,
-  default 20). On a miss the server picks the diamond amount uniformly inside
-  the tier range; the client never submits an amount.
+Pools live in `game_config.task_chest_pool_<pool>` as integer-percentage JSON
+weights over tiers 1–5 that must sum to 100. Missing or invalid pools fail
+closed to the source's most conservative pool (wood, or copper for the weekend
+pool), so completion and claiming never block. Default pools:
+
+```text
+checkin   : 70 / 25 / 5 / 0 / 0
+daily_1   : 55 / 35 / 10 / 0 / 0
+daily_2   : 35 / 35 / 25 / 5 / 0
+daily_3   : 20 / 30 / 35 / 13 / 2
+repair    : 60 / 30 / 9 / 1 / 0
+weekend   : 0 / 15 / 45 / 30 / 10
+```
+
+- Active instances carry the pool and a placeholder tier; the real tier is
+  written at completion and never changes afterwards. Old completed instances
+  keep their stored tier and reward.
+- Tiers 1–3 may roll a boost with `game_config.task_chest_boost_chance`
+  (integer percent, default 10) only before local
+  `task_chest_boost_cutoff_hour` (default 21). On a miss the server picks the
+  diamond amount uniformly inside the tier range; the client never submits an
+  amount. Tiers 4–5 never pay a boost.
+- Tier 5 rolls `game_config.task_chest_star_chance` (integer percent, default
+  10). On a hit it creates one `player_stars` row with `kind='normal'`,
+  `season_key=NULL`, `source='task_chest'`, and `price_diamonds=0`; a repeated
+  claim returns the same star via `chest_star_id`. On a miss it pays 100
+  diamonds.
 - Diamond claims write `diamond_ledger` with `reason='task_chest'`,
   `ref_type='task'`, `ref_id=<task_id>`, and the idempotency key
   `task-chest:<task_id>`.
@@ -154,7 +179,7 @@ diamonds or a time-boxed XP-to-diamond boost; it never pays XP and never writes
   chest claim never fails because of config.
 - A chest must be claimed before `ends_at`; an unclaimed chest is forfeited and
   hidden with the task. Repeated claims return the same reward and never grant
-  the boost twice.
+  the boost or star twice.
 - Manual task photo completion can pay a chest without adding XP. The reward is
   tied to a completed task, not to an XP conversion.
 

@@ -5,7 +5,7 @@ import {
   useCompleteTask,
   useRepairTask,
 } from '../api/queries'
-import type { ChestRewardType, TaskItem } from '../api/types'
+import type { ChestRewardType, Star, TaskItem } from '../api/types'
 import { describeApiError } from '../lib/home'
 import { compressTaskProof } from '../lib/image'
 import { formatTaskCountdown } from '../lib/time'
@@ -16,6 +16,7 @@ export interface ClaimedTaskChest {
   rewardType: ChestRewardType
   amount: number
   boostMinutes: number | null
+  star: Star | null
 }
 
 interface TaskCardProps {
@@ -26,6 +27,9 @@ interface TaskCardProps {
 }
 
 function chestRewardLabel(task: TaskItem): string {
+  if (task.chest_reward_type === 'star') {
+    return task.chest_star ? `星星：${task.chest_star.name}` : '星星'
+  }
   if (task.chest_reward_type === 'boost') {
     return task.chest_boost_minutes
       ? `经验宝 ${task.chest_boost_minutes} 分钟`
@@ -92,10 +96,10 @@ export function TaskCard({
       onSuccess: (result) =>
         onClaimed(
           {
-            rewardType:
-              result.reward_type === 'boost' ? 'boost' : 'diamonds',
+            rewardType: result.reward_type,
             amount: result.amount,
             boostMinutes: result.boost_minutes,
+            star: result.star,
           },
           task.title,
         ),

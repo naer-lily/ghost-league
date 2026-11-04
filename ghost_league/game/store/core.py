@@ -23,9 +23,10 @@ from ..stars import (
     is_valid_palette,
 )
 
-SCHEMA_VERSION = "12"
+SCHEMA_VERSION = "13"
 ALGORITHM_VERSION = "phase1-v1"
 SHOP_ECONOMY_UPDATE_KEY = "shop_economy_update_2026_11"
+TASK_CHEST_CONFIG_UPDATE_KEY = "task_chest_config_update_2026_11"
 DEFAULT_DB_PATH = Path("data/league/league.db")
 SOURCE_AI = "wakatime_public_leaderboard"
 SOURCE_HUMAN = "local_increment"
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS task_instances (
     description TEXT NOT NULL DEFAULT '',
     difficulty INTEGER NOT NULL CHECK(difficulty BETWEEN 1 AND 5),
     chest_tier INTEGER NOT NULL CHECK(chest_tier BETWEEN 1 AND 5),
+    chest_pool TEXT NOT NULL DEFAULT '',
     starts_at TEXT NOT NULL,
     ends_at TEXT NOT NULL,
     completion_mode TEXT NOT NULL CHECK(completion_mode IN ('manual', 'dsl')),
@@ -54,8 +56,9 @@ CREATE TABLE IF NOT EXISTS task_instances (
         CHECK(chest_status IN ('none', 'available', 'claimed', 'forfeited')),
     claimed_at TEXT,
     chest_amount INTEGER,
-    chest_reward_type TEXT NOT NULL DEFAULT 'diamonds' CHECK(chest_reward_type IN ('diamonds', 'boost')),
+    chest_reward_type TEXT NOT NULL DEFAULT 'diamonds' CHECK(chest_reward_type IN ('diamonds', 'boost', 'star')),
     chest_boost_minutes INTEGER,
+    chest_star_id TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -704,6 +707,7 @@ class CoreMixin:
             self._migrate_diamonds(conn, now=now)
             self._seed_catalog(conn)
             self._seed_game_config(conn, now=now)
+            self._apply_task_chest_update(conn, now=now)
             self._seed_shop(conn, now=now)
             self._apply_shop_economy_update(conn, now=now)
             self._seed_progression_start(
@@ -884,6 +888,35 @@ class CoreMixin:
                 "updated_at = excluded.updated_at",
                 (level, price, delta, now, now),
             )
+
+    @staticmethod
+    def _apply_task_chest_update(
+        conn: sqlite3.Connection,
+        *,
+        now: str,
+    ) -> None:
+        """Move the old boost-chance seed from 20 to 10 exactly once.
+
+        Only the exact legacy value is replaced, so operator edits survive.
+        New databases already seed 10 and are unaffected.
+        """
+
+        marker = conn.execute(
+            "SELECT value FROM meta WHERE key = ?",
+            (TASK_CHEST_CONFIG_UPDATE_KEY,),
+        ).fetchone()
+        if marker is not None:
+            return
+        conn.execute(
+            "UPDATE game_config SET value = '10', updated_at = ? "
+            "WHERE key = 'task_chest_boost_chance' AND value = '20'",
+            (now,),
+        )
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, 'applied') "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (TASK_CHEST_CONFIG_UPDATE_KEY,),
+        )
 
     @staticmethod
     def _apply_shop_economy_update(
@@ -1151,12 +1184,37 @@ class CoreMixin:
                 "ALTER TABLE task_instances ADD COLUMN chest_boost_minutes "
                 "INTEGER"
             )
+        if "chest_pool" not in instance_columns:
+            conn.execute(
+                "ALTER TABLE task_instances ADD COLUMN chest_pool TEXT "
+                "NOT NULL DEFAULT ''"
+            )
+        if "chest_star_id" not in instance_columns:
+            conn.execute(
+                "ALTER TABLE task_instances ADD COLUMN chest_star_id TEXT"
+            )
+        # Backfill only rows created before pools existed.  Completed rows keep
+        # their original chest_tier and reward; the pool is only consulted when
+        # an active instance completes.
+        conn.execute(
+            "UPDATE task_instances SET chest_pool = CASE "
+            "WHEN source = 'daily_manual' AND difficulty = 2 THEN 'daily_2' "
+            "WHEN source = 'daily_manual' AND difficulty = 3 THEN 'daily_3' "
+            "WHEN source = 'daily_manual' THEN 'daily_1' "
+            "WHEN source IN ('checkin', 'repair', 'weekend') THEN source "
+            "ELSE 'daily_1' END "
+            "WHERE chest_pool = ''"
+        )
 
         table = conn.execute(
             "SELECT sql FROM sqlite_master "
             "WHERE type = 'table' AND name = 'task_instances'"
         ).fetchone()
-        if table is None or "'checkin'" not in str(table["sql"] or ""):
+        if (
+            table is None
+            or "'checkin'" not in str(table["sql"] or "")
+            or "'star'" not in str(table["sql"] or "")
+        ):
             conn.execute("DROP TABLE IF EXISTS task_instances_new")
             conn.execute(
                 _TASK_INSTANCES_TABLE_DDL.replace(

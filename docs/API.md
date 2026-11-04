@@ -450,6 +450,7 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
       "description": "",
       "difficulty": 2,
       "chest_tier": 2,
+      "chest_pool": "daily_2",
       "sort_order": 10,
       "starts_at": "2026-11-04T00:00:00+08:00",
       "ends_at": "2026-11-05T00:00:00+08:00",
@@ -460,6 +461,7 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
       "chest_amount": null,
       "chest_reward_type": "diamonds",
       "chest_boost_minutes": null,
+      "chest_star": null,
       "proof_url": null,
       "progress": null
     }
@@ -480,8 +482,13 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
   当天达到 600 秒后读取列表即自动 `completed`，不显示拍照按钮。
 - `status`：`active` / `completed` / `expired`。
 - `chest_status`：`none` / `available` / `claimed` / `forfeited`。
-- `chest_reward_type`：`diamonds` / `boost`；领取后固定为实际奖励类型。
-- `chest_boost_minutes`：经验宝时长；钻石奖励或未领取为 `null`。
+- `chest_pool`：实例生成时写入的宝箱池（`checkin` / `daily_1/2/3` /
+  `repair` / `weekend`）。任务卡不展示池子名。
+- `chest_reward_type`：`diamonds` / `boost` / `star`；领取后固定为实际奖励类型。
+- `chest_boost_minutes`：经验宝时长；钻石/星奖励或未领取为 `null`。
+- `chest_star`：已领取星箱时为星的完整展示资料，其他情况为 `null`。
+- 完成时按 `chest_pool` 抽一次 `chest_tier` 并写回；active 实例的
+  `chest_tier` 只是占位。抽出的档位在领取前刷新不会改变，旧实例不追溯重抽。
 - `progress` 只对系统 DSL 任务返回 `{"current": int, "target": int}`；手动任务为
   `null`。周六周日任务统计两天累计 XP；每日打卡和补断联任务为 `0/1` 或 `1/1`。
 - `missed_date` 只有 `source=repair` 返回 `YYYY-MM-DD`（来自
@@ -491,8 +498,8 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
 - `server_now` 是任务卡倒计时的权威当前时间；前端不读手机时钟判断剩余时间。
 - 截止后任务整条隐藏；已完成但未领取的宝箱在截止时作废。
 - 每日手动任务读取时会用当前定义同步当天仍为 `active` 的实例
-  （`title` / `description` / `difficulty` / `chest_tier` / `sort_order`）；
-  `completed` / `expired` 实例保持历史快照。
+  （`title` / `description` / `difficulty` / `chest_tier` / `chest_pool` /
+  `sort_order`）；`completed` / `expired` 实例保持历史快照。
 
 ### `POST /v1/me/tasks/{task_id}/complete`
 
@@ -527,6 +534,7 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
   "duplicate": false,
   "reward_type": "diamonds",
   "boost_minutes": null,
+  "star": null,
   "diamond_boost": {
     "expires_at": null,
     "remaining_seconds": 0,
@@ -535,8 +543,11 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
 }
 ```
 
-- 服务端先按 `game_config.task_chest_boost_chance`（整数百分比，默认 20）
-  判断是否出经验宝；否则在宝箱档位闭区间内均匀抽取钻石，客户端不能传金额。
+- 领取时按实例已抽出的 `chest_tier` 决定内容，客户端不能传金额：
+  - 1–3 档默认钻石；本地时间在 `task_chest_boost_cutoff_hour`（默认 21）
+    之前，按 `task_chest_boost_chance`（整数百分比，默认 10）抽经验宝。
+  - 4–5 档永不出经验宝；5 档按 `task_chest_star_chance`（默认 10）抽一颗
+    普通星，未命中固定给 100 钻。
 - 钻石奖励写 `diamond_ledger`：`reason='task_chest'`、`ref_type='task'`、
   `ref_id=<task_id>`、幂等键 `task-chest:<task_id>`；不产生 XP，不写
   `weekly_scores`。响应 `reward_type='diamonds'`，`amount` 仍是钻石数。
@@ -545,10 +556,14 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
   `diamond_boosts`：当前 buff 未过期就从原 `expires_at` 顺延，否则从现在起算；
   `diamond_boost` 返回发放后的状态。倍率继续读
   `diamond_boost_multiplier`，只作用于 XP→钻石。
-- 配置缺失或非法（概率不在 0–100、时长 ≤0、非整数）时 fail closed：不出
-  经验宝，仍按钻石档发，领取不返回错误。
-- 重复请求返回同一 `reward_type` / `amount` / `boost_minutes`，`duplicate=true`，
-  不重复发 buff；未完成或宝箱不可用返回 `409`。
+- 星箱命中星时创建 `player_stars` 一行（`kind='normal'`、`season_key=NULL`、
+  `source='task_chest'`、`price_diamonds=0`），响应 `reward_type='star'`、
+  `amount=0`、`boost_minutes=null`，`star` 为完整星资料，并写回
+  `chest_star_id`；不写钻石流水。
+- 配置缺失或非法（概率不在 0–100、时长 ≤0、非整数、池子总和不等于 100）时
+  fail closed：池子回退到该来源最保守的池，奖励回退到钻石，领取不返回错误。
+- 重复请求返回同一 `reward_type` / `amount` / `boost_minutes` / `star`，
+  `duplicate=true`，不重复发 buff 或星；未完成或宝箱不可用返回 `409`。
 
 ### `GET /v1/me/task-definitions`
 
@@ -1040,6 +1055,25 @@ python3 -m ghost_league.game.jobs grant-diamonds --player <id> --amount 3000 --r
 | `diamond_boost_60_daily_limit` | `2` | 60 档每自然日限购数量 |
 | `diamond_boost_25_active` | `1` | 25 档是否上架 |
 | `diamond_boost_60_active` | `1` | 60 档是否上架 |
+
+任务宝箱的池子与奖励概率同样是 `game_config` 只读种子：
+
+| key | 种子值 | 含义 |
+| --- | --- | --- |
+| `task_chest_boost_chance` | `10` | 1–3 档经验宝概率（整数百分比） |
+| `task_chest_boost_minutes` | `25` | 经验宝分钟数 |
+| `task_chest_boost_cutoff_hour` | `21` | 本地时间该小时及以后不再出经验宝 |
+| `task_chest_star_chance` | `10` | 5 档出普通星概率（整数百分比） |
+| `task_chest_pool_checkin` | `{"1":70,"2":25,"3":5,"4":0,"5":0}` | 打卡池 |
+| `task_chest_pool_daily_1` | `{"1":55,"2":35,"3":10,"4":0,"5":0}` | 难度 1 池 |
+| `task_chest_pool_daily_2` | `{"1":35,"2":35,"3":25,"4":5,"5":0}` | 难度 2 池 |
+| `task_chest_pool_daily_3` | `{"1":20,"2":30,"3":35,"4":13,"5":2}` | 难度 3 池 |
+| `task_chest_pool_repair` | `{"1":60,"2":30,"3":9,"4":1,"5":0}` | 补断联池 |
+| `task_chest_pool_weekend` | `{"1":0,"2":15,"3":45,"4":30,"5":10}` | 周末池 |
+
+池子值必须是整数百分比且总和恰为 100；缺失或非法时回退到该来源最保守的
+池子（`weekend` 回退铜箱，其余回退木箱），不会卡住完成或领取。旧库中仍是
+`20` 的 `task_chest_boost_chance` 由一次性迁移改为 `10`，运营已改过的值不动。
 
 种子只在缺失时插入，不覆盖运营改过的值。每日限购按 Asia/Shanghai 自然日重置，购买时
 在同一事务内统计 `shop_purchase_requests` 的当日成功记录；幂等重放不重复计数。配置

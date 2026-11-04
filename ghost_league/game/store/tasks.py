@@ -17,25 +17,34 @@ from ..tasks import (
     CHECKIN_TASK_TITLE,
     CHEST_REWARD_BOOST,
     CHEST_REWARD_DIAMONDS,
+    CHEST_REWARD_STAR,
+    MANUAL_CHEST_POOL,
     MANUAL_CHEST_TIER,
     MAX_ACTIVE_TASK_DEFINITIONS,
     REPAIR_CHEST_TIER,
     REPAIR_LOOKBACK_DAYS,
     REPAIR_XP_THRESHOLD,
     TASK_CHEST_BOOST_CHANCE_KEY,
+    TASK_CHEST_BOOST_CUTOFF_HOUR_KEY,
     TASK_CHEST_BOOST_MINUTES_KEY,
+    TASK_CHEST_STAR_CHANCE_KEY,
     WEEKEND_CHEST_TIER,
     TaskLimitReached,
     TaskNotFound,
     TaskStateRejected,
     checkin_condition,
+    chest_pool_config_key,
+    chest_pool_fallback,
+    chest_pool_for_task,
     condition_progress,
     evaluate_condition,
     missed_date_from_system_key,
+    parse_chest_pool,
     repair_condition,
     repair_task_description,
     repair_task_title,
     roll_chest_reward,
+    roll_chest_tier,
     weekend_condition,
 )
 from .boosts import DIAMOND_BOOST_MULTIPLIER_KEY
@@ -293,11 +302,11 @@ class TasksMixin:
             conn.execute(
                 "INSERT OR IGNORE INTO task_instances "
                 "(id, user_id, definition_id, source, system_key, title, "
-                "description, difficulty, chest_tier, starts_at, ends_at, "
-                "completion_mode, condition_json, status, completed_at, "
+                "description, difficulty, chest_tier, chest_pool, starts_at, "
+                "ends_at, completion_mode, condition_json, status, completed_at, "
                 "proof_path, proof_mime, chest_status, claimed_at, "
                 "chest_amount, sort_order, created_at, updated_at) "
-                "VALUES (?, ?, NULL, ?, ?, ?, ?, 1, ?, ?, ?, "
+                "VALUES (?, ?, NULL, ?, ?, ?, ?, 1, ?, ?, ?, ?, "
                 "'dsl', ?, 'active', NULL, NULL, NULL, 'none', NULL, NULL, "
                 "0, ?, ?)",
                 (
@@ -308,6 +317,7 @@ class TasksMixin:
                     CHECKIN_TASK_TITLE,
                     CHECKIN_TASK_DESCRIPTION,
                     CHECKIN_CHEST_TIER,
+                    chest_pool_for_task(CHECKIN_TASK_SOURCE, 1),
                     starts_at,
                     ends_at,
                     condition_json,
@@ -326,15 +336,16 @@ class TasksMixin:
                 description = str(definition["description"])
                 difficulty = int(definition["difficulty"])
                 chest_tier = MANUAL_CHEST_TIER[difficulty]
+                chest_pool = MANUAL_CHEST_POOL[difficulty]
                 sort_order = int(definition["sort_order"])
                 cursor = conn.execute(
                     "INSERT OR IGNORE INTO task_instances "
                     "(id, user_id, definition_id, source, system_key, title, "
-                    "description, difficulty, chest_tier, starts_at, ends_at, "
-                    "completion_mode, condition_json, status, completed_at, "
-                    "proof_path, proof_mime, chest_status, claimed_at, "
-                    "chest_amount, sort_order, created_at, updated_at) "
-                    "VALUES (?, ?, ?, 'daily_manual', ?, ?, ?, ?, ?, ?, ?, "
+                    "description, difficulty, chest_tier, chest_pool, starts_at, "
+                    "ends_at, completion_mode, condition_json, status, "
+                    "completed_at, proof_path, proof_mime, chest_status, "
+                    "claimed_at, chest_amount, sort_order, created_at, updated_at) "
+                    "VALUES (?, ?, ?, 'daily_manual', ?, ?, ?, ?, ?, ?, ?, ?, "
                     "'manual', NULL, 'active', NULL, NULL, NULL, 'none', NULL, "
                     "NULL, ?, ?, ?)",
                     (
@@ -346,6 +357,7 @@ class TasksMixin:
                         description,
                         difficulty,
                         chest_tier,
+                        chest_pool,
                         starts_at,
                         ends_at,
                         sort_order,
@@ -359,16 +371,17 @@ class TasksMixin:
                 # earned with.
                 conn.execute(
                     "UPDATE task_instances SET title = ?, description = ?, "
-                    "difficulty = ?, chest_tier = ?, sort_order = ?, "
-                    "updated_at = ? "
+                    "difficulty = ?, chest_tier = ?, chest_pool = ?, "
+                    "sort_order = ?, updated_at = ? "
                     "WHERE user_id = ? AND system_key = ? AND status = 'active' "
                     "AND (title != ? OR description != ? OR difficulty != ? "
-                    "OR chest_tier != ? OR sort_order != ?)",
+                    "OR chest_tier != ? OR chest_pool != ? OR sort_order != ?)",
                     (
                         title,
                         description,
                         difficulty,
                         chest_tier,
+                        chest_pool,
                         sort_order,
                         stamp,
                         user_id,
@@ -377,6 +390,7 @@ class TasksMixin:
                         description,
                         difficulty,
                         chest_tier,
+                        chest_pool,
                         sort_order,
                     ),
                 )
@@ -423,11 +437,11 @@ class TasksMixin:
                 cursor = conn.execute(
                     "INSERT OR IGNORE INTO task_instances "
                     "(id, user_id, definition_id, source, system_key, title, "
-                    "description, difficulty, chest_tier, starts_at, ends_at, "
-                    "completion_mode, condition_json, status, completed_at, "
-                    "proof_path, proof_mime, chest_status, claimed_at, "
-                    "chest_amount, created_at, updated_at) "
-                    "VALUES (?, ?, NULL, 'repair', ?, ?, ?, 1, ?, ?, ?, "
+                    "description, difficulty, chest_tier, chest_pool, starts_at, "
+                    "ends_at, completion_mode, condition_json, status, "
+                    "completed_at, proof_path, proof_mime, chest_status, "
+                    "claimed_at, chest_amount, created_at, updated_at) "
+                    "VALUES (?, ?, NULL, 'repair', ?, ?, ?, 1, ?, ?, ?, ?, "
                     "'dsl', ?, 'active', NULL, NULL, NULL, 'none', NULL, NULL, "
                     "?, ?)",
                     (
@@ -437,6 +451,7 @@ class TasksMixin:
                         repair_task_title(missed_day),
                         repair_task_description(xp),
                         REPAIR_CHEST_TIER,
+                        chest_pool_for_task("repair", 1),
                         starts_at,
                         ends_at,
                         condition_json,
@@ -471,18 +486,19 @@ class TasksMixin:
             cursor = conn.execute(
                 "INSERT OR IGNORE INTO task_instances "
                 "(id, user_id, definition_id, source, system_key, title, "
-                "description, difficulty, chest_tier, starts_at, ends_at, "
-                "completion_mode, condition_json, status, completed_at, "
+                "description, difficulty, chest_tier, chest_pool, starts_at, "
+                "ends_at, completion_mode, condition_json, status, completed_at, "
                 "proof_path, proof_mime, chest_status, claimed_at, "
                 "chest_amount, created_at, updated_at) "
                 "VALUES (?, ?, NULL, 'weekend', ?, '周末 · 1000 XP', "
-                "'周六周日累计 1000 XP。', 5, ?, ?, ?, 'dsl', ?, 'active', "
+                "'周六周日累计 1000 XP。', 5, ?, ?, ?, ?, 'dsl', ?, 'active', "
                 "NULL, NULL, NULL, 'none', NULL, NULL, ?, ?)",
                 (
                     _new_id("ti"),
                     user_id,
                     f"weekend:{saturday.isoformat()}",
                     WEEKEND_CHEST_TIER,
+                    chest_pool_for_task("weekend", 5),
                     starts_at,
                     ends_at,
                     condition_json,
@@ -537,12 +553,30 @@ class TasksMixin:
                 (now_iso, user_id, now_iso),
             )
             for task_id in completed_ids:
-                conn.execute(
-                    "UPDATE task_instances SET status = 'completed', "
-                    "completed_at = ?, chest_status = 'available', updated_at = ? "
+                row = conn.execute(
+                    "SELECT source, difficulty, chest_pool FROM task_instances "
                     "WHERE id = ? AND user_id = ? AND status = 'active' "
                     "AND ends_at > ?",
-                    (now_iso, now_iso, task_id, user_id, now_iso),
+                    (task_id, user_id, now_iso),
+                ).fetchone()
+                if row is None:
+                    continue
+                pool = self._effective_chest_pool(
+                    row["chest_pool"], row["source"], int(row["difficulty"])
+                )
+                tier = self._roll_task_chest_tier_with(
+                    conn,
+                    pool,
+                    source=str(row["source"]),
+                    difficulty=int(row["difficulty"]),
+                )
+                conn.execute(
+                    "UPDATE task_instances SET status = 'completed', "
+                    "completed_at = ?, chest_tier = ?, "
+                    "chest_status = 'available', updated_at = ? "
+                    "WHERE id = ? AND user_id = ? AND status = 'active' "
+                    "AND ends_at > ?",
+                    (now_iso, tier, now_iso, task_id, user_id, now_iso),
                 )
 
     @staticmethod
@@ -567,6 +601,21 @@ class TasksMixin:
             task=row,
             now=now,
         )
+
+    def _task_chest_star_payload(
+        self, task: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Return the claimed star for a task, or ``None`` while unclaimed."""
+
+        star_id = task.get("chest_star_id")
+        if not star_id or str(task.get("chest_status")) != "claimed":
+            return None
+        with self._reader() as conn:  # type: ignore[attr-defined]
+            row = conn.execute(
+                "SELECT * FROM player_stars WHERE id = ? AND player_id = ?",
+                (star_id, task["user_id"]),
+            ).fetchone()
+            return None if row is None else self._star_payload(row)
 
     def _task_payload(
         self,
@@ -593,6 +642,7 @@ class TasksMixin:
             "description": str(task["description"]),
             "difficulty": int(task["difficulty"]),
             "chest_tier": int(task["chest_tier"]),
+            "chest_pool": str(task.get("chest_pool") or ""),
             "sort_order": int(task["sort_order"]),
             "starts_at": str(task["starts_at"]),
             "ends_at": str(task["ends_at"]),
@@ -611,6 +661,7 @@ class TasksMixin:
                 if task.get("chest_boost_minutes") is None
                 else int(task["chest_boost_minutes"])
             ),
+            "chest_star": self._task_chest_star_payload(task),
             "proof_url": (
                 f"/v1/me/tasks/{task_id}/proof" if task["proof_path"] else None
             ),
@@ -694,43 +745,181 @@ class TasksMixin:
                 raise TaskStateRejected("task is not active")
             if now_iso >= str(row["ends_at"]):
                 raise TaskStateRejected("task has ended")
+            pool = self._effective_chest_pool(
+                row["chest_pool"], row["source"], int(row["difficulty"])
+            )
+            tier = self._roll_task_chest_tier_with(
+                conn,
+                pool,
+                source=str(row["source"]),
+                difficulty=int(row["difficulty"]),
+            )
             conn.execute(
                 "UPDATE task_instances SET status = 'completed', "
-                "completed_at = ?, chest_status = 'available', proof_path = ?, "
+                "completed_at = ?, chest_status = 'available', "
+                "chest_tier = ?, chest_pool = ?, proof_path = ?, "
                 "proof_mime = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-                (now_iso, proof_path, proof_mime, now_iso, task_id, user_id),
+                (
+                    now_iso,
+                    tier,
+                    pool,
+                    proof_path,
+                    proof_mime,
+                    now_iso,
+                    task_id,
+                    user_id,
+                ),
             )
             updated = conn.execute(
                 "SELECT * FROM task_instances WHERE id = ?", (task_id,)
             ).fetchone()
             return self._task_payload(updated, user_id=user_id, now=local_now)
 
-    def _chest_boost_config_with(
-        self, conn: sqlite3.Connection
-    ) -> tuple[int, int, int]:
-        """Return (chance %, minutes, multiplier), failing closed to diamonds."""
+    @staticmethod
+    def _effective_chest_pool(
+        pool: Any, source: Any, difficulty: int
+    ) -> str:
+        """Use the stored pool, deriving one for instances created pre-pool."""
 
-        try:
-            chance = self._config_int_with(  # type: ignore[attr-defined]
-                conn, TASK_CHEST_BOOST_CHANCE_KEY, minimum=0
-            )
-            minutes = self._config_int_with(  # type: ignore[attr-defined]
-                conn, TASK_CHEST_BOOST_MINUTES_KEY, minimum=1
-            )
-            multiplier = self._config_int_with(  # type: ignore[attr-defined]
-                conn, DIAMOND_BOOST_MULTIPLIER_KEY, minimum=1
-            )
-        except ValueError:
+        value = str(pool or "").strip()
+        return value or chest_pool_for_task(str(source or ""), difficulty)
+
+    def _chest_pool_weights_with(
+        self,
+        conn: sqlite3.Connection,
+        pool: str,
+        *,
+        source: str,
+        difficulty: int,
+    ) -> dict[int, int]:
+        """Read one pool, failing closed to the source's conservative pool."""
+
+        key = chest_pool_config_key(pool)
+        raw = self._config_value_with(conn, key)  # type: ignore[attr-defined]
+        weights = parse_chest_pool(raw)
+        if weights is None:
             logger.warning(
-                "task chest boost config is missing or invalid; paying diamonds"
+                "chest pool %s is missing or invalid; using conservative fallback",
+                pool,
             )
-            return 0, 0, 1
+            weights = chest_pool_fallback(
+                pool, source=source, difficulty=difficulty
+            )
+        return weights
+
+    def _roll_task_chest_tier_with(
+        self,
+        conn: sqlite3.Connection,
+        pool: str,
+        *,
+        source: str,
+        difficulty: int,
+    ) -> int:
+        weights = self._chest_pool_weights_with(
+            conn, pool, source=source, difficulty=difficulty
+        )
+        return roll_chest_tier(weights)
+
+    def _chest_config_with(
+        self, conn: sqlite3.Connection
+    ) -> dict[str, int]:
+        """Return validated chest config, failing closed to diamonds.
+
+        A missing or malformed boost row disables boosts; a missing or
+        malformed star row disables the star branch.  Chest claims still pay
+        diamonds in either case.
+        """
+
+        def read(key: str, default: int, minimum: int) -> int:
+            try:
+                return self._config_int_with(  # type: ignore[attr-defined]
+                    conn, key, minimum=minimum
+                )
+            except ValueError:
+                logger.warning(
+                    "task chest config %s is missing or invalid; using %s",
+                    key,
+                    default,
+                )
+                return default
+
+        chance = read(TASK_CHEST_BOOST_CHANCE_KEY, 0, 0)
+        minutes = read(TASK_CHEST_BOOST_MINUTES_KEY, 0, 1)
+        cutoff = read(TASK_CHEST_BOOST_CUTOFF_HOUR_KEY, 0, 0)
+        star_chance = read(TASK_CHEST_STAR_CHANCE_KEY, 0, 0)
+        multiplier = read(DIAMOND_BOOST_MULTIPLIER_KEY, 0, 1)
         if chance > 100:
             logger.warning(
                 "task_chest_boost_chance is out of range; paying diamonds"
             )
-            return 0, 0, 1
-        return chance, minutes, multiplier
+            chance = 0
+        if star_chance > 100:
+            logger.warning(
+                "task_chest_star_chance is out of range; paying diamonds"
+            )
+            star_chance = 0
+        if cutoff > 23:
+            logger.warning(
+                "task_chest_boost_cutoff_hour is out of range; disabling boosts"
+            )
+            cutoff = 0
+        if multiplier < 1:
+            chance, minutes, multiplier = 0, 0, 1
+        return {
+            "boost_chance": chance,
+            "boost_minutes": minutes,
+            "cutoff_hour": cutoff,
+            "star_chance": star_chance,
+            "multiplier": multiplier,
+        }
+
+    def _create_task_chest_star_with(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        player_id: str,
+        acquired_at: str,
+    ) -> dict[str, Any]:
+        """Create the one normal star paid by a star chest."""
+
+        rarity = self.roll_star_rarity()  # type: ignore[attr-defined]
+        star_type = self.roll_star_type(rarity)  # type: ignore[attr-defined]
+        visual = self.make_star_visual(  # type: ignore[attr-defined]
+            star_type, rarity, None
+        )
+        return self._insert_player_star_with(  # type: ignore[attr-defined]
+            conn,
+            player_id=player_id,
+            name=self.generate_star_name(),  # type: ignore[attr-defined]
+            kind="normal",
+            season_key=None,
+            price_diamonds=0,
+            acquired_at=acquired_at,
+            star_type=star_type,
+            rarity=rarity,
+            palette=visual["palette"],
+            visual_seed=int(visual["visual_seed"]),
+            companion_count=int(visual["companion_count"]),
+            catalog_code=self._new_catalog_code_with(  # type: ignore[attr-defined]
+                conn, acquired_at
+            ),
+            source="task_chest",
+        )
+
+    def _task_chest_star_with(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        player_id: str,
+        star_id: Any,
+    ) -> dict[str, Any] | None:
+        if not star_id:
+            return None
+        row = conn.execute(
+            "SELECT * FROM player_stars WHERE id = ? AND player_id = ?",
+            (star_id, player_id),
+        ).fetchone()
+        return None if row is None else self._star_payload(row)  # type: ignore[attr-defined]
 
     def claim_task_chest(
         self,
@@ -761,8 +950,12 @@ class TasksMixin:
                     if row["chest_amount"] is not None
                     else (abs(int(ledger["delta"])) if ledger is not None else 0)
                 )
-                if reward_type == CHEST_REWARD_BOOST:
-                    amount = 0
+                if reward_type in {CHEST_REWARD_BOOST, CHEST_REWARD_STAR}:
+                    amount = (
+                        int(row["chest_amount"])
+                        if row["chest_amount"] is not None
+                        else 0
+                    )
                 wallet = self._sync_diamond_decay_with(  # type: ignore[attr-defined]
                     conn, user_id, local_now, create_for_unknown=False
                 )
@@ -776,6 +969,11 @@ class TasksMixin:
                         if stored_minutes is None
                         else int(stored_minutes)
                     ),
+                    "star": self._task_chest_star_with(
+                        conn,
+                        player_id=user_id,
+                        star_id=row["chest_star_id"],
+                    ),
                     "diamond_boost": self._boost_state_with(  # type: ignore[attr-defined]
                         conn, user_id, local_now
                     ),
@@ -787,23 +985,40 @@ class TasksMixin:
             if now_iso >= str(row["ends_at"]):
                 raise TaskStateRejected("task has ended")
 
-            chance, minutes, multiplier = self._chest_boost_config_with(conn)
+            config = self._chest_config_with(conn)
             reward = roll_chest_reward(
                 int(row["chest_tier"]),
-                boost_chance=chance,
-                boost_minutes=minutes,
+                boost_chance=int(config["boost_chance"]),
+                boost_minutes=int(config["boost_minutes"]),
+                star_chance=int(config["star_chance"]),
+                boost_allowed=local_now.hour < int(config["cutoff_hour"]),
                 rng=rng,
             )
-            if reward["reward_type"] == CHEST_REWARD_BOOST:
+            star_payload: dict[str, Any] | None = None
+            stored_star_id: str | None = None
+            if reward["reward_type"] == CHEST_REWARD_STAR:
+                reward_type = CHEST_REWARD_STAR
+                boost_minutes = None
+                amount = 0
+                stored_amount: int | None = 0
+                star_payload = self._create_task_chest_star_with(
+                    conn, player_id=user_id, acquired_at=now_iso
+                )
+                stored_star_id = str(star_payload["id"])
+                wallet = self._sync_diamond_decay_with(  # type: ignore[attr-defined]
+                    conn, user_id, local_now, create_for_unknown=False
+                )
+                balance = 0 if wallet is None else int(wallet["balance"])
+            elif reward["reward_type"] == CHEST_REWARD_BOOST:
                 reward_type = CHEST_REWARD_BOOST
                 boost_minutes: int | None = int(reward["boost_minutes"])
                 amount = 0
-                stored_amount: int | None = None
+                stored_amount = None
                 self._extend_diamond_boost_with(  # type: ignore[attr-defined]
                     conn,
                     player_id=user_id,
                     minutes=boost_minutes,
-                    multiplier=multiplier,
+                    multiplier=int(config["multiplier"]),
                     now=local_now,
                     updated_at=now_iso,
                 )
@@ -832,13 +1047,14 @@ class TasksMixin:
             conn.execute(
                 "UPDATE task_instances SET chest_status = 'claimed', "
                 "claimed_at = ?, chest_amount = ?, chest_reward_type = ?, "
-                "chest_boost_minutes = ?, updated_at = ? "
+                "chest_boost_minutes = ?, chest_star_id = ?, updated_at = ? "
                 "WHERE id = ? AND user_id = ?",
                 (
                     now_iso,
                     stored_amount,
                     reward_type,
                     boost_minutes,
+                    stored_star_id,
                     now_iso,
                     task_id,
                     user_id,
@@ -850,6 +1066,7 @@ class TasksMixin:
                 "duplicate": False,
                 "reward_type": reward_type,
                 "boost_minutes": boost_minutes,
+                "star": star_payload,
                 "diamond_boost": self._boost_state_with(  # type: ignore[attr-defined]
                     conn, user_id, local_now
                 ),

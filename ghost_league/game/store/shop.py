@@ -893,7 +893,6 @@ class ShopMixin:
 
     @staticmethod
     def make_star_visual(
-        self,
         star_type: str,
         rarity: str,
         season_key: str | None = None,
@@ -1290,6 +1289,7 @@ class ShopMixin:
         visual_seed: int,
         companion_count: int,
         catalog_code: str,
+        source: str = "shop",
     ) -> dict[str, Any]:
         star = {
             "id": uuid.uuid4().hex,
@@ -1309,7 +1309,7 @@ class ShopMixin:
             "(id, player_id, name, kind, season_key, price_diamonds, "
             "acquired_at, source, star_type, rarity, palette_json, "
             "visual_seed, companion_count, catalog_code) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 'shop', ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 star["id"],
                 player_id,
@@ -1318,6 +1318,7 @@ class ShopMixin:
                 season_key,
                 price_diamonds,
                 acquired_at,
+                source,
                 star_type,
                 rarity,
                 json.dumps(list(palette), ensure_ascii=False),

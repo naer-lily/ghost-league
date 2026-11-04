@@ -36,6 +36,7 @@ function makeTask(overrides: Partial<TaskItem> = {}): TaskItem {
     description: '',
     difficulty: 2,
     chest_tier: 2,
+    chest_pool: 'daily_1',
     sort_order: 10,
     starts_at: '2026-11-04T00:00:00+08:00',
     ends_at: '2026-11-05T00:00:00+08:00',
@@ -46,6 +47,7 @@ function makeTask(overrides: Partial<TaskItem> = {}): TaskItem {
     chest_amount: null,
     chest_reward_type: 'diamonds',
     chest_boost_minutes: null,
+    chest_star: null,
     proof_url: null,
     progress: null,
     ...overrides,
@@ -101,6 +103,7 @@ describe('TaskList', () => {
           duplicate: false,
           reward_type: 'diamonds',
           boost_minutes: null,
+          star: null,
           diamond_boost: {
             expires_at: null,
             remaining_seconds: 0,
@@ -149,7 +152,7 @@ describe('TaskList', () => {
 
     const dialog = await screen.findByTestId('task-chest-dialog')
     expect(within(dialog).getByTestId('task-chest-amount')).toHaveTextContent(
-      '+7 钻石',
+      '7 钻',
     )
     expect(await screen.findByTestId('task-claimed')).toHaveTextContent('7 钻')
     expect(screen.queryByText(/概率|机制|DSL/)).not.toBeInTheDocument()
@@ -163,6 +166,7 @@ describe('TaskList', () => {
       description: '画满 10 分钟，开个小宝箱。',
       difficulty: 1,
       chest_tier: 1,
+      chest_pool: 'daily_1',
       sort_order: 0,
       status: 'completed',
       completed_at: '2026-11-04T12:10:00+08:00',
@@ -185,6 +189,7 @@ describe('TaskList', () => {
           duplicate: false,
           reward_type: 'boost',
           boost_minutes: 25,
+          star: null,
           diamond_boost: {
             expires_at: '2026-11-04T12:35:00+08:00',
             remaining_seconds: 1500,
@@ -223,6 +228,79 @@ describe('TaskList', () => {
     )
     expect(screen.queryByText('0 钻')).not.toBeInTheDocument()
     expect(container.querySelector('input[type="file"]')).toBeNull()
+  })
+
+  it('claims a star chest and shows the star name in both places', async () => {
+    const star = {
+      id: 'star_1',
+      name: '北辰',
+      kind: 'normal' as const,
+      season_key: null,
+      star_type: 'red_dwarf',
+      type_label: '红矮星',
+      rarity: 'common',
+      rarity_label: '普通',
+      palette: ['#111111', '#222222', '#333333'],
+      visual_seed: 1,
+      companion_count: 0,
+      catalog_code: 'GL-2026-ABCD',
+      acquired_at: '2026-11-04T12:00:00+08:00',
+      svg_url: '/v1/me/stars/star_1/svg',
+    }
+    let task = makeTask({
+      status: 'completed',
+      completed_at: '2026-11-04T12:00:00+08:00',
+      chest_status: 'available',
+    })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/chest')) {
+        task = {
+          ...task,
+          chest_status: 'claimed',
+          chest_amount: 0,
+          chest_reward_type: 'star',
+          chest_star: star,
+        }
+        return response({
+          amount: 0,
+          balance: 1000,
+          duplicate: false,
+          reward_type: 'star',
+          boost_minutes: null,
+          star,
+          diamond_boost: {
+            expires_at: null,
+            remaining_seconds: 0,
+            multiplier: 1,
+          },
+        })
+      }
+      if (url.endsWith('/v1/me/tasks')) {
+        return response({
+          server_now: '2026-11-04T12:00:00+08:00',
+          tasks: [task],
+        })
+      }
+      return response({ detail: 'not found' }, 404)
+    })
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderList()
+    await userEvent.click(
+      await screen.findByRole('button', { name: '领取速写一张的宝箱' }),
+    )
+    const dialog = await screen.findByTestId('task-chest-dialog')
+    expect(within(dialog).getByTestId('task-chest-amount')).toHaveTextContent(
+      '星星：北辰',
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('task-claimed')).toHaveTextContent(
+        '星星：北辰',
+      ),
+    )
+    expect(screen.queryByText(/概率|池子|档位/)).not.toBeInTheDocument()
   })
 
   it('shows 处理中… while compressing and uploads the compressed file', async () => {
@@ -309,6 +387,7 @@ describe('TaskList', () => {
                 description: '周六周日累计 1000 XP。',
                 difficulty: 5,
                 chest_tier: 5,
+                chest_pool: 'daily_1',
                 ends_at: '2026-11-02T00:00:00+08:00',
                 progress: { current: 420, target: 1000 },
               }),
@@ -336,6 +415,7 @@ describe('TaskList', () => {
       description: '当天只拿到 74 XP；用余烬补上。',
       difficulty: 1,
       chest_tier: 1,
+      chest_pool: 'daily_1',
       starts_at: '2026-11-04T00:00:00+08:00',
       ends_at: '2026-11-06T00:00:00+08:00',
       missed_date: '2026-10-29',
@@ -353,6 +433,7 @@ describe('TaskList', () => {
             description: '当天只拿到 74 XP；用余烬补上。',
             difficulty: 1,
             chest_tier: 1,
+            chest_pool: 'daily_1',
             starts_at: '2026-11-04T00:00:00+08:00',
             ends_at: '2026-11-06T00:00:00+08:00',
             missed_date: '2026-10-29',
@@ -408,6 +489,7 @@ describe('TaskList', () => {
       description: '当天只拿到 74 XP；用余烬补上。',
       difficulty: 1,
       chest_tier: 1,
+      chest_pool: 'daily_1',
       starts_at: '2026-11-04T00:00:00+08:00',
       ends_at: '2026-11-06T00:00:00+08:00',
       missed_date: '2026-10-29',
@@ -455,6 +537,7 @@ describe('TaskList', () => {
                 title: '补断联 · 10/29',
                 difficulty: 1,
                 chest_tier: 1,
+                chest_pool: 'daily_1',
                 missed_date: '2026-10-29',
                 status: 'completed',
                 completed_at: '2026-11-04T12:30:00+08:00',
@@ -467,6 +550,7 @@ describe('TaskList', () => {
                 title: '补断联 · 10/30',
                 difficulty: 1,
                 chest_tier: 1,
+                chest_pool: 'daily_1',
                 missed_date: '2026-10-30',
                 status: 'expired',
                 chest_status: 'forfeited',

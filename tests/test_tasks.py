@@ -22,9 +22,11 @@ from ghost_league.game.tasks import (
     chest_amount_range,
     checkin_condition,
     evaluate_condition,
+    parse_chest_pool,
     repair_condition,
     roll_chest_amount,
     roll_chest_reward,
+    roll_chest_tier,
     weekend_condition,
 )
 from ghost_league.schedule import TZ
@@ -99,6 +101,21 @@ class TaskStoreBase(unittest.TestCase):
         self.store.create_player(
             "u", kind="human", display_name="U", joined_week="2026-10-19", now=self.now
         )
+        # Keep most lifecycle tests independent of the balance pools.  Pool
+        # sampling itself is covered by the dedicated chest-pool tests.
+        for pool, tier in (
+            ("daily_1", 1),
+            ("daily_2", 2),
+            ("daily_3", 3),
+            ("checkin", 1),
+            ("repair", 1),
+            ("weekend", 5),
+        ):
+            self.store.set_game_config(
+                f"task_chest_pool_{pool}",
+                json.dumps({str(i): 100 if i == tier else 0 for i in range(1, 6)}),
+                now=self.now,
+            )
 
     def add_activity(self, day: str, seconds: int, *, event_id: str | None = None) -> None:
         self.store.ingest_activity(
@@ -560,11 +577,233 @@ class ManualChestTests(TaskStoreBase):
     def test_chest_tiers_have_the_documented_ranges(self) -> None:
         self.assertEqual(
             [(row["tier"], row["min"], row["max"]) for row in CHEST_TIERS],
-            [(1, 3, 6), (2, 6, 10), (3, 10, 16), (4, 18, 28), (5, 30, 48)],
+            [(1, 3, 6), (2, 8, 14), (3, 18, 30), (4, 45, 70), (5, 100, 100)],
         )
-        draws = {roll_chest_amount(5, rng=lambda span: 0) for _ in range(3)}
-        self.assertEqual(draws, {30})
-        self.assertEqual(roll_chest_amount(5, rng=lambda span: span - 1), 48)
+        ranges = [set(range(row["min"], row["max"] + 1)) for row in CHEST_TIERS]
+        for index, current in enumerate(ranges):
+            for other in ranges[index + 1 :]:
+                self.assertFalse(current & other)
+        self.assertEqual(roll_chest_amount(5, rng=lambda span: 0), 100)
+        self.assertEqual(roll_chest_amount(5, rng=lambda span: span - 1), 100)
+
+
+class ChestPoolTests(TaskStoreBase):
+    DEFAULT_POOLS = {
+        "checkin": (70, 25, 5, 0, 0),
+        "daily_1": (55, 35, 10, 0, 0),
+        "daily_2": (35, 35, 25, 5, 0),
+        "daily_3": (20, 30, 35, 13, 2),
+        "repair": (60, 30, 9, 1, 0),
+        "weekend": (0, 15, 45, 30, 10),
+    }
+
+    @staticmethod
+    def weights(*values: int) -> dict[int, int]:
+        return {tier: values[tier - 1] for tier in range(1, 6)}
+
+    def test_default_pools_draw_distinguishable_tiers(self) -> None:
+        cases = {
+            "checkin": {0: 1, 69: 1, 70: 2, 94: 2, 95: 3, 99: 3},
+            "daily_1": {0: 1, 54: 1, 55: 2, 89: 2, 90: 3, 99: 3},
+            "daily_2": {
+                0: 1, 34: 1, 35: 2, 69: 2, 70: 3, 94: 3, 95: 4, 99: 4,
+            },
+            "daily_3": {
+                0: 1, 19: 1, 20: 2, 49: 2, 50: 3,
+                84: 3, 85: 4, 97: 4, 98: 5, 99: 5,
+            },
+            "repair": {0: 1, 59: 1, 60: 2, 89: 2, 90: 3, 98: 3, 99: 4},
+            "weekend": {
+                0: 2, 14: 2, 15: 3, 59: 3, 60: 4, 89: 4, 90: 5, 99: 5,
+            },
+        }
+        for pool, expected in cases.items():
+            weights = self.weights(*self.DEFAULT_POOLS[pool])
+            self.assertEqual(sum(weights.values()), 100, pool)
+            for pick, tier in expected.items():
+                self.assertEqual(
+                    roll_chest_tier(
+                        weights, rng=lambda span, pick=pick: pick
+                    ),
+                    tier,
+                    (pool, pick),
+                )
+
+    def test_invalid_pool_weights_are_rejected(self) -> None:
+        self.assertIsNone(parse_chest_pool('{"1":50,"2":49}'))
+        self.assertIsNone(parse_chest_pool('{"1":50,"2":50,"6":0}'))
+        self.assertIsNone(parse_chest_pool('{"1":50,"2":50.0}'))
+        self.assertIsNone(parse_chest_pool('{"1":true,"2":99}'))
+        self.assertIsNone(parse_chest_pool('{"1":101,"2":-1}'))
+        self.assertIsNone(parse_chest_pool("not-json"))
+        self.assertIsNone(parse_chest_pool(None))
+        self.assertEqual(
+            parse_chest_pool('{"1":70,"2":25,"3":5}'),
+            {1: 70, 2: 25, 3: 5, 4: 0, 5: 0},
+        )
+        with self.assertRaises(ValueError):
+            roll_chest_tier({1: 50, 2: 49, 3: 0, 4: 0, 5: 0})
+
+    def test_invalid_pool_completion_uses_conservative_fallback(self) -> None:
+        self.store.set_game_config(
+            "task_chest_pool_daily_2", '{"1":50,"2":49}', now=self.now
+        )
+        self.store.create_task_definition(
+            "u", title="bad pool", difficulty=2, now=self.now
+        )
+        self.store.ensure_user_tasks("u", self.now)
+        task = next(
+            row
+            for row in visible_tasks(self.store, "u", self.now)
+            if row["title"] == "bad pool"
+        )
+        completed = self.store.complete_manual_task(
+            "u",
+            task["id"],
+            proof_path="x",
+            proof_mime="image/png",
+            now=self.now,
+        )
+        self.assertEqual(completed["chest_tier"], 1)
+        self.assertEqual(completed["chest_pool"], "daily_2")
+
+    def test_completion_rolls_once_and_refresh_does_not_reroll(self) -> None:
+        self.store.set_game_config(
+            "task_chest_pool_daily_2",
+            '{"1":0,"2":0,"3":0,"4":0,"5":100}',
+            now=self.now,
+        )
+        self.store.create_task_definition(
+            "u", title="star pool", difficulty=2, now=self.now
+        )
+        self.store.ensure_user_tasks("u", self.now)
+        task = next(
+            row
+            for row in visible_tasks(self.store, "u", self.now)
+            if row["title"] == "star pool"
+        )
+        completed = self.store.complete_manual_task(
+            "u",
+            task["id"],
+            proof_path="x",
+            proof_mime="image/png",
+            now=self.now,
+        )
+        self.assertEqual(completed["chest_tier"], 5)
+        self.store.set_game_config(
+            "task_chest_pool_daily_2", '{"1":100,"2":0,"3":0,"4":0,"5":0}',
+            now=self.now,
+        )
+        refreshed = next(
+            row
+            for row in visible_tasks(self.store, "u", self.now)
+            if row["id"] == task["id"]
+        )
+        self.assertEqual(refreshed["chest_tier"], 5)
+
+    def test_old_completed_instance_keeps_its_tier(self) -> None:
+        self.store.create_task_definition(
+            "u", title="old", difficulty=2, now=self.now
+        )
+        self.store.ensure_user_tasks("u", self.now)
+        task = next(
+            row
+            for row in visible_tasks(self.store, "u", self.now)
+            if row["title"] == "old"
+        )
+        with self.store.transaction() as conn:
+            conn.execute(
+                "UPDATE task_instances SET status = 'completed', "
+                "chest_status = 'available', chest_tier = 4, "
+                "chest_pool = '' WHERE id = ?",
+                (task["id"],),
+            )
+        refreshed = next(
+            row
+            for row in visible_tasks(self.store, "u", self.now)
+            if row["id"] == task["id"]
+        )
+        self.assertEqual(refreshed["chest_tier"], 4)
+
+
+class StarChestTests(TaskStoreBase):
+    def _complete_daily(self, title: str = "A") -> str:
+        self.store.create_task_definition(
+            "u", title=title, difficulty=2, now=self.now
+        )
+        self.store.ensure_user_tasks("u", self.now)
+        task = next(
+            row
+            for row in visible_tasks(self.store, "u", self.now)
+            if row["title"] == title
+        )
+        self.store.complete_manual_task(
+            "u",
+            task["id"],
+            proof_path="x",
+            proof_mime="image/png",
+            now=self.now,
+        )
+        return task["id"]
+
+    def test_star_chest_creates_one_normal_star_and_replays_it(self) -> None:
+        self.store.set_game_config(
+            "task_chest_pool_daily_2",
+            '{"1":0,"2":0,"3":0,"4":0,"5":100}',
+            now=self.now,
+        )
+        self.store.set_game_config("task_chest_star_chance", "100", now=self.now)
+        task_id = self._complete_daily()
+        first = self.store.claim_task_chest(
+            "u", task_id, now=self.now, rng=lambda span: 0
+        )
+        self.assertEqual(first["reward_type"], "star")
+        self.assertEqual(first["amount"], 0)
+        self.assertIsNone(first["boost_minutes"])
+        star = first["star"]
+        self.assertIsNotNone(star)
+        self.assertEqual(star["kind"], "normal")
+        self.assertIsNone(star["season_key"])
+        with self.store._reader() as conn:
+            row = conn.execute(
+                "SELECT source, kind, season_key, price_diamonds "
+                "FROM player_stars WHERE id = ?",
+                (star["id"],),
+            ).fetchone()
+        self.assertEqual(
+            (row["source"], row["kind"], row["season_key"],
+             row["price_diamonds"]),
+            ("task_chest", "normal", None, 0),
+        )
+        duplicate = self.store.claim_task_chest(
+            "u", task_id, now=self.now, rng=lambda span: 0
+        )
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(duplicate["reward_type"], "star")
+        self.assertEqual(duplicate["star"]["id"], star["id"])
+        payload = self.store.get_task_payload("u", task_id, now=self.now)
+        self.assertEqual(payload["chest_reward_type"], "star")
+        self.assertEqual(payload["chest_star"]["id"], star["id"])
+        with self.store._reader() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) AS n FROM player_stars"
+            ).fetchone()["n"]
+        self.assertEqual(count, 1)
+
+    def test_star_chest_miss_pays_100_diamonds(self) -> None:
+        self.store.set_game_config(
+            "task_chest_pool_daily_2",
+            '{"1":0,"2":0,"3":0,"4":0,"5":100}',
+            now=self.now,
+        )
+        self.store.set_game_config("task_chest_star_chance", "0", now=self.now)
+        task_id = self._complete_daily()
+        result = self.store.claim_task_chest(
+            "u", task_id, now=self.now, rng=lambda span: 0
+        )
+        self.assertEqual(result["reward_type"], "diamonds")
+        self.assertEqual(result["amount"], 100)
+        self.assertIsNone(result["star"])
 
 
 class ChestRewardTests(TaskStoreBase):
@@ -615,6 +854,91 @@ class ChestRewardTests(TaskStoreBase):
             )["reward_type"],
             "diamonds",
         )
+
+    def test_high_tiers_never_roll_boost(self) -> None:
+        for tier in (4, 5):
+            reward = roll_chest_reward(
+                tier,
+                boost_chance=100,
+                boost_minutes=25,
+                rng=lambda span: 0,
+            )
+            self.assertEqual(reward["reward_type"], "diamonds")
+            self.assertIsNone(reward["boost_minutes"])
+        self.assertEqual(
+            roll_chest_reward(5, boost_chance=100, rng=lambda span: 0)["amount"],
+            100,
+        )
+
+    def test_boost_is_cut_off_after_the_local_hour(self) -> None:
+        allowed = roll_chest_reward(
+            2,
+            boost_chance=100,
+            boost_minutes=25,
+            boost_allowed=True,
+            rng=lambda span: 0,
+        )
+        blocked = roll_chest_reward(
+            2,
+            boost_chance=100,
+            boost_minutes=25,
+            boost_allowed=False,
+            rng=lambda span: 0,
+        )
+        self.assertEqual(allowed["reward_type"], "boost")
+        self.assertEqual(blocked["reward_type"], "diamonds")
+        self.assertEqual(blocked["amount"], 8)
+
+    def test_star_tier_hits_the_star_branch_with_fixed_rng(self) -> None:
+        star = roll_chest_reward(
+            5, star_chance=10, boost_chance=100, rng=lambda span: 0
+        )
+        self.assertEqual(
+            star,
+            {"reward_type": "star", "amount": 0, "boost_minutes": None},
+        )
+        miss = roll_chest_reward(
+            5,
+            star_chance=10,
+            boost_chance=100,
+            rng=lambda span: 10 if span == 100 else 0,
+        )
+        self.assertEqual(miss["reward_type"], "diamonds")
+        self.assertEqual(miss["amount"], 100)
+
+    def test_boost_cutoff_and_high_tiers_fail_closed_to_diamonds(self) -> None:
+        self.store.set_game_config("task_chest_boost_chance", "100", now=self.now)
+        self.store.set_game_config("task_chest_boost_minutes", "25", now=self.now)
+        self.store.set_game_config(
+            "task_chest_pool_daily_2", '{"1":0,"2":100,"3":0,"4":0,"5":0}',
+            now=self.now,
+        )
+        early = datetime(2026, 11, 4, 20, 0, 0, tzinfo=TZ)
+        early_id = self._complete("early", now=early)
+        early_result = self.store.claim_task_chest(
+            "u", early_id, now=early, rng=lambda span: 0
+        )
+        self.assertEqual(early_result["reward_type"], "boost")
+
+        late = datetime(2026, 11, 4, 21, 0, 0, tzinfo=TZ)
+        late_id = self._complete("late", now=late)
+        late_result = self.store.claim_task_chest(
+            "u", late_id, now=late, rng=lambda span: 0
+        )
+        self.assertEqual(late_result["reward_type"], "diamonds")
+        self.assertIsNone(late_result["boost_minutes"])
+        self.assertIn(late_result["amount"], range(8, 15))
+
+        self.store.set_game_config(
+            "task_chest_pool_daily_2", '{"1":0,"2":0,"3":0,"4":100,"5":0}',
+            now=self.now,
+        )
+        gold_id = self._complete("gold", now=self.now)
+        gold_result = self.store.claim_task_chest(
+            "u", gold_id, now=self.now, rng=lambda span: 0
+        )
+        self.assertEqual(gold_result["reward_type"], "diamonds")
+        self.assertIn(gold_result["amount"], range(45, 71))
 
     def test_boost_chest_extends_buff_and_never_writes_diamond_ledger(
         self,
@@ -673,7 +997,7 @@ class ChestRewardTests(TaskStoreBase):
         result = self.store.claim_task_chest("u", task_id, now=self.now)
         self.assertEqual(result["reward_type"], "diamonds")
         self.assertIsNone(result["boost_minutes"])
-        self.assertIn(result["amount"], range(6, 11))
+        self.assertIn(result["amount"], range(8, 15))
         self.assertEqual(len(self.store.diamond_ledger("u")), 1)
 
     def test_boost_chest_missing_config_fails_closed_to_diamonds(self) -> None:
@@ -1305,6 +1629,7 @@ class TaskApiTests(APITestBase):
                     "duplicate",
                     "reward_type",
                     "boost_minutes",
+                    "star",
                     "diamond_boost",
                 },
             )
@@ -1358,6 +1683,51 @@ class TaskApiTests(APITestBase):
                 ).status_code,
                 404,
             )
+
+    def test_star_chest_api_payload_and_idempotency(self) -> None:
+        with self.client() as client:
+            with sqlite3.connect(self.game_db_path) as conn:
+                conn.execute(
+                    "UPDATE game_config SET value = ? "
+                    "WHERE key = 'task_chest_pool_daily_2'",
+                    ('{"1":0,"2":0,"3":0,"4":0,"5":100}',),
+                )
+                conn.execute(
+                    "UPDATE game_config SET value = '100' "
+                    "WHERE key = 'task_chest_star_chance'"
+                )
+            client.post(
+                "/v1/me/task-definitions",
+                headers=auth(TOKEN),
+                json={"title": "星箱任务", "difficulty": 2},
+            )
+            task_id = api_tasks(client)[0]["id"]
+            done = client.post(
+                f"/v1/me/tasks/{task_id}/complete",
+                headers=auth(TOKEN),
+                files={"file": ("proof.png", image_bytes(), "image/png")},
+            )
+            self.assertEqual(done.status_code, 200, done.text)
+            self.assertEqual(done.json()["task"]["chest_pool"], "daily_2")
+            self.assertIsNone(done.json()["task"]["chest_star"])
+            claimed = client.post(
+                f"/v1/me/tasks/{task_id}/chest", headers=auth(TOKEN)
+            )
+            self.assertEqual(claimed.status_code, 200, claimed.text)
+            body = claimed.json()
+            self.assertEqual(body["reward_type"], "star")
+            self.assertEqual(body["amount"], 0)
+            self.assertIsNone(body["boost_minutes"])
+            self.assertEqual(body["star"]["kind"], "normal")
+            self.assertIsNone(body["star"]["season_key"])
+            again = client.post(
+                f"/v1/me/tasks/{task_id}/chest", headers=auth(TOKEN)
+            )
+            self.assertTrue(again.json()["duplicate"])
+            self.assertEqual(again.json()["star"]["id"], body["star"]["id"])
+            listed = api_tasks(client)[0]
+            self.assertEqual(listed["chest_reward_type"], "star")
+            self.assertEqual(listed["chest_star"]["id"], body["star"]["id"])
 
     def test_definition_validation_and_limit(self) -> None:
         with self.client() as client:

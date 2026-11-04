@@ -53,7 +53,7 @@ def test_schema_meta_and_epoch(tmp_path) -> None:
         "diamond_boosts",
     } <= tables
     meta = store.meta_snapshot()
-    assert meta["schema_version"] == "12"
+    assert meta["schema_version"] == "13"
     assert meta["algorithm_version"] == "phase1-v1"
     assert meta["epoch_id"]
     assert store.active_epoch()["status"] == "active"
@@ -401,20 +401,24 @@ def test_task_order_migration_backfills_definitions_and_instances(tmp_path) -> N
     ] == [("B", 10), ("A", 20)]
     with store.transaction() as conn:
         rows = conn.execute(
-            "SELECT id, sort_order, chest_reward_type, chest_boost_minutes "
+            "SELECT id, sort_order, chest_tier, chest_pool, "
+            "chest_reward_type, chest_boost_minutes, chest_star_id "
             "FROM task_instances ORDER BY id"
         ).fetchall()
     assert [
         (
             row["id"],
             row["sort_order"],
+            row["chest_tier"],
+            row["chest_pool"],
             row["chest_reward_type"],
             row["chest_boost_minutes"],
+            row["chest_star_id"],
         )
         for row in rows
     ] == [
-        ("ti_a", 20, "diamonds", None),
-        ("ti_done", 10, "diamonds", None),
+        ("ti_a", 20, 1, "daily_1", "diamonds", None, None),
+        ("ti_done", 10, 1, "daily_1", "diamonds", None, None),
     ]
     with sqlite3.connect(path) as conn:
         sql = conn.execute(

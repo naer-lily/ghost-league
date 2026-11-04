@@ -73,8 +73,16 @@ def test_game_config_and_boost_tables_are_seeded_once(tmp_path) -> None:
         "diamond_boost_60_minutes": "60",
         "diamond_boost_60_price": "40",
         "diamond_boost_multiplier": "2",
-        "task_chest_boost_chance": "20",
+        "task_chest_boost_chance": "10",
+        "task_chest_boost_cutoff_hour": "21",
         "task_chest_boost_minutes": "25",
+        "task_chest_pool_checkin": '{"1":70,"2":25,"3":5,"4":0,"5":0}',
+        "task_chest_pool_daily_1": '{"1":55,"2":35,"3":10,"4":0,"5":0}',
+        "task_chest_pool_daily_2": '{"1":35,"2":35,"3":25,"4":5,"5":0}',
+        "task_chest_pool_daily_3": '{"1":20,"2":30,"3":35,"4":13,"5":2}',
+        "task_chest_pool_repair": '{"1":60,"2":30,"3":9,"4":1,"5":0}',
+        "task_chest_pool_weekend": '{"1":0,"2":15,"3":45,"4":30,"5":10}',
+        "task_chest_star_chance": "10",
     }
     with sqlite3.connect(tmp_path / "league.db") as connection:
         config_columns = {
@@ -95,6 +103,26 @@ def test_game_config_and_boost_tables_are_seeded_once(tmp_path) -> None:
     store.set_game_config("diamond_boost_multiplier", "4", now=NOW)
     store.initialize()
     assert store.get_game_config("diamond_boost_multiplier") == "4"
+
+
+def test_legacy_task_chest_chance_migrates_without_overwriting_edits(
+    tmp_path,
+) -> None:
+    store = make_store(tmp_path)
+    with store.transaction() as connection:
+        connection.execute(
+            "DELETE FROM meta WHERE key = 'task_chest_config_update_2026_11'"
+        )
+        connection.execute(
+            "UPDATE game_config SET value = '20' "
+            "WHERE key = 'task_chest_boost_chance'"
+        )
+    store.initialize()
+    assert store.get_game_config("task_chest_boost_chance") == "10"
+
+    store.set_game_config("task_chest_boost_chance", "35", now=NOW)
+    store.initialize()
+    assert store.get_game_config("task_chest_boost_chance") == "35"
 
 
 def test_shop_skus_come_from_config(tmp_path) -> None:

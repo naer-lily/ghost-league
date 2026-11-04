@@ -8,6 +8,7 @@ check-in or Channel fallback.
 
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 from datetime import date, datetime
@@ -22,27 +23,61 @@ logger = logging.getLogger(__name__)
 # ``task_instances.chest_tier``; the ranges are inclusive diamond amounts.
 CHEST_TIERS: tuple[dict[str, Any], ...] = (
     {"tier": 1, "key": "wood", "name": "木箱", "min": 3, "max": 6},
-    {"tier": 2, "key": "copper", "name": "铜箱", "min": 6, "max": 10},
-    {"tier": 3, "key": "silver", "name": "银箱", "min": 10, "max": 16},
-    {"tier": 4, "key": "gold", "name": "金箱", "min": 18, "max": 28},
-    {"tier": 5, "key": "star", "name": "星箱", "min": 30, "max": 48},
+    {"tier": 2, "key": "copper", "name": "铜箱", "min": 8, "max": 14},
+    {"tier": 3, "key": "silver", "name": "银箱", "min": 18, "max": 30},
+    {"tier": 4, "key": "gold", "name": "金箱", "min": 45, "max": 70},
+    {"tier": 5, "key": "star", "name": "星箱", "min": 100, "max": 100},
 )
 CHEST_BY_TIER: dict[int, dict[str, Any]] = {
     int(row["tier"]): row for row in CHEST_TIERS
 }
 
+# Placeholder tiers written when an active instance is generated.  The real
+# tier is rolled from the instance's pool exactly once, at completion.
 MANUAL_CHEST_TIER: dict[int, int] = {1: 1, 2: 2, 3: 3}
 REPAIR_CHEST_TIER = 1
 WEEKEND_CHEST_TIER = 5
 CHECKIN_CHEST_TIER = 1
+
+CHEST_POOL_CHECKIN = "checkin"
+CHEST_POOL_DAILY_PREFIX = "daily_"
+CHEST_POOL_REPAIR = "repair"
+CHEST_POOL_WEEKEND = "weekend"
+CHEST_POOL_NAMES = (
+    CHEST_POOL_CHECKIN,
+    "daily_1",
+    "daily_2",
+    "daily_3",
+    CHEST_POOL_REPAIR,
+    CHEST_POOL_WEEKEND,
+)
+MANUAL_CHEST_POOL: dict[int, str] = {
+    1: "daily_1",
+    2: "daily_2",
+    3: "daily_3",
+}
+# Missing or invalid pool config falls back to the most conservative pool for
+# that source.  Claiming a chest must never fail because of a pool row.
+CHEST_POOL_FALLBACKS: dict[str, dict[int, int]] = {
+    "checkin": {1: 100},
+    "daily_1": {1: 100},
+    "daily_2": {1: 100},
+    "daily_3": {1: 100},
+    "repair": {1: 100},
+    "weekend": {2: 100},
+}
 
 CHECKIN_TASK_SOURCE = "checkin"
 CHECKIN_TASK_TITLE = "每日打卡"
 CHECKIN_TASK_DESCRIPTION = "画满 10 分钟，开个小宝箱。"
 TASK_CHEST_BOOST_CHANCE_KEY = "task_chest_boost_chance"
 TASK_CHEST_BOOST_MINUTES_KEY = "task_chest_boost_minutes"
+TASK_CHEST_BOOST_CUTOFF_HOUR_KEY = "task_chest_boost_cutoff_hour"
+TASK_CHEST_STAR_CHANCE_KEY = "task_chest_star_chance"
+TASK_CHEST_POOL_PREFIX = "task_chest_pool_"
 CHEST_REWARD_DIAMONDS = "diamonds"
 CHEST_REWARD_BOOST = "boost"
+CHEST_REWARD_STAR = "star"
 
 REPAIR_XP_THRESHOLD = 100
 REPAIR_LOOKBACK_DAYS = 7
@@ -111,29 +146,45 @@ def roll_chest_reward(
     *,
     boost_chance: int = 0,
     boost_minutes: int = 0,
+    star_chance: int = 0,
+    boost_allowed: bool = True,
     rng: Callable[[int], int] | None = None,
 ) -> dict[str, Any]:
     """Roll one chest reward.
 
-    ``boost_chance`` is an integer percentage.  Invalid or missing config is
-    normalised to zero by the caller, so the chest still pays diamonds.  The
-    returned mapping always has ``reward_type`` and ``boost_minutes``; boost
-    rewards keep ``amount`` at zero so the API field stays an integer.
+    Tiers 1-3 may pay a boost before the local cutoff; tiers 4-5 never pay a
+    boost.  Tier 5 may pay one normal star instead of its fixed 100 diamonds.
+    ``boost_chance`` and ``star_chance`` are integer percentages.  Invalid or
+    missing config is normalised to zero by the caller, so the chest still pays
+    diamonds.  The returned mapping always has ``reward_type`` and
+    ``boost_minutes``; boost and star rewards keep ``amount`` at zero so the
+    API field stays an integer.
     """
 
     chest_amount_range(tier)
     try:
         chance = int(boost_chance)
         minutes = int(boost_minutes)
+        star = int(star_chance)
     except (TypeError, ValueError):
-        chance, minutes = 0, 0
+        chance, minutes, star = 0, 0, 0
     if isinstance(boost_chance, bool) or isinstance(boost_minutes, bool):
         chance, minutes = 0, 0
+    if isinstance(star_chance, bool):
+        star = 0
     if not 0 <= chance <= 100 or minutes < 1:
         chance, minutes = 0, 0
+    if not 0 <= star <= 100:
+        star = 0
 
     draw = rng or secrets.randbelow
-    if chance and int(draw(100)) < chance:
+    if tier == 5 and star and int(draw(100)) < star:
+        return {
+            "reward_type": CHEST_REWARD_STAR,
+            "amount": 0,
+            "boost_minutes": None,
+        }
+    if tier <= 3 and boost_allowed and chance and int(draw(100)) < chance:
         return {
             "reward_type": CHEST_REWARD_BOOST,
             "amount": 0,
@@ -144,6 +195,96 @@ def roll_chest_reward(
         "amount": roll_chest_amount(tier, rng=draw),
         "boost_minutes": None,
     }
+
+
+def chest_pool_for_task(source: str, difficulty: int) -> str:
+    """Return the chest pool a task instance draws from.
+
+    Daily manual tasks use their difficulty; the other sources have one
+    dedicated pool.  Unknown sources fall back to the most conservative daily
+    pool so generation and completion never fail on a missing mapping.
+    """
+
+    if source == "daily_manual":
+        return MANUAL_CHEST_POOL.get(int(difficulty), "daily_1")
+    if source in {CHEST_POOL_CHECKIN, CHEST_POOL_REPAIR, CHEST_POOL_WEEKEND}:
+        return source
+    return "daily_1"
+
+
+def chest_pool_config_key(pool: str) -> str:
+    return f"{TASK_CHEST_POOL_PREFIX}{pool}"
+
+
+def parse_chest_pool(raw: str | None) -> dict[int, int] | None:
+    """Parse one integer-percentage weight row, or return ``None``.
+
+    A pool is valid only when every key is a tier from 1 to 5, every value is
+    an integer percentage from 0 to 100, and the weights sum to exactly 100.
+    Missing tier keys count as zero so operators may omit empty tiers.
+    """
+
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    allowed = {str(tier) for tier in CHEST_BY_TIER}
+    if not set(payload).issubset(allowed):
+        return None
+    weights: dict[int, int] = {tier: 0 for tier in CHEST_BY_TIER}
+    for key, value in payload.items():
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        if not 0 <= value <= 100:
+            return None
+        weights[int(key)] = value
+    if sum(weights.values()) != 100:
+        return None
+    return weights
+
+
+def roll_chest_tier(
+    weights: dict[int, int],
+    *,
+    rng: Callable[[int], int] | None = None,
+) -> int:
+    """Draw one tier from integer percentage weights summing to 100."""
+
+    if not isinstance(weights, dict) or set(weights) != set(CHEST_BY_TIER):
+        raise ValueError("chest pool must define tiers 1 to 5")
+    total = 0
+    for tier, weight in weights.items():
+        if isinstance(weight, bool) or not isinstance(weight, int):
+            raise ValueError("chest pool weights must be integers")
+        if weight < 0:
+            raise ValueError("chest pool weights must not be negative")
+        total += weight
+    if total != 100:
+        raise ValueError("chest pool weights must sum to 100")
+    draw = rng or secrets.randbelow
+    pick = int(draw(100))
+    if not 0 <= pick < 100:
+        raise ValueError("chest pool rng must return a value in [0, 100)")
+    cumulative = 0
+    for tier in sorted(CHEST_BY_TIER):
+        cumulative += int(weights[tier])
+        if pick < cumulative:
+            return tier
+    return max(CHEST_BY_TIER)  # pragma: no cover - sum is 100
+
+
+def chest_pool_fallback(pool: str, *, source: str = "", difficulty: int = 0) -> dict[int, int]:
+    """Return the conservative fallback weights for one pool."""
+
+    if pool in CHEST_POOL_FALLBACKS:
+        weights = CHEST_POOL_FALLBACKS[pool]
+    else:
+        weights = CHEST_POOL_FALLBACKS[chest_pool_for_task(source, difficulty)]
+    return {tier: int(weights.get(tier, 0)) for tier in CHEST_BY_TIER}
 
 
 def repair_condition() -> dict[str, Any]:
@@ -463,14 +604,22 @@ def condition_progress(
 
 __all__ = [
     "CHEST_BY_TIER",
+    "CHEST_POOL_CHECKIN",
+    "CHEST_POOL_DAILY_PREFIX",
+    "CHEST_POOL_FALLBACKS",
+    "CHEST_POOL_NAMES",
+    "CHEST_POOL_REPAIR",
+    "CHEST_POOL_WEEKEND",
     "CHEST_REWARD_BOOST",
     "CHEST_REWARD_DIAMONDS",
+    "CHEST_REWARD_STAR",
     "CHEST_TIERS",
     "CHECKIN_CHEST_TIER",
     "CHECKIN_TASK_DESCRIPTION",
     "CHECKIN_TASK_SOURCE",
     "CHECKIN_TASK_TITLE",
     "ConditionError",
+    "MANUAL_CHEST_POOL",
     "MANUAL_CHEST_TIER",
     "MAX_ACTIVE_TASK_DEFINITIONS",
     "MAX_DSL_DEPTH",
@@ -479,7 +628,10 @@ __all__ = [
     "REPAIR_LOOKBACK_DAYS",
     "REPAIR_XP_THRESHOLD",
     "TASK_CHEST_BOOST_CHANCE_KEY",
+    "TASK_CHEST_BOOST_CUTOFF_HOUR_KEY",
     "TASK_CHEST_BOOST_MINUTES_KEY",
+    "TASK_CHEST_POOL_PREFIX",
+    "TASK_CHEST_STAR_CHANCE_KEY",
     "TASK_COMPLETION_MODES",
     "TASK_SOURCES",
     "TaskLimitReached",
@@ -489,13 +641,18 @@ __all__ = [
     "WEEKEND_XP_TARGET",
     "checkin_condition",
     "chest_amount_range",
+    "chest_pool_config_key",
+    "chest_pool_fallback",
+    "chest_pool_for_task",
     "condition_progress",
     "evaluate_condition",
     "missed_date_from_system_key",
+    "parse_chest_pool",
     "repair_condition",
     "repair_task_description",
     "repair_task_title",
     "roll_chest_amount",
     "roll_chest_reward",
+    "roll_chest_tier",
     "weekend_condition",
 ]

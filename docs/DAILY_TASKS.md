@@ -6,12 +6,12 @@ Status: implemented, 2026-11-04.
 
 Ghost 自有任务系统有四类任务：
 
-| 来源 | 谁创建 | 完成方式 | 宝箱档位 |
+| 来源 | 谁创建 | 完成方式 | 宝箱池 |
 | --- | --- | --- | --- |
-| `checkin` | Ghost 每天自动生成 | 系统条件（当天打卡） | 木箱 |
-| `daily_manual` | 当前用户在 Ghost 内配置 | 上传一张照片 | 难度 1/2/3 → 木/铜/银 |
-| `repair` | Ghost 自动生成 | 系统条件（补签） | 木箱 |
-| `weekend` | Ghost 自动生成 | 系统条件（周末 XP） | 星箱 |
+| `checkin` | Ghost 每天自动生成 | 系统条件（当天打卡） | `checkin` |
+| `daily_manual` | 当前用户在 Ghost 内配置 | 上传一张照片 | 难度 1/2/3 → `daily_1/2/3` |
+| `repair` | Ghost 自动生成 | 系统条件（补签） | `repair` |
+| `weekend` | Ghost 自动生成 | 系统条件（周末 XP） | `weekend` |
 
 用户只能配置每日手动任务的标题、描述和 1–3 难度；系统任务没有 DSL
 编辑器，也不在设置里出现。所有任务按 `user_id` 归属，当前只有登录用户本人。
@@ -32,8 +32,9 @@ Ghost 自有任务系统有四类任务：
 - 每次 `tasks_for()` / `ensure_user_tasks()` 都幂等生成当天实例，`system_key`
   为 `checkin:YYYY-MM-DD`；没有 `definition_id`，用户不能在设置里编辑或停用。
 - 字段固定：`title='每日打卡'`、`description='画满 10 分钟，开个小宝箱。'`、
-  `difficulty=1`、`chest_tier=1`、`sort_order=0`，
-  `starts_at=当天 00:00`、`ends_at=次日 00:00`、`completion_mode='dsl'`。
+  `difficulty=1`、`chest_tier=1`（占位）、`chest_pool='checkin'`、
+  `sort_order=0`，`starts_at=当天 00:00`、`ends_at=次日 00:00`、
+  `completion_mode='dsl'`。
 - `condition_json` 为 `checkin_source(task.start) == 'verified'`。当天经 daily
   resolver 达到 `CHECKIN_SECONDS=600`（100 XP）并生成 verified 打卡后，读取
   任务列表时由 `refresh_task_states()` 自动完成，不另写事件监听或 cron。
@@ -50,11 +51,12 @@ Ghost 自有任务系统有四类任务：
 - 读取任务列表时 `ensure_user_tasks()` 为每个 active 定义生成当天实例，
   幂等键 `daily:<definition_id>:<YYYY-MM-DD>`；实例也保存 `sort_order`。
 - 当天已有 **active** 实例时，`ensure_user_tasks()` 用当前定义的
-  `title` / `description` / `difficulty` / `chest_tier` / `sort_order` 同步该实例；
-  编辑或重排后下一次读取即生效，不需要手工改库。`completed` / `expired`
-  实例保留历史快照，不改标题也不改顺序。
+  `title` / `description` / `difficulty` / `chest_tier` / `chest_pool` /
+  `sort_order` 同步该实例；编辑或重排后下一次读取即生效，不需要手工改库。
+  `completed` / `expired` 实例保留历史快照，不改标题也不改顺序。
 - 当天实例：`starts_at` = 当天 00:00，`ends_at` = 次日 00:00，
-  `completion_mode='manual'`，`chest_tier=difficulty`。
+  `completion_mode='manual'`，`chest_tier=difficulty`（占位），
+  `chest_pool=daily_<difficulty>`。
 - 完成接口要求 `multipart/form-data` 的 `file` 图片；成功后
   `status='completed'`、`chest_status='available'`。
 - 图片存到 `data/api/task-proofs/<user_id>/<task_id>.<ext>`，目录 700、
@@ -93,31 +95,58 @@ Ghost 自有任务系统有四类任务：
 
 ## 宝箱
 
-权威常量在 `ghost_league/game/tasks.py`：
+权威常量在 `ghost_league/game/tasks.py`。实例生成时只写占位的
+`chest_tier`；**完成时**按实例的 `chest_pool` 抽一次档位并写回
+`chest_tier`，之后不再改变。已完成的旧实例不追溯重抽。
 
 | 档位 | 名称 | 钻石（闭区间） |
 | --- | --- | --- |
 | 1 | 木箱 | 3–6 |
-| 2 | 铜箱 | 6–10 |
-| 3 | 银箱 | 10–16 |
-| 4 | 金箱 | 18–28 |
-| 5 | 星箱 | 30–48 |
+| 2 | 铜箱 | 8–14 |
+| 3 | 银箱 | 18–30 |
+| 4 | 金箱 | 45–70 |
+| 5 | 星箱 | 100 或一颗普通星 |
 
-- 每次领取先读 `game_config.task_chest_boost_chance`（整数百分比，默认 20）；
-  命中则出经验宝，否则在档位闭区间内用 `secrets.randbelow` 均匀抽钻石。
-- 经验宝时长读 `game_config.task_chest_boost_minutes`（默认 25 分钟）。出经验宝
-  时把结果写进 `task_instances.chest_reward_type='boost'`、
-  `chest_boost_minutes`，不写 `diamond_ledger`、不发钻石。
+池子存 `game_config.task_chest_pool_<pool>`，值是整数百分比的 JSON 权重，
+按 1–5 档，总和必须为 100；缺省档位视为 0。默认池子：
+
+```text
+checkin   : 木70 铜25 银5  金0  星0
+daily_1   : 木55 铜35 银10 金0  星0
+daily_2   : 木35 铜35 银25 金5  星0
+daily_3   : 木20 铜30 银35 金13 星2
+repair    : 木60 铜30 银9  金1  星0
+weekend   : 木0  铜15 银45 金30 星10
+```
+
+- 缺失、非 JSON、含未知档位、负值或总和不等于 100 时 fail closed：回退到该
+  来源最保守的池子（`checkin` / `daily_1/2/3` / `repair` → 木箱 100%，
+  `weekend` → 铜箱 100%），领取本身不会失败。
+- 手动任务在 `complete_manual_task()` 抽档；自动任务在
+  `refresh_task_states()` 变成 `completed` 时抽档。领取前再次刷新不会重抽。
+- 领取时按档位决定内容：
+  - 1–3 档：默认钻石；在本地时间 `task_chest_boost_cutoff_hour`（默认 21）
+    之前，按 `task_chest_boost_chance`（整数百分比，默认 10）抽经验宝。
+  - 4–5 档：永不出经验宝；5 档先按 `task_chest_star_chance`（整数百分比，
+    默认 10）抽星，未命中则固定 100 钻。
+- 经验宝时长读 `task_chest_boost_minutes`（默认 25）。出经验宝时把结果写进
+  `task_instances.chest_reward_type='boost'`、`chest_boost_minutes`，不写
+  `diamond_ledger`、不发钻石；21:00 及以后任何档位都不出经验宝。
 - 经验宝复用 `diamond_boosts`：当前 buff 未过期就从原 `expires_at` 顺延，否则
   从领取时刻起算；倍率继续读 `diamond_boost_multiplier`（默认 2×），只作用于
   XP→钻石，不乘 XP、宿敌或下注派彩。
+- 星箱命中星时创建一行 `player_stars`：`kind='normal'`、`season_key=NULL`、
+  `source='task_chest'`、`price_diamonds=0`，名字与外观用现有
+  `roll_star_rarity` / `roll_star_type` / `make_star_visual` /
+  `generate_star_name` / `_new_catalog_code_with` 生成；`chest_star_id` 写回
+  实例。重复领取返回同一颗星，不重复创建。
 - 出钻石时写 `diamond_ledger`：`reason='task_chest'`、`ref_type='task'`、
   `ref_id=<task_id>`、幂等键 `task-chest:<task_id>`、`boost=False`；
   `chest_reward_type='diamonds'`，`chest_amount` 保持原字段。
 - 配置缺失或非法（概率不在 0–100、时长 ≤0、缺失、非整数）时 fail closed：
-  不出经验宝，仍按钻石档发，领取不能因此失败。
-- 重复领取幂等返回同一 `reward_type` / `amount` / `boost_minutes`，不重复发 buff；
-  到期未领取的宝箱作废。
+  不出经验宝/星，仍按钻石档发，领取不能因此失败。
+- 重复领取幂等返回同一 `reward_type` / `amount` / `boost_minutes` / `star`，
+  不重复发 buff 或星；到期未领取的宝箱作废。
 - 宝箱奖励不产生 XP、不写 `weekly_scores`。
 
 ## DSL 求值器
@@ -140,7 +169,7 @@ Ghost 自有任务系统有四类任务：
 - `POST /v1/me/tasks/{id}/complete`：手动任务拍照完成。
 - `GET /v1/me/tasks/{id}/proof`：本人读取完成照片。
 - `POST /v1/me/tasks/{id}/chest`：领取宝箱，返回 `reward_type`、
-  `boost_minutes`、`diamond_boost`。
+  `boost_minutes`、`star`、`diamond_boost`。
 - `GET/POST/PATCH/DELETE /v1/me/task-definitions`：管理每日手动定义。
 - `PUT /v1/me/task-definitions/order`：按 `{"ids": [...]}` 批量保存每日任务顺序。
 
@@ -167,8 +196,8 @@ Ghost 自有任务系统有四类任务：
   `POST /v1/me/repair`（`{date: missed_date, idempotency_key: ...}`）；成功后
   刷新任务和首页，提示“补上了。”，任务在下一次刷新时变为 `completed`，
   宝箱仍需用户手动领取。completed / expired 任务不显示该按钮。
-- 完成后显示宝箱按钮，领取后轻量 dialog 和卡片显示「经验宝 25 分钟」或
-  「X 钻」，不展示内部字段。
+- 完成后显示宝箱按钮，领取后轻量 dialog 和卡片显示「经验宝 25 分钟」、
+  「X 钻」或「星星：名字」，不展示池子、概率或档位说明。
 - 首页 buff 区按 `diamond_boost` 显示经验宝剩余时间；没有 buff 时不占位。
 - “设置”打开 `TaskSettingsDialog`，只管理每日手动定义，不出现 DSL、
   系统任务或宝箱档位。

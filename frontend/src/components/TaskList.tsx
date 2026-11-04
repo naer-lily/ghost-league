@@ -18,12 +18,15 @@ interface ClaimedChest extends ClaimedTaskChest {
 
 function claimedRewardText(claimed: ClaimedChest | null): string {
   if (!claimed) return ''
+  if (claimed.rewardType === 'star') {
+    return claimed.star ? `星星：${claimed.star.name}` : '星星'
+  }
   if (claimed.rewardType === 'boost') {
     return claimed.boostMinutes
       ? `经验宝 ${claimed.boostMinutes} 分钟`
       : '经验宝'
   }
-  return `+${claimed.amount} 钻石`
+  return `${claimed.amount} 钻`
 }
 
 function displayBucket(task: TaskItem): number {
