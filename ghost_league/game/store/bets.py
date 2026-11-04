@@ -14,6 +14,7 @@ from typing import Any
 
 from .. import calendar as cal
 from ..rival import (
+    DAILY_MAX_PAID_STAKE,
     FREE_BET_STAKE,
     GROUP_MARKET_LABELS,
     GROUP_MARKETS,
@@ -26,8 +27,8 @@ from ..rival import (
     RivalUnavailable,
     bet_odds,
     daily_bet_locks_at,
-    daily_bet_odds,
     daily_bet_settles_at,
+    daily_target_options,
     group_bet_settles_at,
     group_market_allowed,
     group_market_odds_table,
@@ -426,9 +427,18 @@ class BetsMixin:
             )
         if isinstance(paid_stake, bool) or not isinstance(paid_stake, int):
             raise BetRejected(
-                "invalid_stake", "自付钻石必须是 0 到 500 的整数"
+                "invalid_stake", "自付钻石必须是整数"
             )
-        if not MIN_PAID_STAKE <= paid_stake <= MAX_PAID_STAKE:
+        max_paid_stake = (
+            DAILY_MAX_PAID_STAKE
+            if kind == "daily"
+            else MAX_PAID_STAKE
+        )
+        if not MIN_PAID_STAKE <= paid_stake <= max_paid_stake:
+            if kind == "daily":
+                raise BetRejected(
+                    "invalid_stake", "日注自付上限 100 钻石"
+                )
             raise BetRejected(
                 "invalid_stake", "自付钻石必须在 0 到 500 之间"
             )
@@ -604,19 +614,25 @@ class BetsMixin:
             )
             assert projection is not None
             if kind == "daily":
-                daily_margins = {
-                    int(margin)
-                    for margin in projection["daily_target_margins"]
-                }
-                if target_margin not in daily_margins:
+                options = daily_target_options(
+                    float(projection["daily_mu_me"]),
+                    float(projection["daily_sd_me"]),
+                    float(projection["daily_mu_rival"]),
+                    float(projection["daily_sd_rival"]),
+                )
+                selected = next(
+                    (
+                        option
+                        for option in options
+                        if int(option["margin"]) == target_margin
+                    ),
+                    None,
+                )
+                if selected is None:
                     raise BetRejected(
                         "invalid_target", "目标差值不在今天的档位里"
                     )
-                odds = daily_bet_odds(
-                    target_margin,
-                    float(projection["daily_mu_diff"]),
-                    float(projection["daily_sigma_diff"]),
-                )
+                odds = float(selected["odds"])
             else:
                 week_estimate = int(projection["rival_week_estimate"])
                 if not target_in_range(

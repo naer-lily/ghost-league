@@ -70,6 +70,39 @@ Signals that a mechanic is misaligned:
 - Settlement is not a house game. Every rival bet is judged on the XP gap, every group bet on the group's XP ranking, and the opponent has no separate diamond income. The free stake is a participation subsidy, not a second faucet.
 - A boost should make a planned drawing window more valuable. It should not turn the game into a self-contained money loop.
 
+## Daily bet pricing and limits
+
+Daily bets are the small, frequent loop. They use a fixed odds axis instead of a
+free target range, so the player picks a price first and the server tells them
+what XP gap that price requires:
+
+```text
+odds:      2.0, 3.0, 4.0, 5.0
+p       = 1 / odds
+z       = NormalDist().inv_cdf(1 - p)
+margin  = max(1, ceil(muD + z * sigmaD))
+expected_xp = round_to_step(mu_rival + margin, 10)
+```
+
+`muD` and `sigmaD` come from each player's own recent daily XP, not from a
+shared band average. The same power band is only a prior: a player with at
+least 3 completed check-in days in the last 28 days has their own mean and
+sample variance shrunk toward that prior with 2 pseudo-days. A shorter history
+falls back to the band prior unchanged, so the screen still has four prices on
+day one. Both players are computed independently and may have different means
+and spreads.
+
+Daily paid stake is capped at 100 diamonds. Weekly and group bets keep the
+existing 500-diamond cap. The cap is enforced in the bet transaction, not only
+in the client, and the free 20 stake still stacks on top of the paid part. A
+daily bet at the cap has 120 total principal (20 free + 100 paid); a weekly or
+group bet at the cap has 520. Rejecting a daily stake above 100 uses the same
+`invalid_stake` code as the other stake checks.
+
+The odds shown on the daily screen are the stored odds. The client submits only
+`target_margin`; the server finds that margin among the day's four options and
+copies its `odds` onto the bet. No settlement-time price is recomputed.
+
 ## Diamond sources and sinks
 
 Diamonds enter through the settlement of XP and rank outcomes, not through a separate casino:

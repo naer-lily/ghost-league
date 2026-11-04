@@ -12,10 +12,9 @@ from ghost_league.game.rival import (
     BetRejected,
     BetWindowClosed,
     RivalUnavailable,
-    DAILY_TARGET_STEP,
+    DAILY_ODDS_AXIS,
     bet_odds,
     daily_bet_locks_at,
-    daily_bet_odds,
     daily_bet_settles_at,
     daily_target_margins,
     daily_target_options,
@@ -118,7 +117,6 @@ def make_rival_pair(
 def test_bet_odds_are_monotonic_reference_and_clamped() -> None:
     # Equal power and target == reference gives the documented ~2.0 point.
     assert bet_odds("weekly", 500, 500, 0, 500, 500) == 2.0
-    assert daily_bet_odds(50, 50, 50) == 2.0
     assert bet_odds("weekly", 0, 500, 0, 500, 500) == 1.2
 
     previous = 0.0
@@ -166,26 +164,20 @@ def test_weekly_target_options_cover_range_and_preview_odds() -> None:
         target_options("daily", 0, 0, 500, 500)
 
 
-def test_daily_target_options_are_positive_and_stepped() -> None:
+def test_daily_target_options_use_the_fixed_odds_axis() -> None:
     options = daily_target_options(850, 100, 500, 100)
+    assert [entry["odds"] for entry in options] == list(DAILY_ODDS_AXIS)
+    assert [entry["odds"] for entry in options] == [2.0, 3.0, 4.0, 5.0]
     margins = [entry["margin"] for entry in options]
-    assert 3 <= len(margins) <= 6
+    assert margins == [350, 411, 446, 470]
     assert margins == sorted(set(margins))
-    assert all(margin > 0 for margin in margins)
-    assert margins[0] == 1
-    assert all(
-        margin == 1 or margin % DAILY_TARGET_STEP == 0
-        for margin in margins
-    )
     assert margins == daily_target_margins(850, 100, 500, 100)
-    assert all(entry["odds"] >= 1.2 for entry in options)
-    assert [entry["odds"] for entry in options] == sorted(
-        entry["odds"] for entry in options
-    )
     assert [entry["expected_xp"] for entry in options] == [
         round_to_step(500 + margin, 10) for margin in margins
     ]
-    # No daily projection can offer a zero tier.
+    assert [entry["expected_xp"] for entry in options] == [850, 910, 950, 970]
+    # Daily options always carry all four fields and never a zero margin.
+    assert all(set(entry) == {"odds", "margin", "expected_xp"} for entry in options)
     assert 0 not in margins
 
 
@@ -437,12 +429,15 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     make_rival_pair(store, "h1", "h2")
     make_rival_pair(store, "h3", "h4")
+    make_rival_pair(store, "h5", "h6")
 
     daily = store.rival_state("h1", now=MONDAY)["bet_options"]["daily"]
-    margins = [entry["margin"] for entry in daily["target_options"]]
-    target = margins[0]
-    preview_odds = daily["target_options"][0]["odds"]
+    options = daily["target_options"]
+    assert [entry["odds"] for entry in options] == [2.0, 3.0, 4.0, 5.0]
+    target = options[1]["margin"]
+    preview_odds = options[1]["odds"]
     assert target > 0
+    assert daily["max_paid_stake"] == 100
 
     bet = store.place_bet(
         "h1",
@@ -457,10 +452,10 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
     assert bet["target_margin"] == target
     assert bet["free_stake"] == 20
     assert bet["paid_stake"] == 80
-    assert bet["odds"] == preview_odds
+    assert bet["odds"] == preview_odds == 3.0
     assert store.get_diamond_balance("h1", now=MONDAY_BEFORE_LOCK) == 920
 
-    with pytest.raises(BetRejected):
+    with pytest.raises(BetRejected) as bad_target:
         store.place_bet(
             "h3",
             "daily",
@@ -469,7 +464,8 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
             now=MONDAY,
             request_id="daily-bad-target",
         )
-    with pytest.raises(BetRejected):
+    assert bad_target.value.code == "invalid_target"
+    with pytest.raises(BetRejected) as zero_target:
         store.place_bet(
             "h3",
             "daily",
@@ -478,6 +474,18 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
             now=MONDAY,
             request_id="daily-zero-target",
         )
+    assert zero_target.value.code == "invalid_target"
+    with pytest.raises(BetRejected) as over_stake:
+        store.place_bet(
+            "h3",
+            "daily",
+            paid_stake=101,
+            target_margin=target,
+            now=MONDAY,
+            request_id="daily-bad-stake",
+        )
+    assert over_stake.value.code == "invalid_stake"
+    assert "100" in str(over_stake.value)
     with pytest.raises(BetRejected):
         store.place_bet(
             "h3",
@@ -485,9 +493,9 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
             paid_stake=501,
             target_margin=target,
             now=MONDAY,
-            request_id="daily-bad-stake",
+            request_id="daily-too-much",
         )
-    with pytest.raises(BetRejected):
+    with pytest.raises(BetRejected) as missing_target:
         store.place_bet(
             "h3",
             "daily",
@@ -496,16 +504,31 @@ def test_daily_bet_window_and_validation(tmp_path: Path) -> None:
             now=MONDAY,
             request_id="daily-missing-target",
         )
+    assert missing_target.value.code == "invalid_target"
+
+    # Exactly 100 paid diamonds is still allowed for a daily bet.
+    maxed = store.place_bet(
+        "h3",
+        "daily",
+        paid_stake=100,
+        target_margin=options[0]["margin"],
+        now=MONDAY,
+        request_id="daily-max",
+    )
+    assert maxed["paid_stake"] == 100
+    assert maxed["stake"] == 120
+    assert store.get_diamond_balance("h3", now=MONDAY) == 900
+
     with pytest.raises(BetWindowClosed):
         store.place_bet(
-            "h3",
+            "h5",
             "daily",
             paid_stake=0,
-            target_margin=target,
+            target_margin=options[0]["margin"],
             now=MONDAY_LOCK,
             request_id="daily-late",
         )
-    assert store.get_diamond_balance("h3", now=MONDAY) == 1000
+    assert store.get_diamond_balance("h5", now=MONDAY) == 1000
 
 
 def test_daily_settlement_waits_for_2230_and_uses_2230_xp(

@@ -94,7 +94,7 @@ function makeState(overrides: Partial<RivalState> = {}): RivalState {
       daily_sd_rival: 150,
       daily_mu_diff: 110.5,
       daily_sigma_diff: 234.5,
-      daily_target_margins: [1, 150, 300, 600],
+      daily_target_margins: [111, 212, 269, 308],
     },
     bet_windows: {
       weekly_locks_at: futureIso(4),
@@ -566,7 +566,7 @@ describe('RivalPage', () => {
     )
   })
 
-  it('selects the daily target from the server target_options', async () => {
+  it('shows daily odds first with the required and projected XP', async () => {
     const user = userEvent.setup()
     installApi({ state: makeState() })
 
@@ -580,44 +580,47 @@ describe('RivalPage', () => {
       'daily',
     )
 
-    expect(within(dialog).getByTestId('rival-target-1')).toHaveTextContent(
-      '+1 XP',
-    )
-    expect(within(dialog).getByTestId('rival-target-1')).toHaveTextContent(
-      '预计 510 XP',
-    )
-    expect(within(dialog).getByTestId('rival-target-150')).toHaveTextContent(
-      '+150 XP',
-    )
-    expect(within(dialog).getByTestId('rival-target-150')).toHaveTextContent(
-      '预计 660 XP',
-    )
-    expect(within(dialog).getByTestId('rival-target-300')).toHaveTextContent(
-      '赔率 ×3.10',
-    )
-    expect(within(dialog).getByTestId('rival-target-300')).toHaveTextContent(
-      '预计 810 XP',
-    )
-    expect(within(dialog).getByTestId('rival-target-600')).toBeInTheDocument()
+    const first = within(dialog).getByTestId('rival-target-111')
+    expect(first).toHaveTextContent('×2.00')
+    expect(first).toHaveTextContent('需要多 111 XP')
+    expect(first).toHaveTextContent('预计总共 620 XP')
+    expect(first).not.toHaveTextContent('赔率 ×2.00')
+
+    const second = within(dialog).getByTestId('rival-target-212')
+    expect(second).toHaveTextContent('×3.00')
+    expect(second).toHaveTextContent('需要多 212 XP')
+    expect(second).toHaveTextContent('预计总共 720 XP')
+
+    const third = within(dialog).getByTestId('rival-target-269')
+    expect(third).toHaveTextContent('×4.00')
+    expect(third).toHaveTextContent('预计总共 780 XP')
+    const fourth = within(dialog).getByTestId('rival-target-308')
+    expect(fourth).toHaveTextContent('×5.00')
+    expect(fourth).toHaveTextContent('预计总共 820 XP')
     expect(within(dialog).queryByTestId('rival-target-0')).toBeNull()
+
     expect(within(dialog).getByTestId('rival-bet-paid-input')).toBeVisible()
+    expect(within(dialog).getByTestId('rival-bet-paid-input')).toHaveAttribute(
+      'max',
+      '100',
+    )
     expect(within(dialog).getByTestId('rival-bet-stake')).toHaveTextContent(
       '20',
     )
 
-    await user.click(within(dialog).getByTestId('rival-target-300'))
+    await user.click(second)
     expect(within(dialog).getByTestId('rival-bet-target')).toHaveTextContent(
-      '+300 XP',
+      '+212 XP',
     )
     expect(within(dialog).getByTestId('rival-bet-expected')).toHaveTextContent(
-      '810 XP',
+      '720 XP',
     )
     expect(within(dialog).getByTestId('rival-bet-odds')).toHaveTextContent(
-      '×3.10',
+      '×3.00',
     )
   })
 
-  it('defaults the daily target to the first positive server tier', async () => {
+  it('defaults the daily target to the first odds tier and caps paid at 100', async () => {
     const user = userEvent.setup()
     installApi({ state: makeState() })
 
@@ -632,18 +635,18 @@ describe('RivalPage', () => {
     )
 
     expect(within(dialog).queryByTestId('rival-target-0')).toBeNull()
-    expect(within(dialog).getByTestId('rival-target-1')).toHaveAttribute(
+    expect(within(dialog).getByTestId('rival-target-111')).toHaveAttribute(
       'aria-pressed',
       'true',
     )
     expect(within(dialog).getByTestId('rival-bet-target')).toHaveTextContent(
-      '+1 XP',
+      '+111 XP',
     )
     expect(within(dialog).getByTestId('rival-bet-expected')).toHaveTextContent(
-      '510 XP',
+      '620 XP',
     )
     expect(within(dialog).getByTestId('rival-bet-odds')).toHaveTextContent(
-      '×1.20',
+      '×2.00',
     )
     expect(
       within(dialog).queryByText('目标不在服务端档位里，请从上面的档位里选一个。'),
@@ -651,6 +654,22 @@ describe('RivalPage', () => {
     expect(
       within(dialog).getByRole('button', { name: '确认下注' }),
     ).toBeEnabled()
+
+    const paidInput = within(dialog).getByTestId('rival-bet-paid-input')
+    expect(paidInput).toHaveAttribute('max', '100')
+    expect(within(dialog).getByTestId('rival-bet-paid-range')).toHaveAttribute(
+      'max',
+      '100',
+    )
+    await user.clear(paidInput)
+    await user.type(paidInput, '500')
+    expect(paidInput).toHaveValue(100)
+    expect(within(dialog).getByTestId('rival-bet-paid')).toHaveTextContent(
+      '100',
+    )
+    expect(within(dialog).getByTestId('rival-bet-stake')).toHaveTextContent(
+      '120',
+    )
   })
 
   it('shows the closed daily surface after 21:00 without a bet entry', async () => {

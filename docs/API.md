@@ -1130,12 +1130,14 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 或升降段。周注和日注都要求本周已有宿敌；组注要求本周已有小组，但不需要宿敌。
 
 每笔下注都由两部分组成：**押我比宿敌高多少 XP**（`target_margin`）和
-**押多少钻石**（`paid_stake`，0–500 的整数）。每笔仍带 `free_stake = 20` 免费本金，
-存储时 `stake = 20 + paid_stake`。下注只从 `diamond_balance` 扣除 `paid_stake`：
+**押多少钻石**（`paid_stake`）。每笔仍带 `free_stake = 20` 免费本金，存储时
+`stake = 20 + paid_stake`。下注只从 `diamond_balance` 扣除 `paid_stake`。
+日注是高频小注，自付上限 `100`；周注和组注仍为 `500`：
 
 - 押 `0`：总本金 `20`，自付 `0`。
 - 押 `80`：总本金 `100`，自付 `80`。
-- 押 `500`：总本金 `520`，自付 `500`。
+- 押 `100`（日注上限）：总本金 `120`，自付 `100`。
+- 押 `500`（仅周注/组注）：总本金 `520`，自付 `500`。
 
 赢：按 **总本金 × 锁注赔率** 派彩；输：只失去 `paid_stake`；平/void：只退
 `paid_stake`。所有派彩都走同一本钻石账；宿敌奖励、下注派彩属于正常游戏入账，生效中
@@ -1155,8 +1157,8 @@ Bearer 鉴权。只允许读取自己的星；别人的星、不存在的 id 都
 ### 目标差值与赔率
 
 服务端返回 `target_options`，前端直接展示。周注仍接受区间内任意整数；日注只接受
-本次 `projection.daily_target_margins` 中的档位。越界或不在档位返回 `invalid_target`
-（`422`）。
+当天 `bet_options.daily.target_options` 里的四档 `margin`。越界或不在档位返回
+`invalid_target`（`422`）。
 
 - 周注上界：`max(100, round_to_50(rival_week_estimate * 2))`，并保留旧的动态锚点：
 
@@ -1166,38 +1168,51 @@ power_factor = clamp(0.5, 1.5, 1 + power_delta / 4000)
 anchor = clamp(0, upper_bound, round_to_step(upper_bound * 0.5 * power_factor))
 ```
 
-- 日注不再有“周估算摊平”或区间锚点。双方各取一条日均 XP 正态分布，再对差值
-  `D = 我的 XP - 他的 XP` 取样：
+- 日注固定提供四档赔率 `2.0 / 3.0 / 4.0 / 5.0`。服务端对每个赔率反算所需
+  XP 差值，`target_options` 按 odds 升序：
 
 ```text
-历史样本：只读今天之前的 checkins，窗口 28 天
-         按玩家聚合 AVG(xp)，至少 3 个记录日才算一个样本
-战力分段：宽度 250；本段样本不足 20 时加入相邻段；
-         仍不足 20 时使用全部样本；都没有时使用中性先验 (0, 150)
-分布参数：μ 为段内样本均值，σ 为样本标准差（n-1）
+p = 1 / odds
+z = NormalDist().inv_cdf(1 - p)
+margin = max(1, ceil(muD + z * sigmaD))
+expected_xp = round_to_step(mu_rival + margin, 10)
+```
+
+  `muD` / `sigmaD` 是双方个人日均分布之差。若退化分布让两个赔率得到同一个
+  margin，后一档顺延 `1 XP`，保证四档仍严格递增且每个赔率都能被选中。
+
+- 双方分布以个人历史为主、同战力带为仅先验。双方各自独立计算：
+
+```text
+个人历史：只读今天之前的 checkins，窗口 28 天；
+         每个玩家算自己的日均 μ_p 和样本标准差 σ_p（n-1），至少 3 天
+战力先验：宽度 250；本段样本不足 20 时加入相邻段；仍不足 20 时使用全部
+         样本；都没有时使用中性先验 (0, 150)
+先验强度：k = 2 天
+收缩权重：w = n / (n + k)
+收缩均值：μ = w * μ_p + (1 - w) * μ_prior
+收缩方差：σ² = w * σ_p² + (1 - w) * σ_prior²
+不足 3 天：直接使用同带先验 (μ_prior, σ_prior)
 μD = μ我 - μ他
 σD = sqrt(σ我² + σ他²)
 ```
 
-  第一档固定为 `1 XP`：险胜档，即 `D > 0` 的最小差值。其余档位只落在整
-  15 分钟（150 XP）边界上：`150 / 300 / 450 / 600 / …`，不会出现 `151`、`301`
-  这类尾数。分位点先取 `q = 0.50, 0.60, 0.70, 0.80, 0.90`；只保留
-  `raw = μD + z_q * σD > 0` 的值，按 150 XP 向上取整，去重升序。最高档仍由这些
-  分位点的最大正 ceiling 决定：默认从 150 开始按 150 递增补齐到该 ceiling；若
-  ceiling 高于 `600`（第 4 个 15 分钟档），则保留 `150 / 300 / 450 / 600` 和该
-  ceiling，避免超过 6 档；档位不足 3 个时补到 `150 / 300`。最多 6 个，最少 3 个
-  （含 `1 XP` 险胜档）。日注不返回 `0` 档，所有档位都是“我比他多”的正差值。
-  同一份历史、同一天内，档位和赔率固定；
-  今天的 checkins 不参与计算。
+  因此两个同战力带的玩家不再强制使用同一条分布，`projection.daily_mu_me` 和
+  `daily_mu_rival` 可以不同。今天的 checkins 不参与计算；同一份历史、同一天内
+  档位、margin、expected_xp 和赔率固定。
 
-- 每个选项同时返回锁注赔率，供 UI 预览：
+- 每个选项同时返回赔率、反算出的 margin 和预计总 XP：
 
 ```json
-{"margin": 150, "odds": 2.37}
+{"odds": 3.0, "margin": 212, "expected_xp": 720}
 ```
 
-  赔率在锁注时计算一次并写入 `bets.odds`，之后不随 XP 或历史变化。周注赔率仍用
-  周估计和战力差：
+  日注下单仍然只传 `target_margin`。后端在当天 `target_options` 中按 margin
+  找到对应选项，并把该选项的 `odds` 原样写入 `bets.odds`，不会在下单时重新
+  算出一个和界面不同的赔率。margin 不属于当天四档时返回 `invalid_target`
+  （`422`）。日注赔率由固定赔率轴决定，不再用 `σD` 的生存概率重算。
+
+  周注赔率仍用周估计和战力差，逻辑不变：
 
 ```text
 reference = max(500, rival_week_estimate)
@@ -1206,17 +1221,6 @@ effective_reference = reference * power_ratio
 ratio = target_margin / effective_reference
 odds = clamp(1.2, 15.0, 1.2 + 0.8 * ratio ** 1.4)
 ```
-
-  日注赔率按档位和 `σD` 的正态生存概率计算：
-
-```text
-z = (target_margin - μD) / σD
-p = 1 - Φ(z)
-odds = clamp(1.2, 15.0, 1 / p)
-odds = round(odds, 2)
-```
-
-  因此日注档位越高赔率严格不降；`target_margin = μD` 时约为 `2.0`。
 
 ### `GET /v1/me/rival`
 
@@ -1306,11 +1310,13 @@ odds = round(odds, 2)
   `reward_diamonds`、`settled_at`），没有则为 `null`。
 - `bet_options` 与 `bets` 并列，存放前端可直接渲染的下注参数。`weekly` / `daily`
   在没有宿敌时为 `null`；`group` 在没有小组时为 `null`。周注/日注对象包含
-  `target_options`（每项 `margin` + 锁注赔率 `odds`；日注还带 `expected_xp`）、
-  `min_target_margin`、`max_target_margin`、`min_paid_stake`、`max_paid_stake`、
-  `free_stake` 和
-  `reference`；日注的 `min_target_margin` 就是第一档 `1`（险胜），`reference` 是
-  `μD` 的整数近似（赔率不再使用它）。日注的 `expected_xp` 是
+  `target_options`、`min_target_margin`、`max_target_margin`、`min_paid_stake`、
+  `max_paid_stake`、`free_stake` 和 `reference`。周注的 `target_options` 每项是
+  `margin` + 锁注赔率 `odds`；日注每项是 `odds` + 反算 `margin` + `expected_xp`，
+  固定按赔率 `2.0 / 3.0 / 4.0 / 5.0` 升序。日注的 `min_target_margin` /
+  `max_target_margin` 是当天四档里最小/最大的 margin，`reference` 是 `μD` 的整数
+  近似（赔率不再使用它），`max_paid_stake` 为 `100`；周注和组注的
+  `max_paid_stake` 仍是 `500`。日注的 `expected_xp` 是
   `round_to_10(daily_mu_rival + margin)`，即“预计宿敌日均 + 目标差值”，不是
   我的当前 XP 或实时估算；周注不返回该字段。组注对象保留旧的 `target_rank: 3`、
   `target_margin: 0` 和
@@ -1329,7 +1335,7 @@ odds = round(odds, 2)
   "daily_sd_rival": 150.0,
   "daily_mu_diff": 110.5,
   "daily_sigma_diff": 234.5,
-  "daily_target_margins": [1, 150, 300, 450]
+  "daily_target_margins": [111, 212, 269, 308]
 }
 ```
 
@@ -1337,14 +1343,14 @@ odds = round(odds, 2)
 `weekly_scores.xp` 分位值，四舍五入到百位；没有已结算周时退化到宿敌本周 XP。
 `weekly_target_max` 是周注上界。
 
-日估计：`daily_mu_*` / `daily_sd_*` 是按上面“目标差值与赔率”的战力分段历史分布
-算出的双方均值与样本标准差；`daily_mu_diff` / `daily_sigma_diff` 是差值的 μD/σD；
-`daily_target_margins` 是当天实际可下的正档位，固定以 `1` 开头，其余为 150 的倍数。
-每个档位的 `expected_xp` 由
-`daily_mu_rival + margin` 四舍五入到 10 得到，表示达到该档位预计需要的总 XP。
-只读今天之前的 checkins，且不读
-当天实时 XP，因此同一天 `09:00` 与 `21:00` 的 `projection`、`target_options`（含
-`expected_xp`）和赔率完全一致（前提是同一份历史）。
+日估计：`daily_mu_*` / `daily_sd_*` 是每个玩家自己的近 28 天日均与样本标准差，
+再按上面“目标差值与赔率”的公式向同战力带先验收缩后的结果；双方各自计算，可以
+不同。`daily_mu_diff` / `daily_sigma_diff` 是差值的 μD/σD；`daily_target_margins`
+是当天四档赔率反算出的 margin，顺序与 `target_options` 的 `2/3/4/5` 一致。
+每个档位的 `expected_xp` 由 `daily_mu_rival + margin` 四舍五入到 10 得到，表示
+达到该档位预计需要的总 XP。只读今天之前的 checkins，且不读当天实时 XP，因此同一天
+`09:00` 与 `21:00` 的 `projection`、`target_options`（含 `expected_xp`）和赔率
+完全一致（前提是同一份历史）。
 
 ### `GET /v1/me/rival/candidates`
 
@@ -1462,11 +1468,13 @@ odds = round(odds, 2)
 
 ### `POST /v1/me/bets`
 
-所有下注的请求体只接受 `paid_stake`（0–500 整数），旧的 `stake` 字段不再作为输入。
-`stake = 20 + paid_stake`，`free_stake = 20`，`paid_stake` 原样保存；下注只扣
-`paid_stake`。周注必须带周注区间内的 `target_margin`；日注必须带本次 projection
-`daily_target_margins` 中的一个档位；两者都不接受 `market`。组注不带
-`target_margin`，`market` 缺省为 `top3`。
+所有下注的请求体只接受 `paid_stake`，旧的 `stake` 字段不再作为输入。日注自付
+`0–100` 钻石，周注和组注自付 `0–500` 钻石；后端按 `kind` 校验，日注超过 `100`
+返回 `invalid_stake`（`422`），文案说明日注自付上限 `100`。`stake = 20 +
+paid_stake`，`free_stake = 20`，`paid_stake` 原样保存；下注只扣 `paid_stake`。
+周注必须带周注区间内的 `target_margin`；日注必须带当天 `target_options` 中的
+一个 `margin`；两者都不接受 `market`。组注不带 `target_margin`，`market` 缺省为
+`top3`。
 
 周注：
 
@@ -1483,12 +1491,15 @@ odds = round(odds, 2)
 日注：
 
 ```json
-{"kind": "daily", "target_margin": 1, "paid_stake": 80, "request_id": "daily-20261102"}
+{"kind": "daily", "target_margin": 212, "paid_stake": 80, "request_id": "daily-20261102"}
 ```
 
 - `target_margin` 是“我当天 `22:30` 的打卡 XP 比宿敌高多少”，只能选当天
-  `projection.daily_target_margins` 中的正档位；第一档 `1` 是险胜档，也是前端默认
-  选中的档位；其余档位都是 150 的倍数。赔率随档位和 `σD` 固定不变。
+  `bet_options.daily.target_options` 中的 `margin`；不在当天四档里返回
+  `invalid_target`。前端默认选第一档（赔率 `×2`）。
+- 后端按 margin 找到该选项并把它的 `odds` 原样写入 `bets.odds`；不会重新计算
+  赔率。赔率和 margin 在当天固定，不随实时 XP 变化。
+- 自付上限 `100` 钻石；`paid_stake = 101` 返回 `invalid_stake`。
 - 判定与周注一致；结算使用当天 `22:30` 的打卡 XP，不使用之后的最终日 XP。
 - 当天 `21:00` 前可下，`21:00` 锁注，`22:30` 结算。
 

@@ -259,13 +259,16 @@ class RivalStateAPITests(RivalAPITestBase):
         self.assertIn("daily_target_margins", morning_projection)
         self.assertGreater(morning_projection["daily_sigma_diff"], 0)
         morning_daily = morning_payload["bet_options"]["daily"]
-        daily_margins = [
-            entry["margin"] for entry in morning_daily["target_options"]
-        ]
+        daily_entries = morning_daily["target_options"]
+        daily_margins = [entry["margin"] for entry in daily_entries]
+        self.assertEqual(
+            [entry["odds"] for entry in daily_entries],
+            [2.0, 3.0, 4.0, 5.0],
+        )
         self.assertTrue(
             all(
-                "expected_xp" in entry
-                for entry in morning_daily["target_options"]
+                set(entry) == {"odds", "margin", "expected_xp"}
+                for entry in daily_entries
             )
         )
         self.assertTrue(
@@ -276,26 +279,17 @@ class RivalStateAPITests(RivalAPITestBase):
                     morning_projection["daily_mu_rival"] + entry["margin"],
                     10,
                 )
-                for entry in morning_daily["target_options"]
+                for entry in daily_entries
             )
         )
         self.assertEqual(
             daily_margins, morning_projection["daily_target_margins"]
         )
-        self.assertGreaterEqual(len(daily_margins), 3)
-        self.assertLessEqual(len(daily_margins), 6)
-        self.assertEqual(daily_margins[0], 1)
+        self.assertEqual(len(daily_margins), 4)
+        self.assertEqual(daily_margins, sorted(set(daily_margins)))
         self.assertEqual(daily_margins[0], morning_daily["min_target_margin"])
         self.assertEqual(daily_margins[-1], morning_daily["max_target_margin"])
-        self.assertEqual(
-            daily_margins, sorted(set(daily_margins))
-        )
-        self.assertTrue(
-            all(
-                margin == 1 or margin % 150 == 0
-                for margin in daily_margins
-            )
-        )
+        self.assertEqual(morning_daily["max_paid_stake"], 100)
         self.assertEqual(
             evening_payload["projection"], morning_payload["projection"]
         )
@@ -436,8 +430,8 @@ class BetAPITests(RivalAPITestBase):
         self.assertEqual(daily_bet["free_stake"], 20)
         self.assertEqual(daily_bet["paid_stake"], 80)
         self.assertEqual(daily_bet["target_margin"], daily_target)
-        self.assertGreaterEqual(daily_bet["odds"], 1.2)
-        self.assertLessEqual(daily_bet["odds"], 15.0)
+        self.assertGreaterEqual(daily_bet["odds"], 2.0)
+        self.assertLessEqual(daily_bet["odds"], 5.0)
         daily_options = daily.json()["state"]["bet_options"]["daily"]
         preview = {
             entry["margin"]: entry["odds"]
@@ -450,8 +444,7 @@ class BetAPITests(RivalAPITestBase):
         self.assertEqual(daily_margins[0], daily_options["min_target_margin"])
         self.assertEqual(daily_margins[-1], daily_options["max_target_margin"])
         self.assertEqual(daily_margins, sorted(set(daily_margins)))
-        self.assertGreaterEqual(len(daily_margins), 3)
-        self.assertLessEqual(len(daily_margins), 6)
+        self.assertEqual(len(daily_margins), 4)
         self.assertEqual(preview[daily_target], daily_bet["odds"])
         self.assertEqual(store.get_diamond_balance("owner", now=NOW), 920)
 
@@ -481,7 +474,7 @@ class BetAPITests(RivalAPITestBase):
         self.assertIsNone(listed_payload["bets"]["group"])
         self.assertIsNone(listed_payload["group"])
         self.assertEqual(
-            listed_payload["bet_options"]["daily"]["max_paid_stake"], 500
+            listed_payload["bet_options"]["daily"]["max_paid_stake"], 100
         )
         self.assertEqual(
             listed_payload["bet_options"]["daily"]["free_stake"], 20
@@ -498,6 +491,61 @@ class BetAPITests(RivalAPITestBase):
             "balance",
         ):
             self.assertNotIn(forbidden, keys)
+
+    def test_daily_stake_cap_is_100_while_weekly_reaches_500(self) -> None:
+        client = self.client()
+        self.select_first(client)
+        store = self.store(client)
+        state = client.get("/v1/me/bets", headers=auth()).json()
+        daily_options = state["bet_options"]["daily"]
+        daily_target = daily_options["target_options"][0]["margin"]
+        self.assertEqual(daily_options["max_paid_stake"], 100)
+        self.assertEqual(state["bet_options"]["weekly"]["max_paid_stake"], 500)
+
+        rejected = client.post(
+            "/v1/me/bets",
+            headers=auth(),
+            json={
+                "kind": "daily",
+                "paid_stake": 101,
+                "target_margin": daily_target,
+                "request_id": "daily-101",
+            },
+        )
+        self.assertEqual(rejected.status_code, 422, rejected.text)
+        self.assertEqual(rejected.json()["detail"]["code"], "invalid_stake")
+        self.assertIn("100", rejected.json()["detail"]["message"])
+        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 1000)
+
+        daily = client.post(
+            "/v1/me/bets",
+            headers=auth(),
+            json={
+                "kind": "daily",
+                "paid_stake": 100,
+                "target_margin": daily_target,
+                "request_id": "daily-100",
+            },
+        )
+        self.assertEqual(daily.status_code, 200, daily.text)
+        self.assertEqual(daily.json()["bet"]["paid_stake"], 100)
+        self.assertEqual(daily.json()["bet"]["stake"], 120)
+        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 900)
+
+        weekly = client.post(
+            "/v1/me/bets",
+            headers=auth(),
+            json={
+                "kind": "weekly",
+                "paid_stake": 500,
+                "target_margin": 0,
+                "request_id": "weekly-500",
+            },
+        )
+        self.assertEqual(weekly.status_code, 200, weekly.text)
+        self.assertEqual(weekly.json()["bet"]["paid_stake"], 500)
+        self.assertEqual(weekly.json()["bet"]["stake"], 520)
+        self.assertEqual(store.get_diamond_balance("owner", now=NOW), 400)
 
     def test_group_bet_api_returns_group_without_rival(self) -> None:
         client = self.client()

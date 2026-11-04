@@ -6,16 +6,19 @@ from pathlib import Path
 import pytest
 
 from ghost_league.game.rival import (
+    DAILY_EXPECTED_XP_STEP,
+    DAILY_ODDS_AXIS,
     DAILY_PRIOR_MEAN_XP,
     DAILY_PRIOR_SD_XP,
-    DAILY_TARGET_STEP,
+    DAILY_PRIOR_STRENGTH_DAYS,
     RivalNotFound,
     RivalSelectionRejected,
     RivalWindowClosed,
     band_distribution,
-    daily_bet_odds,
+    daily_margin_for_odds,
     daily_target_margins,
     daily_target_options,
+    personal_daily_distribution,
     power_band,
     round_to_step,
     sample_mean_sd,
@@ -376,8 +379,8 @@ def test_projection_uses_settled_week_and_daily_distribution(
     store.create_group(WEEK, tier="Bronze", player_ids=["rival"], now=MONDAY)
     set_week_xp(store, "h1", 100)
     set_week_xp(store, "rival", 100)
-    add_checkin_history(store, "h1", [100, 200, 300])
-    add_checkin_history(store, "rival", [400, 500, 600])
+    add_checkin_history(store, "h1", [400, 500, 600])
+    add_checkin_history(store, "rival", [100, 200, 300])
     store.select_rival("h1", "rival", now=MONDAY, request_id="projection")
     store.ensure_week(PREVIOUS_WEEK, status="settled")
     for index, xp in enumerate((100, 200, 300, 400, 500), start=1):
@@ -401,15 +404,14 @@ def test_projection_uses_settled_week_and_daily_distribution(
     assert projection["weekly_target_max"] == 600
     assert "rival_today_estimate" not in projection
     assert "daily_target_max" not in projection
-    # The two players are the only samples, so both fall back to the same
-    # global mean/sample-std until each band has 20 players.
-    assert projection["daily_mu_me"] == 350.0
-    assert projection["daily_sd_me"] == 212.13
-    assert projection["daily_mu_rival"] == 350.0
-    assert projection["daily_sd_rival"] == 212.13
-    assert projection["daily_mu_diff"] == 0.0
-    assert projection["daily_sigma_diff"] == 300.0
-    assert projection["daily_target_margins"] == [1, 150, 300, 450]
+    # Each player is shrunk from their own three-day history toward the same
+    # two-player band prior, so the two distributions are no longer identical.
+    assert projection["daily_mu_me"] == 440.0
+    assert projection["daily_sd_me"] == 154.92
+    assert projection["daily_mu_rival"] == 260.0
+    assert projection["daily_sd_rival"] == 154.92
+    assert projection["daily_mu_diff"] == 180.0
+    assert projection["daily_sigma_diff"] == 219.09
 
     weekly_options = state["bet_options"]["weekly"]
     daily_options = state["bet_options"]["daily"]
@@ -421,17 +423,18 @@ def test_projection_uses_settled_week_and_daily_distribution(
         "odds": 1.2,
     }
     assert weekly_options["target_options"][-1]["margin"] == 600
-    assert daily_options["min_target_margin"] == 1
-    assert daily_options["max_target_margin"] == 450
+    assert daily_options["max_paid_stake"] == 100
+    assert daily_options["min_target_margin"] == 180
+    assert daily_options["max_target_margin"] == 365
+    assert [entry["odds"] for entry in daily_options["target_options"]] == [
+        2.0,
+        3.0,
+        4.0,
+        5.0,
+    ]
     assert [
         entry["margin"] for entry in daily_options["target_options"]
-    ] == projection["daily_target_margins"]
-    assert [entry["odds"] for entry in daily_options["target_options"]] == [
-        daily_bet_odds(1, 0.0, 300.0),
-        daily_bet_odds(150, 0.0, 300.0),
-        daily_bet_odds(300, 0.0, 300.0),
-        daily_bet_odds(450, 0.0, 300.0),
-    ]
+    ] == projection["daily_target_margins"] == [180, 275, 328, 365]
     assert [
         entry["expected_xp"] for entry in daily_options["target_options"]
     ] == [
@@ -440,7 +443,7 @@ def test_projection_uses_settled_week_and_daily_distribution(
     ]
     assert [
         entry["expected_xp"] for entry in daily_options["target_options"]
-    ] == [350, 500, 650, 800]
+    ] == [440, 540, 590, 630]
 
 
 def test_projection_falls_back_without_settled_week(tmp_path: Path) -> None:
@@ -463,7 +466,7 @@ def test_projection_falls_back_without_settled_week(tmp_path: Path) -> None:
     assert projection["daily_sd_rival"] == DAILY_PRIOR_SD_XP
     assert projection["daily_mu_diff"] == 0.0
     assert projection["daily_sigma_diff"] == 212.13
-    assert projection["daily_target_margins"] == [1, 150, 300, 450]
+    assert projection["daily_target_margins"] == [1, 92, 144, 179]
 
 
 def test_daily_history_ignores_today_and_short_players(tmp_path: Path) -> None:
@@ -488,12 +491,14 @@ def test_daily_history_ignores_today_and_short_players(tmp_path: Path) -> None:
     store.select_rival("h1", "rival", now=MONDAY, request_id="history")
 
     projection = store.rival_state("h1", now=MONDAY)["projection"]
+    # h1's own three days are shrunk toward a zero-spread band prior; the rival
+    # has too little history and falls back to that same band prior directly.
     assert projection["daily_mu_me"] == 200.0
-    assert projection["daily_sd_me"] == 0.0
+    assert projection["daily_sd_me"] == 77.46
     assert projection["daily_mu_rival"] == 200.0
     assert projection["daily_sd_rival"] == 0.0
-    assert projection["daily_sigma_diff"] == 0.0
-    assert projection["daily_target_margins"] == [1, 150, 300]
+    assert projection["daily_sigma_diff"] == 77.46
+    assert projection["daily_target_margins"] == [1, 34, 53, 66]
 
 
 def test_power_band_uses_250_width() -> None:
@@ -543,82 +548,50 @@ def test_band_distribution_prior_without_any_history() -> None:
     )
 
 
-def test_daily_targets_are_positive_stepped_and_at_least_three() -> None:
-    cases = [
-        (0.0, 0.0, 0.0, 0.0),
-        (0.0, 150.0, 0.0, 150.0),
-        (850.0, 100.0, 500.0, 100.0),
-        (0.0, 100.0, 400.0, 100.0),
-        (5000.0, 600.0, 100.0, 50.0),
-    ]
-    for mu_me, sd_me, mu_rival, sd_rival in cases:
-        margins = daily_target_margins(
-            mu_me, sd_me, mu_rival, sd_rival
-        )
-        assert 3 <= len(margins) <= 6
-        assert margins == sorted(set(margins))
-        assert all(margin > 0 for margin in margins)
-        assert margins[0] == 1
-        assert all(
-            margin == 1 or margin % DAILY_TARGET_STEP == 0
-            for margin in margins
-        )
+def test_personal_daily_distribution_shrinks_toward_band_prior() -> None:
+    prior = (350.0, 200.0)
+    mean, sd = personal_daily_distribution([100, 200, 300], prior)
+    weight = 3 / (3 + DAILY_PRIOR_STRENGTH_DAYS)
+    expected_variance = weight * sample_mean_sd([100, 200, 300])[1] ** 2
+    expected_variance += (1 - weight) * prior[1] ** 2
+    assert mean == weight * 200 + (1 - weight) * prior[0]
+    assert sd == pytest.approx(expected_variance**0.5)
 
-    # A 350-point expected lead fills every 15-minute tier up to the
-    # quantile ceiling, plus the narrow-win 1 XP tier.
-    assert daily_target_margins(850, 100, 500, 100) == [
-        1,
-        150,
-        300,
-        450,
-        600,
-        750,
-    ]
-
-    # When the quantile ceiling lies above the canonical 15-minute steps, the
-    # ladder keeps the canonical low tiers and the quantile ceiling itself.
-    strong = daily_target_margins(5000, 600, 100, 50)
-    assert strong[:5] == [1, 150, 300, 450, 600]
-    assert strong[-1] > 750
-    assert strong[-1] % DAILY_TARGET_STEP == 0
+    # Fewer than three completed days keeps the band prior unchanged.
+    assert personal_daily_distribution([10, 20], prior) == prior
+    assert personal_daily_distribution([], prior) == prior
 
 
-def test_daily_target_options_match_odds_and_stay_monotonic() -> None:
-    options = daily_target_options(850, 100, 500, 100)
+def test_daily_odds_axis_inverts_margins_and_previews_total_xp() -> None:
+    mu_me, sd_me, mu_rival, sd_rival = 850.0, 100.0, 500.0, 100.0
+    options = daily_target_options(mu_me, sd_me, mu_rival, sd_rival)
+    assert [entry["odds"] for entry in options] == list(DAILY_ODDS_AXIS)
+    assert [entry["odds"] for entry in options] == [2.0, 3.0, 4.0, 5.0]
+
+    mu_diff, sigma_diff = 350.0, (100.0**2 + 100.0**2) ** 0.5
     assert [entry["margin"] for entry in options] == [
-        1,
-        150,
-        300,
-        450,
-        600,
-        750,
+        daily_margin_for_odds(odds, mu_diff, sigma_diff)
+        for odds in DAILY_ODDS_AXIS
     ]
-    assert [entry["odds"] for entry in options] == [
-        daily_bet_odds(1, 350, 141.42),
-        daily_bet_odds(150, 350, 141.42),
-        daily_bet_odds(300, 350, 141.42),
-        daily_bet_odds(450, 350, 141.42),
-        daily_bet_odds(600, 350, 141.42),
-        daily_bet_odds(750, 350, 141.42),
-    ]
-    # Expected XP is the rival's daily mean plus the target gap, not my XP.
+    assert [entry["margin"] for entry in options] == [350, 411, 446, 470]
+    margins = [entry["margin"] for entry in options]
+    assert margins == sorted(set(margins))
+    assert all(margin > 0 for margin in margins)
     assert [entry["expected_xp"] for entry in options] == [
-        round_to_step(500 + margin, 10)
-        for margin in (1, 150, 300, 450, 600, 750)
+        round_to_step(mu_rival + margin, DAILY_EXPECTED_XP_STEP)
+        for margin in margins
     ]
-    assert [entry["expected_xp"] for entry in options] == [
-        500,
-        650,
-        800,
-        950,
-        1100,
-        1250,
-    ]
-    odds = [entry["odds"] for entry in options]
-    assert odds == sorted(odds)
-    assert odds[0] >= 1.2
-    assert odds[-1] <= 15.0
-    assert daily_bet_odds(350, 350, 100) == 2.0
+    assert daily_target_margins(
+        mu_me, sd_me, mu_rival, sd_rival
+    ) == margins
+
+
+def test_daily_odds_axis_stays_unique_for_a_degenerate_spread() -> None:
+    options = daily_target_options(100, 0, 100, 0)
+    assert [entry["odds"] for entry in options] == [2.0, 3.0, 4.0, 5.0]
+    # The exact formula maps every price to 1 XP here; the display guard bumps
+    # duplicates so each price remains selectable and ordered.
+    assert [entry["margin"] for entry in options] == [1, 2, 3, 4]
 
 
 def test_daily_lines_do_not_drift_with_live_xp(tmp_path: Path) -> None:

@@ -57,48 +57,35 @@ WEEKLY_TARGET_FLOOR: Final = 100
 WEEKLY_TARGET_STEP: Final = 50
 
 # Daily targets come from the normal difference of the two players' daily XP
-# distributions.  A player's sample is their mean XP over the lookback window;
-# the power band supplies the distribution for a given power.
+# distributions.  Each player's own recent check-in days are the main sample;
+# the power band only supplies a prior.  Personal samples with at least
+# ``DAILY_MIN_HISTORY_DAYS`` days are shrunk toward the band prior with
+# ``DAILY_PRIOR_STRENGTH_DAYS`` pseudo-days.
 POWER_BAND_WIDTH: Final = 250
 DAILY_HISTORY_DAYS: Final = 28
 DAILY_MIN_HISTORY_DAYS: Final = 3
 DAILY_BAND_MIN_SAMPLES: Final = 20
+DAILY_PRIOR_STRENGTH_DAYS: Final = 2
 # Neutral prior only when the whole history is empty.  A positive sigma keeps
 # the first day's screen playable instead of hiding every daily tier.
 DAILY_PRIOR_MEAN_XP: Final = 0.0
 DAILY_PRIOR_SD_XP: Final = 150.0
-DAILY_TARGET_STEP: Final = 150
-# The narrow-win tier is the smallest positive D, so it is always 1 XP; the
-# remaining tiers stay on whole 15-minute (150 XP) boundaries.
-DAILY_NARROW_WIN_MARGIN: Final = 1
-# ``expected_xp`` is the rival's daily mean plus the target margin, rounded to
-# this step.  It previews the total XP needed to reach a daily tier.
+# The daily screen displays a fixed odds axis; the server inverts each price to
+# the XP margin needed for that payout.  ``expected_xp`` previews the total XP
+# at the rival's daily mean plus the margin.
+DAILY_ODDS_AXIS: Final[tuple[float, ...]] = (2.0, 3.0, 4.0, 5.0)
 DAILY_EXPECTED_XP_STEP: Final = 10
-DAILY_TARGET_QUANTILES: Final[tuple[float, ...]] = (0.50, 0.60, 0.70, 0.80, 0.90)
-DAILY_TARGET_EXTENDED_QUANTILES: Final[tuple[float, ...]] = (
-    0.95,
-    0.96,
-    0.97,
-    0.98,
-    0.99,
-    0.995,
-    0.999,
-    0.9999,
-    0.99999,
-    0.999999,
-)
-DAILY_TARGET_MIN_OPTIONS: Final = 3
-DAILY_TARGET_MAX_OPTIONS: Final = 6
+# Daily bets are the small, frequent loop; weekly and group bets keep the
+# larger 500-diamond cap.
+DAILY_MAX_PAID_STAKE: Final = 100
 
-# Odds are fixed when the bet is placed.  Weekly uses the rival's estimated
-# XP, floored, then adjusted for the current power gap.  Daily uses the normal
-# survival probability of the chosen margin given ``muD`` and ``sigmaD``.
+# Weekly odds are fixed when the bet is placed.  Weekly uses the rival's
+# estimated XP, floored, then adjusted for the current power gap.  Daily odds
+# are the fixed display axis above, not a recomputed survival probability.
 WEEKLY_REFERENCE_FLOOR: Final = 500
 POWER_RATIO_MIN: Final = 0.5
 POWER_RATIO_MAX: Final = 2.0
 POWER_GAP_SCALE: Final = 4000
-DAILY_ODDS_MIN: Final = 1.2
-DAILY_ODDS_MAX: Final = 15.0
 
 # Weekly dynamic target anchor.  The player's power gap scales the middle of
 # the target range between 0.5x and 1.5x, so a stronger player is offered
@@ -411,16 +398,6 @@ def round_to_step(value: float, step: int) -> int:
     return int(value / step + 0.5) * step
 
 
-def round_up_to_step(value: float, step: int) -> int:
-    """Round a positive value up to the next multiple of ``step``."""
-
-    if step <= 0:
-        raise ValueError("step must be positive")
-    if value <= 0:
-        return 0
-    return int(math.ceil(value / step)) * step
-
-
 def weekly_target_upper_bound(rival_week_estimate: int) -> int:
     """Largest weekly target margin offered for this rival estimate."""
 
@@ -455,7 +432,7 @@ def target_step(kind: str) -> int:
     if kind == "weekly":
         return WEEKLY_TARGET_STEP
     if kind == "daily":
-        return DAILY_TARGET_STEP
+        raise ValueError("daily targets use daily_target_options()")
     raise ValueError(f"unsupported bet kind: {kind}")
 
 
@@ -546,79 +523,55 @@ def daily_distribution_parameters(
     return mu_diff, sigma_diff
 
 
-def _daily_quantile_ladder() -> tuple[float, ...]:
-    return DAILY_TARGET_QUANTILES + tuple(
-        quantile
-        for quantile in DAILY_TARGET_EXTENDED_QUANTILES
-        if quantile > DAILY_TARGET_QUANTILES[-1]
-    )
+def personal_daily_distribution(
+    personal_xp: Sequence[float],
+    prior: tuple[float, float],
+) -> tuple[float, float]:
+    """Shrink a player's own daily history toward the power-band prior.
 
+    The personal sample needs at least ``DAILY_MIN_HISTORY_DAYS`` recorded
+    days.  With ``n`` days and ``k = DAILY_PRIOR_STRENGTH_DAYS`` pseudo-days,
+    the mean and variance are pooled as
 
-def daily_target_margins(
-    mu_me: float,
-    sd_me: float,
-    mu_rival: float,
-    sd_rival: float,
-    *,
-    step: int = DAILY_TARGET_STEP,
-) -> list[int]:
-    """Return the daily target tiers derived from the two normals.
+    ``x = (n * x_personal + k * x_prior) / (n + k)``.
 
-    The first tier is always ``1``: the narrow-win line, i.e. the smallest
-    positive difference ``D > 0``.  The remaining tiers are whole ``step``
-    (150 XP / 15 minute) multiples starting at ``step``.  The highest tier is
-    still the positive quantile ceiling from ``muD + z_q * sigmaD`` rounded up
-    to ``step``; the ladder fills in the 15-minute tiers below it.
-
-    The result holds at least three and at most six tiers.  When the quantile
-    ceiling lies above the first four canonical steps (150/300/450/600), the
-    ladder keeps those four and adds the ceiling itself, so the result stays
-    within six tiers while the highest tier never drifts from the quantile.
+    Both players are computed independently, so two players in the same power
+    band can receive different means and spreads.  A short history falls back
+    to the band prior unchanged.
     """
 
-    if step <= 0:
-        raise ValueError("step must be positive")
-    mu_diff, sigma_diff = daily_distribution_parameters(
-        mu_me, sd_me, mu_rival, sd_rival
+    history = [float(value) for value in personal_xp]
+    prior_mu, prior_sd = prior
+    stats = sample_mean_sd(history)
+    if stats is None or len(history) < DAILY_MIN_HISTORY_DAYS:
+        return float(prior_mu), float(prior_sd)
+    personal_mu, personal_sd = stats
+    weight = len(history) / (len(history) + DAILY_PRIOR_STRENGTH_DAYS)
+    mean = weight * personal_mu + (1.0 - weight) * float(prior_mu)
+    variance = (
+        weight * personal_sd**2 + (1.0 - weight) * float(prior_sd) ** 2
     )
-    normal = NormalDist()
-    ceilings: list[int] = []
+    return mean, math.sqrt(max(0.0, variance))
 
-    def add_raw(raw: float) -> None:
-        if raw <= 0:
-            return
-        ceiling = round_up_to_step(raw, step)
-        if ceiling > 0 and ceiling not in ceilings:
-            ceilings.append(ceiling)
 
-    for quantile in _daily_quantile_ladder():
-        if len(ceilings) >= DAILY_TARGET_MAX_OPTIONS:
-            break
-        add_raw(mu_diff + normal.inv_cdf(quantile) * sigma_diff)
-        if (
-            quantile >= DAILY_TARGET_QUANTILES[-1]
-            and len(ceilings) >= DAILY_TARGET_MIN_OPTIONS
-        ):
-            break
+def daily_margin_for_odds(
+    odds: float,
+    mu_diff: float,
+    sigma_diff: float,
+) -> int:
+    """Return the XP margin needed to win a daily bet at ``odds``.
 
-    top = max(ceilings) if ceilings else 0
-    # One slot is reserved for the narrow-win tier, and one for the quantile
-    # ceiling when it lies above the canonical 15-minute steps.
-    canonical_steps = DAILY_TARGET_MAX_OPTIONS - 2
-    canonical_top = step * canonical_steps
-    margins = list(
-        range(step, min(top, canonical_top) + step, step)
-    )
-    if top > canonical_top:
-        margins.append(top)
+    ``p = 1 / odds`` is the displayed win probability and ``z`` is the normal
+    quantile of ``1 - p``.  The margin is at least the narrow-win line ``1``.
+    """
 
-    # Degenerate spread (sigmaD == 0) or a very small sigma can leave too few
-    # positive ceilings.  Extend by whole steps until the minimum tier count
-    # exists; the narrow-win tier is added on top.
-    while len(margins) < DAILY_TARGET_MIN_OPTIONS - 1:
-        margins.append(margins[-1] + step if margins else step)
-
-    return [DAILY_NARROW_WIN_MARGIN] + margins
+    price = float(odds)
+    if price <= 1.0:
+        raise ValueError("daily odds must be greater than 1")
+    probability = 1.0 / price
+    z_score = NormalDist().inv_cdf(1.0 - probability)
+    raw = float(mu_diff) + z_score * max(0.0, float(sigma_diff))
+    return max(1, math.ceil(raw))
 
 
 def daily_expected_xp(mu_rival: float, margin: int) -> int:
@@ -633,52 +586,51 @@ def daily_expected_xp(mu_rival: float, margin: int) -> int:
     )
 
 
-def daily_bet_odds(
-    target_margin: int,
-    mu_diff: float,
-    sigma_diff: float,
-) -> float:
-    """Return fixed daily odds from the margin and ``sigmaD``.
-
-    A margin at ``muD`` is a coin flip (about 2.0).  Higher margins require a
-    rarer ``D >= margin``, so their fair odds rise; the result is clamped and
-    rounded to two decimals.  The caller stores it on the bet so later XP or
-    history changes cannot move a locked price.
-    """
-
-    target = int(target_margin)
-    mu = float(mu_diff)
-    sigma = max(0.0, float(sigma_diff))
-    if sigma <= 0:
-        return DAILY_ODDS_MIN if target <= mu else DAILY_ODDS_MAX
-    z_score = (target - mu) / sigma
-    probability = 1.0 - NormalDist().cdf(z_score)
-    if probability <= 0:
-        return DAILY_ODDS_MAX
-    raw = 1.0 / probability
-    return round(max(DAILY_ODDS_MIN, min(DAILY_ODDS_MAX, raw)), 2)
-
-
 def daily_target_options(
     mu_me: float,
     sd_me: float,
     mu_rival: float,
     sd_rival: float,
 ) -> list[dict[str, float | int]]:
-    """Return the positive daily tiers with odds and expected total XP."""
+    """Return the fixed daily odds axis with its inverted target margins.
+
+    Each option stores the displayed ``odds``, the XP ``margin`` needed to win
+    at that price, and the projected total ``expected_xp``.  Options are sorted
+    by odds.  A degenerate spread can map two prices to the same raw margin;
+    the later margin is bumped by one XP so every price stays selectable and
+    the displayed margins remain strictly increasing.
+    """
 
     mu_diff, sigma_diff = daily_distribution_parameters(
         mu_me, sd_me, mu_rival, sd_rival
     )
-    return [
-        {
-            "margin": margin,
-            "odds": daily_bet_odds(margin, mu_diff, sigma_diff),
-            "expected_xp": daily_expected_xp(mu_rival, margin),
-        }
-        for margin in daily_target_margins(
-            mu_me, sd_me, mu_rival, sd_rival
+    options: list[dict[str, float | int]] = []
+    previous_margin = 0
+    for odds in DAILY_ODDS_AXIS:
+        margin = daily_margin_for_odds(odds, mu_diff, sigma_diff)
+        margin = max(margin, previous_margin + 1)
+        previous_margin = margin
+        options.append(
+            {
+                "odds": float(odds),
+                "margin": margin,
+                "expected_xp": daily_expected_xp(mu_rival, margin),
+            }
         )
+    return options
+
+
+def daily_target_margins(
+    mu_me: float,
+    sd_me: float,
+    mu_rival: float,
+    sd_rival: float,
+) -> list[int]:
+    """Compatibility helper: margins of :func:`daily_target_options`."""
+
+    return [
+        int(option["margin"])
+        for option in daily_target_options(mu_me, sd_me, mu_rival, sd_rival)
     ]
 
 
@@ -745,7 +697,7 @@ def odds_reference(
     """Floored weekly reference XP used by the odds formula."""
 
     if kind != "weekly":
-        raise ValueError("daily odds use daily_bet_odds()")
+        raise ValueError("daily odds use daily_target_options()")
     return max(WEEKLY_REFERENCE_FLOOR, int(rival_week_estimate))
 
 
@@ -769,11 +721,11 @@ def bet_odds(
     ``odds = clamp(1.2, 15.0, 1.2 + 0.8 * (target / effective_reference) ** 1.4)``
     where ``effective_reference = reference * power_ratio``.  The function is
     monotonically non-decreasing in ``target_margin`` and rounds to 2 decimals.
-    Daily bets use :func:`daily_bet_odds` instead.
+    Daily bets use :func:`daily_target_options` instead.
     """
 
     if kind != "weekly":
-        raise ValueError("daily odds use daily_bet_odds()")
+        raise ValueError("daily odds use daily_target_options()")
     reference = odds_reference(kind, rival_week_estimate)
     effective_reference = reference * power_ratio(my_power, rival_power)
     ratio = max(0, int(target_margin)) / effective_reference
@@ -904,17 +856,12 @@ __all__ = [
     "DAILY_BET_SETTLE_TIME",
     "DAILY_HISTORY_DAYS",
     "DAILY_EXPECTED_XP_STEP",
+    "DAILY_MAX_PAID_STAKE",
     "DAILY_MIN_HISTORY_DAYS",
-    "DAILY_NARROW_WIN_MARGIN",
-    "DAILY_ODDS_MAX",
-    "DAILY_ODDS_MIN",
+    "DAILY_ODDS_AXIS",
     "DAILY_PRIOR_MEAN_XP",
     "DAILY_PRIOR_SD_XP",
-    "DAILY_TARGET_EXTENDED_QUANTILES",
-    "DAILY_TARGET_MAX_OPTIONS",
-    "DAILY_TARGET_MIN_OPTIONS",
-    "DAILY_TARGET_QUANTILES",
-    "DAILY_TARGET_STEP",
+    "DAILY_PRIOR_STRENGTH_DAYS",
     "FREE_BET_STAKE",
     "GROUP_BET_SETTLE_OFFSET",
     "GROUP_MARKETS",
@@ -957,10 +904,10 @@ __all__ = [
     "band_distribution",
     "bet_odds",
     "daily_bet_locks_at",
-    "daily_bet_odds",
     "daily_bet_settles_at",
     "daily_distribution_parameters",
     "daily_expected_xp",
+    "daily_margin_for_odds",
     "daily_target_margins",
     "daily_target_options",
     "group_bet_settles_at",
@@ -972,6 +919,7 @@ __all__ = [
     "odds_reference",
     "payout_for_win",
     "percentile_value",
+    "personal_daily_distribution",
     "power_anchor_factor",
     "power_band",
     "power_ratio",
@@ -979,7 +927,6 @@ __all__ = [
     "rival_outcome",
     "rival_reward",
     "round_to_step",
-    "round_up_to_step",
     "sample_mean_sd",
     "selection_window_open",
     "target_anchor",

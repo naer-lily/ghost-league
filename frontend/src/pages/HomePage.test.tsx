@@ -261,17 +261,32 @@ describe('HomePage rework', () => {
     expect(
       within(dialog).getByText('押「今天我比宿敌多多少 XP」'),
     ).toBeInTheDocument()
-    expect(within(dialog).getByTestId('rival-target-1')).toBeInTheDocument()
+    expect(within(dialog).getByTestId('rival-target-111')).toHaveTextContent(
+      '×2.00',
+    )
+    expect(within(dialog).getByTestId('rival-target-111')).toHaveTextContent(
+      '需要多 111 XP',
+    )
+    expect(within(dialog).getByTestId('rival-target-111')).toHaveTextContent(
+      '预计总共 620 XP',
+    )
     expect(within(dialog).queryByTestId('rival-target-0')).not.toBeInTheDocument()
-    expect(within(dialog).getByTestId('rival-target-1')).toHaveAttribute(
+    expect(within(dialog).getByTestId('rival-target-111')).toHaveAttribute(
       'aria-pressed',
       'true',
     )
     expect(within(dialog).getByTestId('rival-bet-target')).toHaveTextContent(
-      '+1 XP',
+      '+111 XP',
+    )
+    expect(within(dialog).getByTestId('rival-bet-expected')).toHaveTextContent(
+      '620 XP',
     )
     expect(within(dialog).getByTestId('rival-bet-odds')).toHaveTextContent(
-      '×1.20',
+      '×2.00',
+    )
+    expect(within(dialog).getByTestId('rival-bet-paid-input')).toHaveAttribute(
+      'max',
+      '100',
     )
     expect(
       within(dialog).queryByText(/目标不在服务端档位里/),

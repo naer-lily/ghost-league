@@ -35,6 +35,8 @@ interface TargetOptionButtonProps {
   margin: number
   odds: number
   expectedXp?: number | undefined
+  /** Daily options lead with the odds; weekly options lead with the margin. */
+  isDaily: boolean
   selected: boolean
   disabled: boolean
   onSelect: () => void
@@ -44,6 +46,7 @@ function TargetOptionButton({
   margin,
   odds,
   expectedXp,
+  isDaily,
   selected,
   disabled,
   onSelect,
@@ -59,13 +62,23 @@ function TargetOptionButton({
       data-testid={`rival-target-${margin}`}
       onClick={onSelect}
     >
-      <span className={styles.optionTitle}>+{formatXp(margin)} XP</span>
-      {expectedXp !== undefined ? (
-        <span className={styles.optionExpected}>
-          预计 {formatXp(expectedXp)} XP
-        </span>
-      ) : null}
-      <span className={styles.optionLine}>赔率 ×{formatOdds(odds)}</span>
+      <span className={styles.optionTitle}>
+        {isDaily ? `×${formatOdds(odds)}` : `+${formatXp(margin)} XP`}
+      </span>
+      {isDaily ? (
+        <>
+          <span className={styles.optionExpected}>
+            需要多 {formatXp(margin)} XP
+          </span>
+          {expectedXp !== undefined ? (
+            <span className={styles.optionLine}>
+              预计总共 {formatXp(expectedXp)} XP
+            </span>
+          ) : null}
+        </>
+      ) : (
+        <span className={styles.optionLine}>赔率 ×{formatOdds(odds)}</span>
+      )}
     </button>
   )
 }
@@ -209,7 +222,8 @@ export function RivalBetDialog({
 
   const freeStake = option?.free_stake ?? DEFAULT_FREE_STAKE
   const minPaid = option?.min_paid_stake ?? 0
-  const maxPaid = option?.max_paid_stake ?? DEFAULT_MAX_PAID
+  const defaultMaxPaid = tab === 'daily' ? 100 : DEFAULT_MAX_PAID
+  const maxPaid = option?.max_paid_stake ?? defaultMaxPaid
   const paidStake = Math.min(Math.max(paidStakes[tab], minPaid), maxPaid)
   const totalStake = freeStake + paidStake
   const payout = selectedTarget ? betReturn(totalStake, selectedTarget.odds) : 0
@@ -358,6 +372,7 @@ export function RivalBetDialog({
                       margin={entry.margin}
                       odds={entry.odds}
                       expectedXp={isDaily ? entry.expected_xp : undefined}
+                      isDaily={isDaily}
                       selected={entry.margin === selectedTarget?.margin}
                       disabled={Boolean(currentBet) || Boolean(closed)}
                       onSelect={() => {
@@ -431,7 +446,7 @@ export function RivalBetDialog({
 
                 <div className={styles.summary} data-testid="rival-bet-summary">
                   <div>
-                    <span>目标</span>
+                    <span>{isDaily ? '目标差' : '目标'}</span>
                     <strong data-testid="rival-bet-target">
                       {selectedTarget
                         ? `+${formatXp(selectedTarget.margin)} XP`
@@ -440,7 +455,7 @@ export function RivalBetDialog({
                   </div>
                   {isDaily && selectedTarget ? (
                     <div>
-                      <span>预计需要</span>
+                      <span>预计总共</span>
                       <strong data-testid="rival-bet-expected">
                         {formatXp(selectedTarget.expected_xp)} XP
                       </strong>
