@@ -31,6 +31,7 @@ Channel token。`/badge/...`、`/embed/...`、`/health` 和 `/avatars/...` 公�
 | GET | `/v1/me/tasks/{task_id}/proof` | 本人读取任务照片 |
 | POST | `/v1/me/tasks/{task_id}/chest` | 领取任务宝箱 |
 | GET/POST | `/v1/me/task-definitions` | 列出/新增每日手动任务定义 |
+| PUT | `/v1/me/task-definitions/order` | 批量保存每日任务顺序 |
 | PATCH/DELETE | `/v1/me/task-definitions/{id}` | 修改/停用每日手动任务定义 |
 | GET | `/v1/me/rival` | 本周宿敌、选择窗口、下注与上次结果 |
 | GET | `/v1/me/rival/candidates` | 可选择的宿敌候选（跨组） |
@@ -464,7 +465,9 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
 ```
 
 - 只返回 `status IN ('active','completed')` 且 `starts_at <= now < ends_at` 的任务，
-  按 `ends_at` 升序。
+  按 `ends_at ASC, sort_order ASC, created_at ASC, id ASC` 排序。每日手动任务
+  截止时间都在当天 24:00，组内顺序由定义顺序决定；补断联、周末任务仍按各自
+  截止时间插入，不与每日任务混排。前端不再二次排序。
 - `source`：`daily_manual` / `repair` / `weekend`。
 - `status`：`active` / `completed` / `expired`。
 - `chest_status`：`none` / `available` / `claimed` / `forfeited`。
@@ -476,8 +479,8 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
 - `server_now` 是任务卡倒计时的权威当前时间；前端不读手机时钟判断剩余时间。
 - 截止后任务整条隐藏；已完成但未领取的宝箱在截止时作废。
 - 每日手动任务读取时会用当前定义同步当天仍为 `active` 的实例
-  （`title` / `description` / `difficulty` / `chest_tier`）；`completed` / `expired`
-  实例保持历史快照。
+  （`title` / `description` / `difficulty` / `chest_tier` / `sort_order`）；
+  `completed` / `expired` 实例保持历史快照。
 
 ### `POST /v1/me/tasks/{task_id}/complete`
 
@@ -528,11 +531,30 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
     "description": "",
     "difficulty": 2,
     "active": true,
+    "sort_order": 10,
     "created_at": "2026-11-04T12:00:00+08:00",
     "updated_at": "2026-11-04T12:00:00+08:00"
   }
 ]
 ```
+
+按 `sort_order, created_at, id` 返回。新建定义的 `sort_order` 为当前 active
+定义最大值 + 10。
+
+### `PUT /v1/me/task-definitions/order`
+
+Body：
+
+```json
+{"ids": ["td_second", "td_first"]}
+```
+
+- 事务内按数组顺序把定义的 `sort_order` 写为 10、20、30…，返回重排后的
+  active 定义列表。
+- 每个 id 必须属于当前用户且仍是 active 定义；未知、他人或已停用的 id 返回
+  `404`，重复 id 返回 `422`。
+- 生效于当天仍为 `active` 的实例和以后新生成的实例；`completed` / `expired`
+  实例不追溯改标题或顺序。
 
 ### `POST /v1/me/task-definitions`
 

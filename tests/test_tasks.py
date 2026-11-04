@@ -199,6 +199,96 @@ class DailyTaskTests(TaskStoreBase):
         }
         self.assertEqual(tiers, {1: 1, 2: 2, 3: 3})
 
+    def test_reorder_controls_daily_order_ahead_of_repair_and_persists(self) -> None:
+        first = self.store.create_task_definition(
+            "u", title="A", difficulty=1, now=self.now
+        )
+        second = self.store.create_task_definition(
+            "u", title="B", difficulty=1, now=self.now
+        )
+        self.assertEqual(first["sort_order"], 10)
+        self.assertEqual(second["sort_order"], 20)
+        self.store.ensure_user_tasks("u", self.now)
+        self.assertEqual(
+            [task["title"] for task in self.store.list_visible_tasks("u", self.now)],
+            ["A", "B"],
+        )
+
+        reordered = self.store.reorder_task_definitions(
+            "u", [second["id"], first["id"]], now=self.now
+        )
+        self.assertEqual([row["title"] for row in reordered], ["B", "A"])
+        self.assertEqual([row["sort_order"] for row in reordered], [10, 20])
+        self.assertEqual(
+            [row["title"] for row in self.store.list_visible_tasks("u", self.now)],
+            ["B", "A"],
+        )
+
+        self.add_activity("2026-10-29", 444)
+        self.store.ensure_repair_tasks("u", self.now.date(), now=self.now)
+        self.assertEqual(self.store.ensure_user_tasks("u", self.now), 0)
+        tasks = self.store.list_visible_tasks("u", self.now)
+        self.assertEqual(
+            [(task["title"], task["ends_at"]) for task in tasks],
+            [
+                ("B", "2026-11-05T00:00:00+08:00"),
+                ("A", "2026-11-05T00:00:00+08:00"),
+                ("补断联 · 10/29", "2026-11-06T00:00:00+08:00"),
+            ],
+        )
+
+        reopened = GameStore(self.store.path)
+        self.assertEqual(
+            [row["title"] for row in reopened.list_task_definitions("u")],
+            ["B", "A"],
+        )
+        self.assertEqual(
+            [task["title"] for task in reopened.list_visible_tasks("u", self.now)],
+            ["B", "A", "补断联 · 10/29"],
+        )
+
+    def test_completed_instance_keeps_title_and_sort_order(self) -> None:
+        second = self.store.create_task_definition(
+            "u", title="B", difficulty=1, now=self.now
+        )
+        first = self.store.create_task_definition(
+            "u", title="A", difficulty=1, now=self.now
+        )
+        self.store.ensure_user_tasks("u", self.now)
+        completed = self.store.get_task(
+            "u",
+            next(
+                task["id"]
+                for task in self.store.list_visible_tasks("u", self.now)
+                if task["title"] == "A"
+            ),
+        )
+        self.store.complete_manual_task(
+            "u",
+            completed["id"],
+            proof_path="task-proofs/u/a.png",
+            proof_mime="image/png",
+            now=self.now,
+        )
+        self.store.update_task_definition(
+            "u",
+            first["id"],
+            title="A 新标题",
+            description="新描述",
+            difficulty=3,
+            now=self.now,
+        )
+        self.store.reorder_task_definitions(
+            "u", [first["id"], second["id"]], now=self.now
+        )
+        self.store.ensure_user_tasks("u", self.now)
+
+        stored = self.store.get_task("u", completed["id"])
+        self.assertEqual(stored["status"], "completed")
+        self.assertEqual(stored["title"], "A")
+        self.assertEqual(stored["description"], "")
+        self.assertEqual(stored["sort_order"], 20)
+
     def test_next_day_generates_new_instance(self) -> None:
         self.store.create_task_definition(
             "u", title="画一张", difficulty=1, now=self.now
@@ -586,6 +676,108 @@ class TaskApiTests(APITestBase):
             self.assertEqual(
                 len(client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]),
                 1,
+            )
+
+    def test_reorder_endpoint_controls_tasks_and_survives_restart(self) -> None:
+        self.clock["now"] = datetime(2026, 11, 4, 12, 0, 0, tzinfo=TZ)
+        self.add_account("friend", "Friend", "friend-token-only")
+        with self.client() as client:
+            first = client.post(
+                "/v1/me/task-definitions",
+                headers=auth(TOKEN),
+                json={"title": "A", "difficulty": 1},
+            ).json()
+            second = client.post(
+                "/v1/me/task-definitions",
+                headers=auth(TOKEN),
+                json={"title": "B", "difficulty": 1},
+            ).json()
+            inactive = client.post(
+                "/v1/me/task-definitions",
+                headers=auth(TOKEN),
+                json={"title": "C", "difficulty": 1},
+            ).json()
+            friend = client.post(
+                "/v1/me/task-definitions",
+                headers=auth("friend-token-only"),
+                json={"title": "Friend", "difficulty": 1},
+            ).json()
+            self.assertEqual(first["sort_order"], 10)
+            self.assertEqual(second["sort_order"], 20)
+            self.assertEqual(
+                client.delete(
+                    f"/v1/me/task-definitions/{inactive['id']}",
+                    headers=auth(TOKEN),
+                ).status_code,
+                204,
+            )
+            self.assertEqual(
+                client.post(
+                    "/v1/me/increments",
+                    headers=auth(TOKEN),
+                    json={
+                        "event_id": "missed-order-day",
+                        "seconds": 444,
+                        "occurred_at": "2026-10-29T12:00:00+08:00",
+                    },
+                ).status_code,
+                200,
+            )
+            before = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]
+            self.assertEqual(
+                [(task["title"], task["ends_at"]) for task in before],
+                [
+                    ("A", "2026-11-05T00:00:00+08:00"),
+                    ("B", "2026-11-05T00:00:00+08:00"),
+                    ("补断联 · 10/29", "2026-11-06T00:00:00+08:00"),
+                ],
+            )
+
+            reordered = client.put(
+                "/v1/me/task-definitions/order",
+                headers=auth(TOKEN),
+                json={"ids": [second["id"], first["id"]]},
+            )
+            self.assertEqual(reordered.status_code, 200, reordered.text)
+            self.assertEqual(
+                [(row["title"], row["sort_order"]) for row in reordered.json()],
+                [("B", 10), ("A", 20)],
+            )
+            tasks = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]
+            self.assertEqual(
+                [(task["title"], task["ends_at"]) for task in tasks],
+                [
+                    ("B", "2026-11-05T00:00:00+08:00"),
+                    ("A", "2026-11-05T00:00:00+08:00"),
+                    ("补断联 · 10/29", "2026-11-06T00:00:00+08:00"),
+                ],
+            )
+
+            for ids, expected in (
+                (["td_missing"], 404),
+                ([friend["id"]], 404),
+                ([inactive["id"]], 404),
+                ([second["id"], second["id"]], 422),
+            ):
+                response = client.put(
+                    "/v1/me/task-definitions/order",
+                    headers=auth(TOKEN),
+                    json={"ids": ids},
+                )
+                self.assertEqual(response.status_code, expected, response.text)
+
+        with self.client() as client:
+            definitions = client.get(
+                "/v1/me/task-definitions", headers=auth(TOKEN)
+            ).json()
+            self.assertEqual(
+                [(row["title"], row["sort_order"]) for row in definitions],
+                [("B", 10), ("A", 20)],
+            )
+            tasks = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]
+            self.assertEqual(
+                [task["title"] for task in tasks],
+                ["B", "A", "补断联 · 10/29"],
             )
 
     def test_manual_complete_requires_image_and_returns_task(self) -> None:

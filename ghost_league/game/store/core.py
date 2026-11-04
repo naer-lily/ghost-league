@@ -23,7 +23,7 @@ from ..stars import (
     is_valid_palette,
 )
 
-SCHEMA_VERSION = "10"
+SCHEMA_VERSION = "11"
 ALGORITHM_VERSION = "phase1-v1"
 SHOP_ECONOMY_UPDATE_KEY = "shop_economy_update_2026_11"
 DEFAULT_DB_PATH = Path("data/league/league.db")
@@ -543,6 +543,7 @@ CREATE TABLE IF NOT EXISTS task_definitions (
     description TEXT NOT NULL DEFAULT '',
     difficulty INTEGER NOT NULL CHECK(difficulty BETWEEN 1 AND 3),
     active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)),
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -571,6 +572,7 @@ CREATE TABLE IF NOT EXISTS task_instances (
         CHECK(chest_status IN ('none', 'available', 'claimed', 'forfeited')),
     claimed_at TEXT,
     chest_amount INTEGER,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -1076,11 +1078,59 @@ class CoreMixin:
 
     @staticmethod
     def _migrate_tasks(conn: sqlite3.Connection) -> None:
-        """Ensure task tables have the indexes the lifecycle queries rely on.
+        """Add task ordering columns and keep the lifecycle indexes current.
 
-        New databases get these from ``_SCHEMA``; this pass makes the same
-        indexes idempotent for a database created by an older binary.
+        New databases get the columns from ``_SCHEMA``.  Older databases get
+        ``sort_order`` added in place; existing active definitions keep their
+        previous ``created_at, id`` order as 10, 20, 30…, and existing daily
+        instances are aligned once so completed rows keep the old visible
+        order.  Later reorders only sync active instances; completed/expired
+        instances keep that historical value.  Re-running is idempotent.
         """
+
+        definition_columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(task_definitions)")
+        }
+        if "sort_order" not in definition_columns:
+            conn.execute(
+                "ALTER TABLE task_definitions ADD COLUMN sort_order INTEGER "
+                "NOT NULL DEFAULT 0"
+            )
+            next_by_user: dict[str, int] = {}
+            rows = conn.execute(
+                "SELECT id, user_id FROM task_definitions WHERE active = 1 "
+                "ORDER BY user_id, created_at, id"
+            ).fetchall()
+            for row in rows:
+                user_id = str(row["user_id"])
+                sort_order = next_by_user.get(user_id, 0) + 10
+                next_by_user[user_id] = sort_order
+                conn.execute(
+                    "UPDATE task_definitions SET sort_order = ? WHERE id = ?",
+                    (sort_order, row["id"]),
+                )
+
+        instance_columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(task_instances)")
+        }
+        added_instance_order = "sort_order" not in instance_columns
+        if added_instance_order:
+            conn.execute(
+                "ALTER TABLE task_instances ADD COLUMN sort_order INTEGER "
+                "NOT NULL DEFAULT 0"
+            )
+            # Preserve the old visible order once, including completed rows.
+            # Later reorders only sync active instances; completed/expired
+            # rows keep this value as their historical snapshot.
+            conn.execute(
+                "UPDATE task_instances SET sort_order = COALESCE(("
+                "SELECT sort_order FROM task_definitions "
+                "WHERE task_definitions.id = task_instances.definition_id), "
+                "sort_order) "
+                "WHERE source = 'daily_manual' AND definition_id IS NOT NULL"
+            )
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_task_definitions_user_active "

@@ -53,6 +53,7 @@ class TasksMixin:
             "description": str(item["description"]),
             "difficulty": int(item["difficulty"]),
             "active": bool(item["active"]),
+            "sort_order": int(item["sort_order"]),
             "created_at": str(item["created_at"]),
             "updated_at": str(item["updated_at"]),
         }
@@ -79,7 +80,7 @@ class TasksMixin:
         with self._reader() as conn:  # type: ignore[attr-defined]
             rows = conn.execute(
                 "SELECT * FROM task_definitions WHERE user_id = ? AND active = 1 "
-                "ORDER BY created_at, id",
+                "ORDER BY sort_order, created_at, id",
                 (user_id,),
             ).fetchall()
             return [self._definition_payload(row) for row in rows]
@@ -108,12 +109,28 @@ class TasksMixin:
                 raise TaskLimitReached(
                     f"at most {MAX_ACTIVE_TASK_DEFINITIONS} active task definitions"
                 )
+            maximum = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) AS n FROM task_definitions "
+                "WHERE user_id = ? AND active = 1",
+                (user_id,),
+            ).fetchone()
+            sort_order = int(maximum["n"]) + 10
             definition_id = _new_id("td")
             conn.execute(
                 "INSERT INTO task_definitions "
                 "(id, user_id, title, description, difficulty, active, "
-                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
-                (definition_id, user_id, title, description, difficulty, stamp, stamp),
+                "sort_order, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                (
+                    definition_id,
+                    user_id,
+                    title,
+                    description,
+                    difficulty,
+                    sort_order,
+                    stamp,
+                    stamp,
+                ),
             )
             row = conn.execute(
                 "SELECT * FROM task_definitions WHERE id = ?", (definition_id,)
@@ -170,6 +187,79 @@ class TasksMixin:
             if cursor.rowcount == 0:
                 raise TaskNotFound("task definition not found")
 
+    def reorder_task_definitions(
+        self,
+        user_id: str,
+        ids: list[str] | tuple[str, ...],
+        *,
+        now: datetime | str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Persist a manual order as 10, 20, 30…
+
+        Every supplied id must be an active definition owned by ``user_id``.
+        The supplied ids come first in the given order; any other active
+        definitions keep their relative order after them.  Active instances
+        follow their definition immediately, while completed/expired
+        instances keep their historical sort value.
+        """
+
+        if not isinstance(ids, (list, tuple)):
+            raise ValueError("ids must be a list of task definition ids")
+        normalized = [str(item) for item in ids]
+        if any(not item for item in normalized):
+            raise ValueError("task definition ids must be non-empty")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("task definition ids must be unique")
+
+        local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
+        stamp = cal.iso_ts(local_now)
+        with self.transaction() as conn:  # type: ignore[attr-defined]
+            rows = conn.execute(
+                "SELECT * FROM task_definitions WHERE user_id = ? AND active = 1 "
+                "ORDER BY sort_order, created_at, id",
+                (user_id,),
+            ).fetchall()
+            by_id = {str(row["id"]): row for row in rows}
+            for definition_id in normalized:
+                if definition_id not in by_id:
+                    raise TaskNotFound("task definition not found")
+
+            listed = set(normalized)
+            ordered = [by_id[definition_id] for definition_id in normalized]
+            ordered.extend(
+                row for row in rows if str(row["id"]) not in listed
+            )
+            for index, row in enumerate(ordered, start=1):
+                sort_order = index * 10
+                if int(row["sort_order"]) == sort_order:
+                    continue
+                conn.execute(
+                    "UPDATE task_definitions SET sort_order = ?, updated_at = ? "
+                    "WHERE id = ? AND user_id = ? AND active = 1",
+                    (sort_order, stamp, row["id"], user_id),
+                )
+
+            conn.execute(
+                "UPDATE task_instances SET sort_order = COALESCE(("
+                "SELECT sort_order FROM task_definitions "
+                "WHERE task_definitions.id = task_instances.definition_id), "
+                "sort_order), updated_at = ? "
+                "WHERE user_id = ? AND source = 'daily_manual' "
+                "AND status = 'active' AND definition_id IS NOT NULL "
+                "AND sort_order != COALESCE(("
+                "SELECT sort_order FROM task_definitions "
+                "WHERE task_definitions.id = task_instances.definition_id), "
+                "sort_order)",
+                (stamp, user_id),
+            )
+
+            updated = conn.execute(
+                "SELECT * FROM task_definitions WHERE user_id = ? AND active = 1 "
+                "ORDER BY sort_order, created_at, id",
+                (user_id,),
+            ).fetchall()
+            return [self._definition_payload(row) for row in updated]
+
     # ------------------------------------------------------------------
     # Generation
     # ------------------------------------------------------------------
@@ -188,7 +278,8 @@ class TasksMixin:
         inserted = 0
         with self.transaction() as conn:  # type: ignore[attr-defined]
             definitions = conn.execute(
-                "SELECT * FROM task_definitions WHERE user_id = ? AND active = 1",
+                "SELECT * FROM task_definitions WHERE user_id = ? AND active = 1 "
+                "ORDER BY sort_order, created_at, id",
                 (user_id,),
             ).fetchall()
             for definition in definitions:
@@ -197,16 +288,17 @@ class TasksMixin:
                 description = str(definition["description"])
                 difficulty = int(definition["difficulty"])
                 chest_tier = MANUAL_CHEST_TIER[difficulty]
+                sort_order = int(definition["sort_order"])
                 cursor = conn.execute(
                     "INSERT OR IGNORE INTO task_instances "
                     "(id, user_id, definition_id, source, system_key, title, "
                     "description, difficulty, chest_tier, starts_at, ends_at, "
                     "completion_mode, condition_json, status, completed_at, "
                     "proof_path, proof_mime, chest_status, claimed_at, "
-                    "chest_amount, created_at, updated_at) "
+                    "chest_amount, sort_order, created_at, updated_at) "
                     "VALUES (?, ?, ?, 'daily_manual', ?, ?, ?, ?, ?, ?, ?, "
                     "'manual', NULL, 'active', NULL, NULL, NULL, 'none', NULL, "
-                    "NULL, ?, ?)",
+                    "NULL, ?, ?, ?)",
                     (
                         _new_id("ti"),
                         user_id,
@@ -218,24 +310,28 @@ class TasksMixin:
                         chest_tier,
                         starts_at,
                         ends_at,
+                        sort_order,
                         stamp,
                         stamp,
                     ),
                 )
                 inserted += max(0, cursor.rowcount)
-                # Edits apply to today's still-active instance.  Completed and
-                # expired instances keep the snapshot they were earned with.
+                # Edits and ordering apply to today's still-active instance.
+                # Completed and expired instances keep the snapshot they were
+                # earned with.
                 conn.execute(
                     "UPDATE task_instances SET title = ?, description = ?, "
-                    "difficulty = ?, chest_tier = ?, updated_at = ? "
+                    "difficulty = ?, chest_tier = ?, sort_order = ?, "
+                    "updated_at = ? "
                     "WHERE user_id = ? AND system_key = ? AND status = 'active' "
                     "AND (title != ? OR description != ? OR difficulty != ? "
-                    "OR chest_tier != ?)",
+                    "OR chest_tier != ? OR sort_order != ?)",
                     (
                         title,
                         description,
                         difficulty,
                         chest_tier,
+                        sort_order,
                         stamp,
                         user_id,
                         system_key,
@@ -243,6 +339,7 @@ class TasksMixin:
                         description,
                         difficulty,
                         chest_tier,
+                        sort_order,
                     ),
                 )
         return inserted
@@ -488,7 +585,7 @@ class TasksMixin:
                 "SELECT * FROM task_instances "
                 "WHERE user_id = ? AND status IN ('active', 'completed') "
                 "AND starts_at <= ? AND ends_at > ? "
-                "ORDER BY ends_at, created_at, id",
+                "ORDER BY ends_at ASC, sort_order ASC, created_at ASC, id ASC",
                 (user_id, now_iso, now_iso),
             ).fetchall()
             return [

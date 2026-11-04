@@ -510,4 +510,37 @@ describe('HomePage rework', () => {
     expect(within(list).getByRole('button', { name: '任务设置' })).toBeVisible()
     expect(screen.queryByText(/概率|机制|DSL/)).not.toBeInTheDocument()
   })
+
+  it('renders task cards in the exact order returned by the API', async () => {
+    const task = (id: string, title: string) => ({
+      id,
+      source: 'daily_manual',
+      title,
+      description: '',
+      difficulty: 1,
+      chest_tier: 1,
+      starts_at: '2026-11-04T00:00:00+08:00',
+      ends_at: '2026-11-05T00:00:00+08:00',
+      status: 'active',
+      completed_at: null,
+      chest_status: 'none',
+      chest_amount: null,
+      proof_url: null,
+      progress: null,
+    })
+    vi.stubGlobal(
+      'fetch',
+      mockApi({ tasks: [task('ti_b', '先做这个'), task('ti_a', '再做这个')] }),
+    )
+
+    renderHome()
+
+    const list = await screen.findByTestId('task-list')
+    await screen.findByText('先做这个')
+    expect(
+      within(list)
+        .getAllByRole('heading', { level: 3 })
+        .map((heading) => heading.textContent),
+    ).toEqual(['先做这个', '再做这个'])
+  })
 })

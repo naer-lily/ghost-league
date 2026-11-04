@@ -1,9 +1,15 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { Pencil, Plus, Trash2, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { GripVertical, Pencil, Plus, Trash2, X } from 'lucide-react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import {
   useCreateTaskDefinition,
   useDeleteTaskDefinition,
+  useReorderTaskDefinitions,
   useTaskDefinitions,
   useUpdateTaskDefinition,
 } from '../api/queries'
@@ -18,6 +24,16 @@ const DIFFICULTIES = [
   { value: 3, label: '重' },
 ] as const
 
+const DRAG_THRESHOLD = 4
+
+interface DragState {
+  pointerId: number
+  id: string
+  startY: number
+  moved: boolean
+  original: TaskDefinition[]
+}
+
 interface TaskSettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -31,6 +47,7 @@ export function TaskSettingsDialog({
   const createDefinition = useCreateTaskDefinition()
   const updateDefinition = useUpdateTaskDefinition()
   const deleteDefinition = useDeleteTaskDefinition()
+  const reorderDefinitions = useReorderTaskDefinitions()
   const notify = useUiStore((state) => state.notify)
 
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -38,6 +55,21 @@ export function TaskSettingsDialog({
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [difficulty, setDifficulty] = useState<number>(1)
+  const [order, setOrder] = useState<TaskDefinition[]>([])
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+  const orderRef = useRef<TaskDefinition[]>([])
+  const dragRef = useRef<DragState | null>(null)
+
+  function applyOrder(next: TaskDefinition[]) {
+    orderRef.current = next
+    setOrder(next)
+  }
+
+  useEffect(() => {
+    if (dragRef.current) return
+    applyOrder(definitions.data ?? [])
+  }, [definitions.data])
 
   useEffect(() => {
     if (!open) {
@@ -46,6 +78,8 @@ export function TaskSettingsDialog({
       setTitle('')
       setDescription('')
       setDifficulty(1)
+      dragRef.current = null
+      setDraggingId(null)
     }
   }, [open])
 
@@ -95,6 +129,102 @@ export function TaskSettingsDialog({
       onSuccess: () => notify('任务已停用。'),
       onError: (error) => notify(describeApiError(error), 'error'),
     })
+  }
+
+  function startDrag(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    definition: TaskDefinition,
+  ) {
+    if (reorderDefinitions.isPending) return
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    if (event.isPrimary === false) return
+    event.preventDefault()
+    event.stopPropagation()
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      // Older WebViews can reject capture; touch still has implicit capture.
+    }
+    dragRef.current = {
+      pointerId: event.pointerId,
+      id: definition.id,
+      startY: event.clientY,
+      moved: false,
+      original: [...orderRef.current],
+    }
+    setDraggingId(definition.id)
+  }
+
+  function moveDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const state = dragRef.current
+    if (!state || state.pointerId !== event.pointerId) return
+    if (!state.moved) {
+      if (Math.abs(event.clientY - state.startY) < DRAG_THRESHOLD) return
+      state.moved = true
+    }
+    event.preventDefault()
+
+    const list = listRef.current
+    if (!list) return
+    const rows = Array.from(
+      list.querySelectorAll<HTMLElement>('[data-task-id]'),
+    ).filter((row) => row.dataset.taskId !== state.id)
+    let target = rows.length
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index]
+      if (!row) continue
+      const rect = row.getBoundingClientRect()
+      if (event.clientY < rect.top + rect.height / 2) {
+        target = index
+        break
+      }
+    }
+
+    const current = orderRef.current
+    const draggedIndex = current.findIndex((item) => item.id === state.id)
+    const dragged = current[draggedIndex]
+    if (!dragged || target === draggedIndex) return
+    const next = current.filter((item) => item.id !== state.id)
+    next.splice(target, 0, dragged)
+    applyOrder(next)
+  }
+
+  function finishDrag(pointerId: number, commit: boolean) {
+    const state = dragRef.current
+    if (!state || state.pointerId !== pointerId) return
+    dragRef.current = null
+    setDraggingId(null)
+
+    const current = orderRef.current
+    const originalIds = state.original.map((item) => item.id)
+    if (!state.moved || !commit) {
+      if (state.moved) applyOrder(state.original)
+      return
+    }
+    const ids = current.map((item) => item.id)
+    if (ids.join('|') === originalIds.join('|')) return
+    reorderDefinitions.mutate(ids, {
+      onError: (error) => {
+        applyOrder(state.original)
+        notify(describeApiError(error), 'error')
+      },
+    })
+  }
+
+  function endDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const pointerId = event.pointerId
+    finishDrag(pointerId, true)
+    try {
+      if (event.currentTarget.hasPointerCapture(pointerId)) {
+        event.currentTarget.releasePointerCapture(pointerId)
+      }
+    } catch {
+      // The handle may already have lost capture.
+    }
+  }
+
+  function cancelDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    finishDrag(event.pointerId, false)
   }
 
   return (
@@ -206,9 +336,32 @@ export function TaskSettingsDialog({
               ) : (definitions.data ?? []).length === 0 ? (
                 <p className={styles.muted}>还没有每日任务。</p>
               ) : (
-                <ul className={styles.list}>
-                  {(definitions.data ?? []).map((definition) => (
-                    <li key={definition.id} className={styles.item}>
+                <ul className={styles.list} ref={listRef}>
+                  {order.map((definition) => (
+                    <li
+                      key={definition.id}
+                      className={[
+                        styles.item,
+                        draggingId === definition.id ? styles.itemDragging : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                      data-task-id={definition.id}
+                    >
+                      <button
+                        type="button"
+                        className={styles.dragHandle}
+                        aria-label={`拖动排序 ${definition.title}`}
+                        data-drag-handle
+                        disabled={reorderDefinitions.isPending}
+                        onPointerDown={(event) => startDrag(event, definition)}
+                        onPointerMove={moveDrag}
+                        onPointerUp={endDrag}
+                        onPointerCancel={cancelDrag}
+                        onLostPointerCapture={(event) => cancelDrag(event)}
+                      >
+                        <GripVertical size={17} aria-hidden="true" />
+                      </button>
                       <div className={styles.itemCopy}>
                         <strong>{definition.title}</strong>
                       </div>

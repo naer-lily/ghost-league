@@ -53,7 +53,7 @@ def test_schema_meta_and_epoch(tmp_path) -> None:
         "diamond_boosts",
     } <= tables
     meta = store.meta_snapshot()
-    assert meta["schema_version"] == "10"
+    assert meta["schema_version"] == "11"
     assert meta["algorithm_version"] == "phase1-v1"
     assert meta["epoch_id"]
     assert store.active_epoch()["status"] == "active"
@@ -330,3 +330,80 @@ def test_old_sources_table_is_migrated_without_losing_raw_values(tmp_path) -> No
     source = store.get_source("old-hash")
     assert source["effective_seconds"] == 20000
     assert source["normalization_version"] == "p75-soft-0.2-v1"
+
+
+def test_task_order_migration_backfills_definitions_and_instances(tmp_path) -> None:
+    path = tmp_path / "league.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE task_definitions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                difficulty INTEGER NOT NULL CHECK(difficulty BETWEEN 1 AND 3),
+                active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE task_instances (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                definition_id TEXT,
+                source TEXT NOT NULL
+                    CHECK(source IN ('daily_manual', 'repair', 'weekend')),
+                system_key TEXT,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                difficulty INTEGER NOT NULL CHECK(difficulty BETWEEN 1 AND 5),
+                chest_tier INTEGER NOT NULL CHECK(chest_tier BETWEEN 1 AND 5),
+                starts_at TEXT NOT NULL,
+                ends_at TEXT NOT NULL,
+                completion_mode TEXT NOT NULL
+                    CHECK(completion_mode IN ('manual', 'dsl')),
+                condition_json TEXT,
+                status TEXT NOT NULL
+                    CHECK(status IN ('active', 'completed', 'expired')),
+                completed_at TEXT,
+                proof_path TEXT,
+                proof_mime TEXT,
+                chest_status TEXT NOT NULL DEFAULT 'none'
+                    CHECK(chest_status IN ('none', 'available', 'claimed', 'forfeited')),
+                claimed_at TEXT,
+                chest_amount INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO task_definitions VALUES
+                ('td_b', 'u', 'B', '', 1, 1,
+                 '2026-11-01T00:00:00+08:00', '2026-11-01T00:00:00+08:00'),
+                ('td_a', 'u', 'A', '', 1, 1,
+                 '2026-11-02T00:00:00+08:00', '2026-11-02T00:00:00+08:00');
+            INSERT INTO task_instances VALUES
+                ('ti_a', 'u', 'td_a', 'daily_manual',
+                 'daily:td_a:2026-11-04', 'A', '', 1, 1,
+                 '2026-11-04T00:00:00+08:00', '2026-11-05T00:00:00+08:00',
+                 'manual', NULL, 'active', NULL, NULL, NULL, 'none', NULL, NULL,
+                 '2026-11-04T01:00:00+08:00', '2026-11-04T01:00:00+08:00'),
+                ('ti_done', 'u', 'td_b', 'daily_manual',
+                 'daily:td_b:2026-11-03', 'B', '', 1, 1,
+                 '2026-11-03T00:00:00+08:00', '2026-11-04T00:00:00+08:00',
+                 'manual', NULL, 'completed', NULL, NULL, NULL, 'none', NULL,
+                 NULL, '2026-11-03T01:00:00+08:00', '2026-11-03T01:00:00+08:00');
+            """
+        )
+
+    store = GameStore(path, epoch_reason="test")
+    assert [
+        (row["title"], row["sort_order"])
+        for row in store.list_task_definitions("u")
+    ] == [("B", 10), ("A", 20)]
+    with store.transaction() as conn:
+        rows = conn.execute(
+            "SELECT id, sort_order FROM task_instances ORDER BY id"
+        ).fetchall()
+    assert [(row["id"], row["sort_order"]) for row in rows] == [
+        ("ti_a", 20),
+        ("ti_done", 10),
+    ]

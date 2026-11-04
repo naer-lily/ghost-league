@@ -565,6 +565,7 @@ export interface TaskDefinition {
   description: string
   difficulty: number
   active: boolean
+  sort_order: number
   created_at: string
   updated_at: string
 }

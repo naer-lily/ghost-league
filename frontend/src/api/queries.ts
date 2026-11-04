@@ -568,3 +568,20 @@ export function useDeleteTaskDefinition() {
     },
   })
 }
+
+export function useReorderTaskDefinitions() {
+  const queryClient = useQueryClient()
+  return useMutation<TaskDefinition[], Error, string[]>({
+    mutationFn: (ids: string[]) =>
+      apiFetch<TaskDefinition[]>('/v1/me/task-definitions/order', {
+        method: 'PUT',
+        body: { ids },
+      }),
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: taskDefinitionsQueryKey }),
+        queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
+      ])
+    },
+  })
+}

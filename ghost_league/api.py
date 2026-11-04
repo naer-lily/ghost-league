@@ -195,6 +195,12 @@ class TaskDefinitionRequest(BaseModel):
     difficulty: int = Field(strict=True, ge=1, le=3)
 
 
+class TaskDefinitionOrderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ids: list[str] = Field(default_factory=list, max_length=100)
+
+
 class RivalSelectRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1493,6 +1499,15 @@ class GameService:
             str(account["user_id"]), definition_id, now=self.now()
         )
 
+    def reorder_task_definitions_for(
+        self, account: dict[str, Any], ids: list[str]
+    ) -> list[dict[str, Any]]:
+        self._prepare_player(account)
+        assert self.store is not None
+        return self.store.reorder_task_definitions(
+            str(account["user_id"]), ids, now=self.now()
+        )
+
     def _task_proof_storage(
         self, user_id: str, task_id: str, extension: str
     ) -> tuple[Path, str]:
@@ -2513,6 +2528,16 @@ def create_app(
                 description=request.description,
                 difficulty=request.difficulty,
             )
+        except (GameError, ValueError) as exc:
+            raise game_error(exc) from exc
+
+    @app.put("/v1/me/task-definitions/order")
+    def reorder_task_definitions(
+        request: TaskDefinitionOrderRequest,
+        account: dict[str, Any] = Depends(auth),
+    ) -> list[dict[str, Any]]:
+        try:
+            return service.reorder_task_definitions_for(account, request.ids)
         except (GameError, ValueError) as exc:
             raise game_error(exc) from exc
 

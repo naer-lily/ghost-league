@@ -29,11 +29,15 @@ Ghost 自有任务系统只有三类任务：
 ## 每日手动任务
 
 - `task_definitions` 保存用户定义；同一用户最多 20 条 active 定义。
+- `task_definitions.sort_order` 决定每日任务组内顺序：新建为当前 active
+  最大值 + 10；批量重排接口按数组顺序写 10、20、30…。旧库迁移时按原有
+  `created_at, id` 顺序回填 10、20…。
 - 读取任务列表时 `ensure_user_tasks()` 为每个 active 定义生成当天实例，
-  幂等键 `daily:<definition_id>:<YYYY-MM-DD>`。
+  幂等键 `daily:<definition_id>:<YYYY-MM-DD>`；实例也保存 `sort_order`。
 - 当天已有 **active** 实例时，`ensure_user_tasks()` 用当前定义的
-  `title` / `description` / `difficulty` / `chest_tier` 同步该实例；编辑定义后
-  下一次读取即生效，不需要手工改库。`completed` / `expired` 实例保留历史快照。
+  `title` / `description` / `difficulty` / `chest_tier` / `sort_order` 同步该实例；
+  编辑或重排后下一次读取即生效，不需要手工改库。`completed` / `expired`
+  实例保留历史快照，不改标题也不改顺序。
 - 当天实例：`starts_at` = 当天 00:00，`ends_at` = 次日 00:00，
   `completion_mode='manual'`，`chest_tier=difficulty`。
 - 完成接口要求 `multipart/form-data` 的 `file` 图片；成功后
@@ -110,12 +114,15 @@ Ghost 自有任务系统只有三类任务：
 - `GET /v1/me/tasks/{id}/proof`：本人读取完成照片。
 - `POST /v1/me/tasks/{id}/chest`：领取宝箱。
 - `GET/POST/PATCH/DELETE /v1/me/task-definitions`：管理每日手动定义。
+- `PUT /v1/me/task-definitions/order`：按 `{"ids": [...]}` 批量保存每日任务顺序。
 
 完整字段和错误码见 [`API.md`](API.md)。
 
 ## 前端
 
-- 首页“任务”区按 `ends_at` 升序显示；没有任务时只留极简空态。
+- 首页“任务”区完全按 `GET /v1/me/tasks` 的返回顺序显示，前端不排序；
+  每日任务组内顺序与设置一致，补断联、周末任务继续按截止时间插入。
+- 没有任务时只留极简空态。
 - 任务卡显示相对剩余时间，由 `/v1/me/tasks` 的 `server_now` 驱动；任务查询每
   30 秒刷新，倒计时本身每秒随服务端时间前进。
 - 手动任务：隐藏 file input + `capture="environment"`；选图后先在浏览器里
@@ -129,3 +136,6 @@ Ghost 自有任务系统只有三类任务：
 - 完成后显示宝箱按钮，领取后轻量 dialog 显示钻石数。
 - “设置”打开 `TaskSettingsDialog`，只管理每日手动定义，不出现 DSL、
   系统任务或宝箱档位。
+- 每日任务每行有独立拖拽手柄；用 Pointer Events 拖拽（不依赖 HTML5 drag，
+  兼容 Android WebView）。松手后立即调用批量重排接口，失败回滚到拖动前顺序
+  并提示；编辑、停用按钮与手柄分开，避免点按时误拖。
