@@ -9,7 +9,7 @@ import {
   formatXp,
   type RivalBetTab,
 } from '../lib/rival'
-import { formatAbsoluteTime } from '../lib/time'
+import { formatAbsoluteTime, formatTaskCountdown } from '../lib/time'
 import styles from './BetTaskRow.module.css'
 
 export interface BetSides {
@@ -26,6 +26,8 @@ interface BetTaskRowProps {
   rivalXp: number
   windows: BetWindows
   locked: boolean
+  /** Server-clock "now", shared with TaskCard so countdowns match. */
+  now: Date
   expanded: boolean
   onToggle: () => void
   onOpenBets: (kind: RivalBetTab) => void
@@ -97,10 +99,6 @@ function settlementLabel(
   return '次周一结算'
 }
 
-function closedCopy(kind: RivalBetTab): string {
-  return kind === 'daily' ? '今天的注已截止' : '本周的注已截止'
-}
-
 function toneClass(diff: number): string {
   if (diff > 0) return styles.ahead ?? ''
   if (diff < 0) return styles.behind ?? ''
@@ -120,6 +118,7 @@ export function BetTaskRow({
   rivalXp,
   windows,
   locked,
+  now,
   expanded,
   onToggle,
   onOpenBets,
@@ -127,6 +126,10 @@ export function BetTaskRow({
   firstWeekly,
 }: BetTaskRowProps) {
   const label = kind === 'daily' ? '日注' : '周注'
+  const cutoff = formatTaskCountdown(
+    kind === 'daily' ? windows.daily_locks_at : windows.weekly_locks_at,
+    now,
+  )
   const target = bet?.target_margin ?? 0
   const live = { me: meXp, rival: rivalXp + target }
   const settled = Boolean(bet && bet.status !== 'placed')
@@ -163,8 +166,18 @@ export function BetTaskRow({
             className={styles.lockedRow}
             data-testid={`bet-task-locked-${kind}`}
           >
-            <span className={styles.lockedLabel}>{label}</span>
-            <span className={styles.lockedCopy}>{closedCopy(kind)}</span>
+            <span
+              className={styles.label}
+              data-testid={`bet-task-label-${kind}`}
+            >
+              {label}
+            </span>
+            <span
+              className={styles.deadline}
+              data-testid={`bet-task-cutoff-${kind}`}
+            >
+              {cutoff}
+            </span>
           </div>
         </article>
       )
@@ -180,9 +193,21 @@ export function BetTaskRow({
           type="button"
           className={styles.openRow}
           data-testid={`bet-task-open-${kind}`}
+          aria-label={label}
           onClick={() => onOpenBets(kind)}
         >
-          {label}
+          <span
+            className={styles.label}
+            data-testid={`bet-task-label-${kind}`}
+          >
+            {label}
+          </span>
+          <span
+            className={styles.deadline}
+            data-testid={`bet-task-cutoff-${kind}`}
+          >
+            {cutoff}
+          </span>
         </button>
       </article>
     )
@@ -221,6 +246,21 @@ export function BetTaskRow({
         data-testid={`bet-task-toggle-${kind}`}
         onClick={onToggle}
       >
+        <span className={styles.cardHead}>
+          <span
+            className={styles.label}
+            data-testid={`bet-task-label-${kind}`}
+          >
+            {label}
+          </span>
+          <span
+            className={styles.deadline}
+            data-testid={`bet-task-cutoff-${kind}`}
+          >
+            {cutoff}
+          </span>
+        </span>
+
         <span className={styles.xpRow}>
           <span className={styles.meXp} data-testid={`bet-task-me-${kind}`}>
             {formatXp(frozen.me)}

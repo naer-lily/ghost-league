@@ -681,7 +681,7 @@ describe('TaskList', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('sinks claimed weekly stages and keeps unclaimed stages in place', async () => {
+  it('hides claimed weekly stages and keeps the unclaimed chest and next stage visible', async () => {
     const tasks = [
       makeTask({
         id: 'ti_chain_3',
@@ -703,8 +703,7 @@ describe('TaskList', () => {
         ends_at: '2026-11-09T00:00:00+08:00',
         status: 'completed',
         completed_at: '2026-11-04T10:00:00+08:00',
-        chest_status: 'claimed',
-        chest_amount: 7,
+        chest_status: 'available',
         progress: { current: 1000, target: 1000 },
       }),
       makeTask({
@@ -717,7 +716,8 @@ describe('TaskList', () => {
         ends_at: '2026-11-09T00:00:00+08:00',
         status: 'completed',
         completed_at: '2026-11-04T11:00:00+08:00',
-        chest_status: 'available',
+        chest_status: 'claimed',
+        chest_amount: 7,
         progress: { current: 1000, target: 2000 },
       }),
     ]
@@ -736,14 +736,48 @@ describe('TaskList', () => {
     )
 
     const { container } = renderList()
-    await screen.findByText('本周 2000 XP')
+    await screen.findByText('本周 3000 XP')
     expect(taskTitles(container)).toEqual([
-      '本周 2000 XP',
-      '本周 3000 XP',
       '本周 1000 XP',
+      '本周 3000 XP',
     ])
     expect(screen.getByRole('button', { name: '开宝箱' })).toBeInTheDocument()
-    expect(screen.getByTestId('task-claimed')).toHaveTextContent('7 钻')
+    expect(screen.queryByTestId('task-claimed')).not.toBeInTheDocument()
+  })
+
+  it('keeps a completed final weekly stage in the list with no next stage', async () => {
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-04T12:00:00+08:00',
+            tasks: [
+              makeTask({
+                id: 'ti_chain_4',
+                source: 'weekly_chain',
+                title: '本周 5000 XP',
+                chest_pool: 'weekly_chain_4',
+                sort_order: 40,
+                starts_at: '2026-11-02T00:00:00+08:00',
+                ends_at: '2026-11-09T00:00:00+08:00',
+                status: 'completed',
+                completed_at: '2026-11-04T11:00:00+08:00',
+                chest_status: 'available',
+                progress: { current: 5000, target: 5000 },
+              }),
+            ],
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      }),
+    )
+
+    const { container } = renderList()
+    await screen.findByText('本周 5000 XP')
+    expect(taskTitles(container)).toEqual(['本周 5000 XP'])
+    expect(screen.getByRole('button', { name: '开宝箱' })).toBeInTheDocument()
   })
 
   it('reveals the next weekly stage after claiming its chest', async () => {
@@ -819,15 +853,12 @@ describe('TaskList', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '收下' }))
 
     await waitFor(() =>
-      expect(taskTitles(container)).toEqual([
-        '本周 2000 XP',
-        '本周 1000 XP',
-      ]),
+      expect(taskTitles(container)).toEqual(['本周 2000 XP']),
     )
     expect(screen.getByTestId('task-progress')).toHaveTextContent(
       '1200 / 2000 XP',
     )
-    expect(screen.getByTestId('task-claimed')).toHaveTextContent('7 钻')
+    expect(screen.queryByTestId('task-claimed')).not.toBeInTheDocument()
   })
 
   it('repairs a missed day from the task card and then shows completed', async () => {
@@ -1273,12 +1304,18 @@ describe('TaskList', () => {
     })
     renderList(1, vi.fn(), { rivalState, onOpenBets: vi.fn() })
 
-    expect(await screen.findByTestId('bet-task-locked-daily')).toHaveTextContent(
-      '今天的注已截止',
+    const daily = await screen.findByTestId('bet-task-locked-daily')
+    expect(daily).toHaveTextContent('日注')
+    expect(within(daily).getByTestId('bet-task-cutoff-daily')).toHaveTextContent(
+      '已到期',
     )
-    expect(screen.getByTestId('bet-task-locked-weekly')).toHaveTextContent(
-      '本周的注已截止',
-    )
+    const weekly = screen.getByTestId('bet-task-locked-weekly')
+    expect(weekly).toHaveTextContent('周注')
+    expect(
+      within(weekly).getByTestId('bet-task-cutoff-weekly'),
+    ).toHaveTextContent('已到期')
+    expect(screen.queryByText('今天的注已截止')).not.toBeInTheDocument()
+    expect(screen.queryByText('本周的注已截止')).not.toBeInTheDocument()
     expect(
       screen.queryByTestId('bet-task-open-daily'),
     ).not.toBeInTheDocument()

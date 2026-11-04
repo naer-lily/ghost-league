@@ -56,6 +56,16 @@ function displayBucket(task: TaskItem): number {
   return 1
 }
 
+function isHiddenChainStage(task: TaskItem): boolean {
+  // A claimed chain stage disappears from the feed: the next stage takes its
+  // place.  An unclaimed stage stays visible so its chest can still be opened.
+  return (
+    task.source === 'weekly_chain' &&
+    task.status === 'completed' &&
+    task.chest_status === 'claimed'
+  )
+}
+
 function timestamp(value: string): number {
   const parsed = new Date(value).getTime()
   return Number.isNaN(parsed) ? 0 : parsed
@@ -167,7 +177,10 @@ export function TaskList({
     kind: RivalBetTab
     id: number
   } | null>(null)
-  const items = useMemo(() => tasks.data?.tasks ?? [], [tasks.data])
+  const items = useMemo(
+    () => (tasks.data?.tasks ?? []).filter((task) => !isHiddenChainStage(task)),
+    [tasks.data],
+  )
   const betRows = useMemo(
     () => (onOpenBets ? buildBetRows(rivalState, now) : []),
     [onOpenBets, rivalState, now],
@@ -235,6 +248,7 @@ export function TaskList({
                     rivalXp={entry.row.rivalXp}
                     windows={entry.row.windows}
                     locked={entry.row.locked}
+                    now={now}
                     expanded={
                       entry.row.bet !== null &&
                       expandedBet?.kind === entry.row.kind &&

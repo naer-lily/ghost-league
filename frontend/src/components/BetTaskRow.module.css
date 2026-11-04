@@ -12,19 +12,18 @@
   width: 100%;
   min-height: 52px;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 0 13px;
   border: 1px solid var(--border);
   border-radius: 16px;
   background:
     radial-gradient(circle at 100% 0%, rgba(255, 206, 92, 0.06), transparent 58%),
     var(--surface-2);
-  font-size: 0.9rem;
-  font-weight: 900;
+  text-align: left;
 }
 
 .openRow {
-  justify-content: center;
   color: var(--text);
 }
 
@@ -40,21 +39,23 @@
 }
 
 .lockedRow {
-  justify-content: space-between;
-  gap: 10px;
   color: var(--muted);
 }
 
-.lockedLabel {
+.label {
+  min-width: 0;
   color: var(--text);
   font-size: 0.9rem;
   font-weight: 900;
 }
 
-.lockedCopy {
-  color: var(--muted-2);
-  font-size: 0.66rem;
+.deadline {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.67rem;
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .placed {
@@ -76,6 +77,15 @@
 
 .placedButton[aria-expanded='true'] {
   padding-bottom: 6px;
+}
+
+.cardHead {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
 }
 
 .xpRow {

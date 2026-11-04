@@ -45,6 +45,7 @@ function renderRow(
     rivalXp: 540,
     windows: WINDOWS,
     locked: false,
+    now: new Date('2026-11-04T12:00:00+08:00'),
     expanded: false,
     onToggle,
     onOpenBets,
@@ -64,6 +65,10 @@ describe('BetTaskRow', () => {
       'data-state',
       'open',
     )
+    expect(screen.getByTestId('bet-task-label-weekly')).toHaveTextContent('周注')
+    expect(screen.getByTestId('bet-task-cutoff-weekly')).toHaveTextContent(
+      '还剩 131 小时 59 分',
+    )
     expect(screen.queryByText(/点击下注/)).not.toBeInTheDocument()
     expect(screen.queryByText(/目标|赔率|本金|总返/)).not.toBeInTheDocument()
 
@@ -71,14 +76,47 @@ describe('BetTaskRow', () => {
     expect(onOpenBets).toHaveBeenCalledWith('weekly')
   })
 
-  it('shows a locked row without a clickable bet button', () => {
-    renderRow({ kind: 'daily', locked: true })
+  it('shows the daily countdown on the open row', () => {
+    renderRow({ kind: 'daily' })
 
-    expect(screen.getByTestId('bet-task-locked-daily')).toHaveTextContent(
-      '今天的注已截止',
+    expect(screen.getByTestId('bet-task-label-daily')).toHaveTextContent('日注')
+    expect(screen.getByTestId('bet-task-cutoff-daily')).toHaveTextContent(
+      '还剩 9 小时 0 分',
     )
+  })
+
+  it('shows a locked row with its label and cutoff and no clickable button', () => {
+    renderRow({
+      kind: 'daily',
+      locked: true,
+      now: new Date('2026-11-04T21:30:00+08:00'),
+    })
+
+    expect(screen.getByTestId('bet-task-locked-daily')).toHaveTextContent('日注')
+    expect(screen.getByTestId('bet-task-cutoff-daily')).toHaveTextContent(
+      '已到期',
+    )
+    expect(screen.queryByText('今天的注已截止')).not.toBeInTheDocument()
+    expect(screen.queryByText('本周的注已截止')).not.toBeInTheDocument()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
     expect(screen.queryByText(/点击下注/)).not.toBeInTheDocument()
+  })
+
+  it('shows the label and cutoff above a placed XP row', () => {
+    renderRow({ bet: bet(), meXp: 638, rivalXp: 540 })
+
+    expect(screen.getByTestId('bet-task-daily')).toHaveAttribute(
+      'data-state',
+      'placed',
+    )
+    expect(screen.getByTestId('bet-task-label-daily')).toHaveTextContent('日注')
+    expect(screen.getByTestId('bet-task-cutoff-daily')).toHaveTextContent(
+      '还剩 9 小时 0 分',
+    )
+    expect(screen.getByTestId('bet-task-me-daily')).toHaveTextContent('638')
+    expect(screen.getByTestId('bet-task-rival-daily')).toHaveTextContent('589')
+    expect(screen.getByTestId('bet-task-diff-daily')).toHaveTextContent('+49')
+    expect(screen.getByTestId('bet-task-bar-daily')).toBeVisible()
   })
 
   it('shows my XP, the opponent XP plus target, and a positive signed diff', () => {
