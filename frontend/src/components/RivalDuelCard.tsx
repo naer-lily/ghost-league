@@ -24,6 +24,8 @@ interface RivalDuelCardProps {
   /** The home page uses the compact read-only body. */
   variant?: 'full' | 'summary'
   onOpenProfile?: (userId: string) => void
+  /** Home moves the weekly/daily bet entries into the task list. */
+  showBetSurfaces?: boolean
 }
 
 interface BetSurfaceProps {
@@ -122,6 +124,7 @@ export function RivalDuelCard({
   onOpenBets,
   variant = 'full',
   onOpenProfile,
+  showBetSurfaces = true,
 }: RivalDuelCardProps) {
   const rival = state.rival
   if (!rival) return null
@@ -329,22 +332,24 @@ export function RivalDuelCard({
             </span>
           </div>
 
-          <div className={styles.betSurfaces} aria-label="宿敌下注">
-            <BetSurface
-              kind="weekly"
-              label="周注"
-              bet={state.bets.weekly}
-              closedCopy={weeklyClosedCopy}
-              onOpenBets={onOpenBets}
-            />
-            <BetSurface
-              kind="daily"
-              label="日注"
-              bet={state.bets.daily}
-              closedCopy={dailyClosedCopy}
-              onOpenBets={onOpenBets}
-            />
-          </div>
+          {showBetSurfaces ? (
+            <div className={styles.betSurfaces} aria-label="宿敌下注">
+              <BetSurface
+                kind="weekly"
+                label="周注"
+                bet={state.bets.weekly}
+                closedCopy={weeklyClosedCopy}
+                onOpenBets={onOpenBets}
+              />
+              <BetSurface
+                kind="daily"
+                label="日注"
+                bet={state.bets.daily}
+                closedCopy={dailyClosedCopy}
+                onOpenBets={onOpenBets}
+              />
+            </div>
+          ) : null}
         </>
       )}
     </section>

@@ -134,6 +134,8 @@ export function HomePage() {
         <TaskList
           embersBalance={view.embersBalance}
           onOpenSettings={() => setTasksSettingsOpen(true)}
+          rivalState={data ?? null}
+          onOpenBets={setDialogKind}
         />
 
         <section
@@ -194,6 +196,7 @@ export function HomePage() {
                 state={data}
                 now={now}
                 variant="full"
+                showBetSurfaces={false}
                 onOpenProfile={setProfileId}
                 onOpenBets={(kind) => setDialogKind(kind)}
               />

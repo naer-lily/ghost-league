@@ -11,7 +11,8 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
 import { tasksQueryKey } from '../api/queries'
-import type { TaskItem } from '../api/types'
+import type { Bet, RivalPlayer, RivalState, TaskItem } from '../api/types'
+import { makeBetOptions } from '../test/fixtures'
 import { compressTaskProof } from '../lib/image'
 import { useUiStore } from '../store/useUiStore'
 import { TaskList } from './TaskList'
@@ -54,7 +55,16 @@ function makeTask(overrides: Partial<TaskItem> = {}): TaskItem {
   }
 }
 
-function renderList(embersBalance = 1, onOpenSettings = vi.fn()) {
+interface RenderListOptions {
+  rivalState?: RivalState | null
+  onOpenBets?: (kind: 'daily' | 'weekly') => void
+}
+
+function renderList(
+  embersBalance = 1,
+  onOpenSettings = vi.fn(),
+  options: RenderListOptions = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { gcTime: 0, retry: false, refetchOnWindowFocus: false },
@@ -69,6 +79,12 @@ function renderList(embersBalance = 1, onOpenSettings = vi.fn()) {
         <TaskList
           embersBalance={embersBalance}
           onOpenSettings={onOpenSettings}
+          {...(options.rivalState !== undefined
+            ? { rivalState: options.rivalState }
+            : {})}
+          {...(options.onOpenBets
+            ? { onOpenBets: options.onOpenBets }
+            : {})}
         />
       </QueryClientProvider>,
     ),
@@ -78,6 +94,79 @@ function renderList(embersBalance = 1, onOpenSettings = vi.fn()) {
 function taskTitles(container: HTMLElement): string[] {
   return Array.from(container.querySelectorAll('h3')).map(
     (heading) => heading.textContent ?? '',
+  )
+}
+
+function player(overrides: Partial<RivalPlayer> = {}): RivalPlayer {
+  return {
+    user_id: 'naer-lily',
+    display_name: '那尔',
+    avatar_url: null,
+    group_no: 1,
+    tier: 'Bronze',
+    power: 1000,
+    week_xp: 900,
+    today_xp: 20,
+    ...overrides,
+  }
+}
+
+function makeBet(overrides: Partial<Bet> = {}): Bet {
+  return {
+    id: 1,
+    kind: 'daily',
+    period_key: '2026-11-04',
+    rival_id: 'ch-rival',
+    stake: 120,
+    free_stake: 20,
+    paid_stake: 100,
+    target_margin: 5,
+    odds: 2,
+    status: 'placed',
+    placed_at: '2026-11-04T10:00:00+08:00',
+    locked_at: null,
+    settled_at: null,
+    payout: 0,
+    result_diff: null,
+    ...overrides,
+  }
+}
+
+function makeRivalState(overrides: Partial<RivalState> = {}): RivalState {
+  return {
+    server_now: '2026-11-04T12:00:00+08:00',
+    week_start: '2026-11-02',
+    selection: {
+      open: true,
+      locks_at: '2026-11-02T23:59:59+08:00',
+      auto_select_at: '2026-11-03T09:00:00+08:00',
+      mode: 'manual',
+    },
+    me: player({ week_xp: 1000, today_xp: 10 }),
+    rival: player({
+      user_id: 'ch-rival',
+      display_name: '林间',
+      group_no: 7,
+      power: 980,
+      week_xp: 900,
+      today_xp: 20,
+    }),
+    result: null,
+    bets: { weekly: null, daily: null, group: null },
+    bet_options: makeBetOptions(),
+    projection: null,
+    bet_windows: {
+      weekly_locks_at: '2026-11-02T23:59:59+08:00',
+      daily_locks_at: '2026-11-04T21:00:00+08:00',
+      daily_settles_at: '2026-11-04T22:30:00+08:00',
+    },
+    ...overrides,
+  }
+}
+
+function entryKeys(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll('[data-entry-kind]')).map(
+    (entry) => entry.getAttribute('data-entry-kind') ?? '',
   )
 }
 
@@ -1029,5 +1118,196 @@ describe('TaskList', () => {
     renderList(1, onOpenSettings)
     await userEvent.click(screen.getByRole('button', { name: '任务设置' }))
     expect(onOpenSettings).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders daily/weekly bet rows from today/week data and keeps completed tasks last', async () => {
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    const tasks = [
+      makeTask({
+        id: 'ti_daily',
+        title: '每日速写',
+        ends_at: '2026-11-05T00:00:00+08:00',
+        sort_order: 10,
+      }),
+      makeTask({
+        id: 'ti_weekly',
+        source: 'weekly_chain',
+        title: '本周 1000 XP',
+        ends_at: '2026-11-09T00:00:00+08:00',
+        sort_order: 20,
+      }),
+      makeTask({
+        id: 'ti_done',
+        title: '已领任务',
+        status: 'completed',
+        chest_status: 'claimed',
+        sort_order: 1,
+      }),
+    ]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-04T12:00:00+08:00',
+            tasks,
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      }),
+    )
+    const onOpenBets = vi.fn()
+    const rivalState = makeRivalState({
+      bets: {
+        weekly: makeBet({
+          id: 2,
+          kind: 'weekly',
+          period_key: '2026-11-02',
+          target_margin: 100,
+        }),
+        daily: makeBet({ id: 1, kind: 'daily', target_margin: 5 }),
+        group: null,
+      },
+    })
+
+    const { container } = renderList(1, vi.fn(), { rivalState, onOpenBets })
+    await screen.findByText('每日速写')
+
+    const daily = screen.getByTestId('bet-task-daily')
+    expect(within(daily).getByTestId('bet-task-me-daily')).toHaveTextContent(
+      '10',
+    )
+    expect(
+      within(daily).getByTestId('bet-task-rival-daily'),
+    ).toHaveTextContent('25')
+    expect(
+      within(daily).getByTestId('bet-task-diff-daily'),
+    ).toHaveTextContent('-15')
+    const weekly = screen.getByTestId('bet-task-weekly')
+    expect(within(weekly).getByTestId('bet-task-me-weekly')).toHaveTextContent(
+      '1,000',
+    )
+    expect(
+      within(weekly).getByTestId('bet-task-rival-weekly'),
+    ).toHaveTextContent('1,000')
+    expect(
+      within(weekly).getByTestId('bet-task-diff-weekly'),
+    ).toHaveTextContent('0')
+
+    expect(entryKeys(container)).toEqual([
+      'bet',
+      'task',
+      'bet',
+      'task',
+      'task',
+    ])
+    expect(taskTitles(container)).toEqual([
+      '每日速写',
+      '本周 1000 XP',
+      '已领任务',
+    ])
+    const weeklyEntries = container.querySelectorAll('[data-entry-kind]')
+    expect(weeklyEntries[2]).toHaveAttribute('data-list-gap', 'true')
+
+    await userEvent.click(
+      within(daily).getByTestId('bet-task-toggle-daily'),
+    )
+    expect(screen.getByTestId('bet-task-details-daily')).toBeVisible()
+    expect(
+      screen.queryByTestId('bet-task-details-weekly'),
+    ).not.toBeInTheDocument()
+
+    await userEvent.click(
+      within(weekly).getByTestId('bet-task-toggle-weekly'),
+    )
+    expect(screen.getByTestId('bet-task-details-weekly')).toBeVisible()
+    expect(
+      screen.queryByTestId('bet-task-details-daily'),
+    ).not.toBeInTheDocument()
+    expect(onOpenBets).not.toHaveBeenCalled()
+  })
+
+  it('opens the matching bet dialog from the unbet rows', async () => {
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-02T12:00:00+08:00',
+            tasks: [],
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      }),
+    )
+    const onOpenBets = vi.fn()
+    renderList(1, vi.fn(), { rivalState: makeRivalState(), onOpenBets })
+
+    await userEvent.click(await screen.findByTestId('bet-task-open-daily'))
+    expect(onOpenBets).toHaveBeenLastCalledWith('daily')
+    await userEvent.click(screen.getByTestId('bet-task-open-weekly'))
+    expect(onOpenBets).toHaveBeenLastCalledWith('weekly')
+  })
+
+  it('shows locked bet rows without clickable buttons after the windows close', async () => {
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-04T22:00:00+08:00',
+            tasks: [],
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      }),
+    )
+    const rivalState = makeRivalState({
+      bet_windows: {
+        weekly_locks_at: '2026-11-02T23:59:59+08:00',
+        daily_locks_at: '2026-11-04T21:00:00+08:00',
+        daily_settles_at: '2026-11-04T22:30:00+08:00',
+      },
+    })
+    renderList(1, vi.fn(), { rivalState, onOpenBets: vi.fn() })
+
+    expect(await screen.findByTestId('bet-task-locked-daily')).toHaveTextContent(
+      '今天的注已截止',
+    )
+    expect(screen.getByTestId('bet-task-locked-weekly')).toHaveTextContent(
+      '本周的注已截止',
+    )
+    expect(
+      screen.queryByTestId('bet-task-open-daily'),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('bet-task-open-weekly'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('does not render bet rows without a rival', async () => {
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-04T12:00:00+08:00',
+            tasks: [makeTask({ id: 'ti_a', title: 'A' })],
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      }),
+    )
+    renderList(1, vi.fn(), {
+      rivalState: makeRivalState({ rival: null, bets: { weekly: null, daily: null, group: null } }),
+      onOpenBets: vi.fn(),
+    })
+
+    expect(await screen.findByText('A')).toBeInTheDocument()
+    expect(screen.queryByTestId('bet-task-daily')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('bet-task-weekly')).not.toBeInTheDocument()
   })
 })

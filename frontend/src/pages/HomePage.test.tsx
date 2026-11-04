@@ -10,7 +10,12 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
-import type { Bet, RivalPlayer, RivalState } from '../api/types'
+import type {
+  Bet,
+  PlaceBetResult,
+  RivalPlayer,
+  RivalState,
+} from '../api/types'
 import { makeBetOptions, makeRecentXp, makeSnapshot } from '../test/fixtures'
 import { HomePage } from './HomePage'
 
@@ -160,12 +165,13 @@ interface MockOptions {
   candidates?: RivalPlayer[]
   tasks?: unknown[]
   homeFails?: () => boolean
+  place?: (body: Record<string, unknown>) => PlaceBetResult
 }
 
 function mockApi(options: MockOptions = {}) {
   const snapshot = options.snapshot ?? makeSnapshot()
-  const rival = options.rival ?? rivalState()
-  return vi.fn(async (input: RequestInfo | URL) => {
+  let rival = options.rival ?? rivalState()
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (options.homeFails?.()) return response({ detail: 'unauthorized' }, 401)
     if (url.includes('/v1/me/tasks')) {
@@ -186,6 +192,16 @@ function mockApi(options: MockOptions = {}) {
       })
     }
     if (url.includes('/v1/me/rival')) return response(rival)
+    if (url.includes('/v1/me/bets') && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}')) as Record<
+        string,
+        unknown
+      >
+      const result = options.place?.(body)
+      if (!result) return response({ detail: 'not configured' }, 500)
+      rival = result.state
+      return response(result)
+    }
     if (url.includes('/v1/me/bets')) {
       return response({
         server_now: rival.server_now,
@@ -216,7 +232,7 @@ describe('HomePage rework', () => {
     vi.unstubAllGlobals()
   })
 
-  it('shows the full duel card with weekly and daily surfaces on the home page', async () => {
+  it('shows the full duel card and moves weekly/daily entries into the task list', async () => {
     vi.stubGlobal('fetch', mockApi())
 
     renderHome()
@@ -234,22 +250,32 @@ describe('HomePage rework', () => {
     expect(screen.getByTestId('rival-week-countdown')).toBeVisible()
     expect(screen.getByTestId('rival-daily-countdown')).toBeVisible()
 
-    expect(screen.getByTestId('rival-bet-status-周注')).toHaveTextContent(
-      '周注 · 已下注',
-    )
-    expect(screen.getByTestId('rival-bet-target-weekly')).toHaveTextContent(
-      '+0 XP',
-    )
-    expect(screen.getByTestId('rival-bet-odds-weekly')).toHaveTextContent(
-      '×2.00',
-    )
-    expect(screen.getByTestId('rival-bet-status-日注')).toHaveTextContent(
-      '日注 · 未下注',
-    )
-    expect(screen.getByRole('button', { name: '下注日注' })).toBeVisible()
     expect(
-      screen.queryByRole('button', { name: '下注周注' }),
+      screen.queryByTestId('rival-bet-status-周注'),
     ).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('rival-bet-status-日注'),
+    ).not.toBeInTheDocument()
+
+    const list = screen.getByTestId('task-list')
+    const daily = await within(list).findByTestId('bet-task-daily')
+    expect(daily).toHaveAttribute('data-state', 'open')
+    expect(within(daily).getByRole('button', { name: '日注' })).toBeVisible()
+    const weekly = await within(list).findByTestId('bet-task-weekly')
+    expect(weekly).toHaveAttribute('data-state', 'placed')
+    expect(within(weekly).getByTestId('bet-task-me-weekly')).toHaveTextContent(
+      '524',
+    )
+    expect(
+      within(weekly).getByTestId('bet-task-rival-weekly'),
+    ).toHaveTextContent('760')
+    expect(
+      within(weekly).getByTestId('bet-task-diff-weekly'),
+    ).toHaveTextContent('-236')
+    expect(
+      within(weekly).getByTestId('bet-task-diff-weekly'),
+    ).toHaveAttribute('data-tone', 'behind')
+    expect(within(weekly).queryByText(/目标|赔率|本金|总返/)).not.toBeInTheDocument()
     expect(card).toHaveTextContent('战力')
     expect(
       screen.queryByTestId('rival-bet-status-组注'),
@@ -271,7 +297,7 @@ describe('HomePage rework', () => {
 
     renderHome()
 
-    await user.click(await screen.findByRole('button', { name: '下注日注' }))
+    await user.click(await screen.findByTestId('bet-task-open-daily'))
     const dialog = await screen.findByTestId('rival-bet-dialog')
     expect(within(dialog).queryByRole('tab')).not.toBeInTheDocument()
     expect(within(dialog).getByRole('tabpanel')).toHaveAttribute(
@@ -335,7 +361,7 @@ describe('HomePage rework', () => {
 
     renderHome()
 
-    await user.click(await screen.findByRole('button', { name: '下注周注' }))
+    await user.click(await screen.findByTestId('bet-task-open-weekly'))
     const dialog = await screen.findByTestId('rival-bet-dialog')
     expect(within(dialog).queryByRole('tab')).not.toBeInTheDocument()
     expect(within(dialog).getByRole('tabpanel')).toHaveAttribute(
@@ -372,26 +398,96 @@ describe('HomePage rework', () => {
             }),
             group: null,
           },
+          bet_windows: {
+            weekly_locks_at: futureIso(4),
+            daily_locks_at: futureIso(2),
+            daily_settles_at: '2026-11-04T22:30:00+08:00',
+          },
         }),
       }),
     )
 
     renderHome()
 
-    const daily = await screen.findByTestId('rival-bet-status-日注')
-    expect(daily).toHaveTextContent('日注 · 已下注')
-    expect(screen.getByTestId('rival-bet-target-daily')).toHaveTextContent(
-      '+150 XP',
+    const daily = await screen.findByTestId('bet-task-daily')
+    expect(daily).toHaveAttribute('data-state', 'placed')
+    expect(within(daily).getByTestId('bet-task-me-daily')).toHaveTextContent(
+      '129',
     )
-    expect(screen.getByTestId('rival-bet-odds-daily')).toHaveTextContent(
-      '×2.00',
-    )
-    expect(screen.getByTestId('rival-bet-stake-daily')).toHaveTextContent('20')
-    expect(screen.getByTestId('rival-bet-return-daily')).toHaveTextContent('40')
     expect(
-      screen.queryByRole('button', { name: '下注日注' }),
+      within(daily).getByTestId('bet-task-rival-daily'),
+    ).toHaveTextContent('270')
+    expect(
+      within(daily).getByTestId('bet-task-diff-daily'),
+    ).toHaveTextContent('-141')
+
+    await userEvent.click(
+      within(daily).getByTestId('bet-task-toggle-daily'),
+    )
+    const details = within(daily).getByTestId('bet-task-details-daily')
+    expect(details).toHaveTextContent('20 × 2.00')
+    expect(details).toHaveTextContent('+150 XP')
+    expect(details).toHaveTextContent('40')
+    expect(details).toHaveTextContent('22:30')
+    expect(
+      screen.queryByTestId('bet-task-open-daily'),
     ).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '下注周注' })).toBeVisible()
+    expect(screen.getByTestId('bet-task-open-weekly')).toBeVisible()
+  })
+
+  it('turns the daily row into a bar after a successful bet', async () => {
+    const user = userEvent.setup()
+    const base = rivalState()
+    const placedBet = bet({
+      id: 5,
+      kind: 'daily',
+      period_key: base.week_start,
+      target_margin: 111,
+      stake: 20,
+      free_stake: 20,
+      paid_stake: 0,
+      odds: 2,
+    })
+    const nextState: RivalState = {
+      ...base,
+      bets: { ...base.bets, daily: placedBet },
+    }
+    const captured: { body: Record<string, unknown> | null } = { body: null }
+    vi.stubGlobal(
+      'fetch',
+      mockApi({
+        rival: base,
+        place: (body) => {
+          captured.body = body
+          return { bet: placedBet, state: nextState }
+        },
+      }),
+    )
+
+    renderHome()
+
+    await user.click(await screen.findByTestId('bet-task-open-daily'))
+    const dialog = await screen.findByTestId('rival-bet-dialog')
+    expect(within(dialog).getByTestId('rival-bet-target')).toHaveTextContent(
+      '+111 XP',
+    )
+    await user.click(within(dialog).getByRole('button', { name: '确认下注' }))
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('rival-bet-dialog')).not.toBeInTheDocument(),
+    )
+    const daily = await screen.findByTestId('bet-task-daily')
+    expect(daily).toHaveAttribute('data-state', 'placed')
+    expect(
+      screen.queryByTestId('bet-task-open-daily'),
+    ).not.toBeInTheDocument()
+    expect(captured.body).toMatchObject({
+      kind: 'daily',
+      target_margin: 111,
+      paid_stake: 0,
+    })
+    expect(typeof captured.body?.request_id).toBe('string')
+    expect(captured.body).not.toHaveProperty('stake')
   })
 
   it('opens the rival public profile from the duel avatar and shows the week comparison', async () => {

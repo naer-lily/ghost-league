@@ -80,11 +80,15 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
     `stake`（`free_stake + paid_stake`）和赔率都由服务端返回，前端只读
     `bet_options` 的 `target_options` 档位与赔率。
   - 首页与 `/rival` 共用 `variant="full"` 的 `RivalDuelCard`：显示双方本周 XP、今日 XP
-    比分、对撞条、差距、本周剩余/日注锁注两个时间，以及周注/日注两个独立注面。
-    未下注且未截止时分别显示「下注周注 / 下注日注」，已下注时显示该注面的目标、赔率、
-    总本金和总返，截止后只显示截止状态。两个入口分别用 `onlyKind="weekly"` /
-    `onlyKind="daily"` 直接打开对应 dialog，不再先展示另一个 tab；复用同一套
-    `RivalDuelCard` / `RivalCandidatePicker` 组件。
+    比分、对撞条、差距、本周剩余/日注锁注两个时间。首页传 `showBetSurfaces={false}`，
+    不再显示周注/日注两张下注卡；`/rival` 保持默认显示两个独立注面，未下注且未截止时
+    分别显示「下注周注 / 下注日注」，已下注时显示该注面的目标、赔率、总本金和总返，
+    截止后只显示截止状态。
+  - 首页任务列表把周注/日注作为两行 `BetTaskRow` 混入同一条列表：日注跟每日任务同簇，
+    周注跟周连续任务同簇并在两簇之间留 gap；未下注是可点击整行（或截止后的锁定行），
+    已下注显示双方 XP、带符号差值和左右对撞条，点击原地展开本金×赔率、目标、总返和
+    结算时间，同一时间只展开一条。两个入口分别用 `onlyKind="weekly"` /
+    `onlyKind="daily"` 直接打开对应 dialog，不再先展示另一个 tab。
 - 小组/好友榜：
   - 小组：`GET /v1/league/standings`
   - 好友：`GET /v1/me/friends/standings`，保留本人和已关注的人，按 XP 排序；
@@ -127,8 +131,9 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
 - **首页**：删除了小组排行榜和小组号展示；今日进度不再显示“第 N 档 X 分钟”。更新标记
   按 `status.last_activity_at` 计算，超过 1 小时不显示“刚刚更新”。顶部没有刷新按钮，
   页面容器支持 touch 下拉刷新（调用真实 refetch）。未选宿敌时显示内联候选；选好后首页
-  显示完整宿敌卡：双方本周/今日 XP、对撞条、差距、本周剩余/日注锁注两个时间，以及
-  周注/日注两个独立注面，两个下注按钮分别打开对应 dialog。
+  显示完整宿敌卡：双方本周/今日 XP、对撞条、差距、本周剩余/日注锁注两个时间。周注/日注
+  改在任务列表里作为两行：未下注是整行按钮，已下注是对撞条并可原地展开，点击仍打开
+  现有下注 dialog；下注成功后刷新 rival query，行从按钮变成 bar。
 - **任务拍照**：手动任务选图后先在浏览器里把可解码图片压到 ≤1MB（`lib/image.ts`），
   压缩期间按钮显示“处理中…”，随后上传并显示“上传中…”。HEIC 等浏览器解不了的文件
   原样上传，由服务端转换并兜底压到 ≤1MB。
@@ -168,7 +173,8 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
   从顶栏移到这里，音量在现有 `SettingsDialog` 内；页面支持下拉刷新。
 - **宿敌深链 `/rival`**：三态（选候选 / 已有宿敌 / 锁定空态）；完整卡显示今日 XP 比分和
   周注/日注两个注面，每个注面各自打开对应注种的 dialog（`onlyKind`），不再需要先切换 tab。
-  组注不出现在宿敌卡或宿敌 dialog，只在 `/league` 的小组 tab。
+  首页隐藏这两张注面后，`/rival` 的投注交互保持不变；组注不出现在宿敌卡或宿敌 dialog，
+  只在 `/league` 的小组 tab。
 
 ## PWA shell
 
@@ -204,7 +210,8 @@ PYTHONPATH=. pytest -q tests/test_api.py
 PYTHONPATH=. pytest -q tests/test_pwa.py tests/test_pwa_design.py tests/test_pwa_next.py
 ```
 
-前端单测覆盖：首页有/无宿敌、首页完整宿敌卡（今日 XP、周注/日注注面与两个 dialog）、
+前端单测覆盖：首页有/无宿敌、首页完整宿敌卡（今日 XP）、任务列表周注/日注两行
+（未下注按钮、已下注 bar、差值正/负/平、原地展开、锁定态、下注成功后变 bar）、
 宿敌页今日 XP 比分与周注/日注独立注面、真实更新时间、下拉刷新、周注/日注目标档位、
 自付 0/500 与总返、
 15 人小组前 4/后 4 晋升/下降标识、组注三盘口

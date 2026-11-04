@@ -41,6 +41,14 @@
   gap: 8px;
 }
 
+.entry {
+  min-width: 0;
+}
+
+.weeklyStart {
+  margin-top: 10px;
+}
+
 .empty {
   padding: 12px 13px;
   border: 1px dashed var(--border);
