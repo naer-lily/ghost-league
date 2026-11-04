@@ -143,6 +143,9 @@ def test_channel_seconds_between_aggregates_local_days(tmp_path) -> None:
         {"date": "2026-10-27", "seconds": 120},
     ]
     assert store.channel_seconds_between("ai-1", week, week) == []
+    assert store.channel_seconds_on_day("ai-1", "2026-10-26") == 150
+    assert store.channel_seconds_on_day("ai-1", "2026-10-27") == 120
+    assert store.channel_seconds_on_day("ai-1", "2026-10-28") == 0
 
 
 def test_source_upsert_is_unique_and_players_cannot_duplicate(tmp_path) -> None:

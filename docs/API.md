@@ -716,6 +716,9 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 ```
 
 - 该接口只读当前 token 的账号，不提供全员状态。
+- `today_xp` 优先取当天 `checkins.xp`（0 也以 check-in 为准）；没有 check-in 行时，
+  用当天 `activity_events` 与 `channel_events` 中较大的秒数按 `seconds // 6` 折算，
+  保证历史 Channel 数据在 `activity_events` 缺失时仍能显示。`week_xp` 不受影响。
 - `last_activity_at` 是本周最后一条 `activity_events.occurred_at`，没有活动时为 `null`。
   前端用它计算“刚刚更新/N 分钟前更新”，超过 1 小时不再显示“刚刚更新”；`updated_at`
   仍是响应生成时间，两者语义不同。
@@ -1294,6 +1297,9 @@ odds = clamp(1.2, 15.0, 1.2 + 0.8 * ratio ** 1.4)
 - `selection.open` 只在周一 `00:05–23:59:59` 且没有已锁定 assignment 时为 `true`。
 - `selection.mode` 为 `manual` / `auto` / `null`。
 - `me` / `rival` 只含公开字段；不返回 `kind`、`is_ai`、钱包或钻石余额。
+- `me` / `rival` 的 `today_xp` 优先取当天 `checkins.xp`（0 也以 check-in 为准）；
+  没有 check-in 行时回退到当天 `channel_events.seconds // 6`，两者都没有为 `0`。
+  `week_xp` 仍只来自 `weekly_scores`，不受该回退影响。
 - `result` 是最近一次已结算宿敌结果（`outcome`、`my_xp`、`rival_xp`、
   `reward_diamonds`、`settled_at`），没有则为 `null`。
 - `bet_options` 与 `bets` 并列，存放前端可直接渲染的下注参数。`weekly` / `daily`
@@ -1361,7 +1367,8 @@ odds = clamp(1.2, 15.0, 1.2 + 0.8 * ratio ** 1.4)
 
 候选必须 active、不是自己、与自己在不同小组、本周有 `weekly_scores` 行。默认按与
 自己的战力差从小到大排序；界面可再过滤“略高于我”。每个候选只出现一次，响应不含
-`kind`、`is_ai`、钱包或钻石。
+`kind`、`is_ai`、钱包或钻石。候选的 `today_xp` 与 `GET /v1/me/rival` 使用同一套
+check-in / Channel 事件回退规则。
 
 ### `POST /v1/me/rival/select`
 

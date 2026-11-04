@@ -6,11 +6,23 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Iterable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from .. import calendar as cal
 from .core import SOURCE_CHANNEL
+
+# Aggregate one local day of Channel seconds, keyed by player.  The two ``?``
+# parameters are the day's start and end timestamps; the outer player table
+# must be aliased ``p``.
+CHANNEL_DAY_SECONDS_JOIN_SQL = (
+    "LEFT JOIN ("
+    "SELECT player_id, COALESCE(SUM(seconds), 0) AS seconds "
+    "FROM channel_events "
+    "WHERE occurred_at >= ? AND occurred_at < ? "
+    "GROUP BY player_id"
+    ") day_channel ON day_channel.player_id = p.id"
+)
 
 
 def _channel_player_id(channel_id: str, player_ref: str) -> str:
@@ -297,6 +309,40 @@ class ChannelMixin:
                 ),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    @staticmethod
+    def _channel_day_bounds(day: date | datetime | str) -> tuple[str, str]:
+        day_date = cal.parse_date(day)
+        return (
+            cal.iso_ts(cal.day_start_at(day_date)),
+            cal.iso_ts(cal.day_end_at(day_date)),
+        )
+
+    def channel_seconds_on_day(
+        self, player_id: str, day: date | datetime | str
+    ) -> int:
+        """Aggregate one player's Channel seconds for one local day."""
+
+        day_date = cal.parse_date(day)
+        rows = self.channel_seconds_between(
+            player_id, day_date, day_date + timedelta(days=1)
+        )
+        return int(rows[0]["seconds"]) if rows else 0
+
+    @classmethod
+    def _channel_seconds_on_day_with(
+        cls,
+        conn: sqlite3.Connection,
+        player_id: str,
+        day: date | datetime | str,
+    ) -> int:
+        start, end = cls._channel_day_bounds(day)
+        row = conn.execute(
+            "SELECT COALESCE(SUM(seconds), 0) AS n FROM channel_events "
+            "WHERE player_id = ? AND occurred_at >= ? AND occurred_at < ?",
+            (player_id, start, end),
+        ).fetchone()
+        return int(row["n"]) if row is not None else 0
 
     def replace_channel_week_roster(
         self,

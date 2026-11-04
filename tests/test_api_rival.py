@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from ghost_league.accounts import AccountsStore
 from ghost_league.api import create_app
+from ghost_league.game import calendar as cal
 from ghost_league.game.rival import round_to_step
 from ghost_league.schedule import TZ
 
@@ -351,6 +353,92 @@ class RivalSelectionAPITests(RivalAPITestBase):
             json={"rival_id": "someone"},
         )
         self.assertEqual(invalid.status_code, 422, invalid.text)
+
+
+class RivalTodayXpAPITests(RivalAPITestBase):
+    def seed_channel_event(
+        self, player_id: str, seconds: int, event_id: str, *, day: str
+    ) -> None:
+        occurred_at = cal.iso_ts(
+            datetime.fromisoformat(f"{day}T12:00:00").replace(tzinfo=TZ)
+        )
+        with sqlite3.connect(self.game_db_path) as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO channel_events "
+                "(event_id, channel_id, player_ref, player_id, seconds, "
+                "occurred_at, week_start, created_at) "
+                "VALUES (?, 'test-channel', ?, ?, ?, ?, ?, ?)",
+                (
+                    event_id,
+                    player_id,
+                    player_id,
+                    seconds,
+                    occurred_at,
+                    cal.week_start(day).isoformat(),
+                    occurred_at,
+                ),
+            )
+
+    def seed_checkin(
+        self, player_id: str, xp: int, *, day: str, seconds: int = 600
+    ) -> None:
+        checked_at = datetime.fromisoformat(
+            f"{day}T09:00:00"
+        ).replace(tzinfo=TZ)
+        with sqlite3.connect(self.game_db_path) as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO checkins "
+                "(player_id, date, source, seconds, xp, checked_at, repaired_at, "
+                "repair_cost, status, created_at) "
+                "VALUES (?, ?, 'verified', ?, ?, ?, NULL, 0, 'verified', ?)",
+                (
+                    player_id,
+                    day,
+                    seconds,
+                    xp,
+                    checked_at.isoformat(timespec="seconds"),
+                    int(checked_at.timestamp()),
+                ),
+            )
+
+    def test_rival_and_me_today_xp_match_recent_xp_last_day(self) -> None:
+        client = self.client()
+        selected = self.select_first(client)
+        rival_id = selected["rival"]["user_id"]
+
+        # Channel-only day: no check-in rows yet.
+        self.seed_channel_event("owner", 288, "owner-today", day=WEEK_START)
+        self.seed_channel_event(rival_id, 600, "rival-today", day=WEEK_START)
+
+        state = client.get("/v1/me/rival", headers=auth()).json()
+        self.assertEqual(state["me"]["today_xp"], 48)
+        self.assertEqual(state["rival"]["today_xp"], 100)
+
+        recent = client.get(
+            f"/v1/users/{rival_id}", headers=auth()
+        ).json()["recent_xp"]
+        self.assertEqual(recent["target"][-1], state["rival"]["today_xp"])
+
+        status = client.get("/v1/me/status", headers=auth()).json()
+        self.assertEqual(status["today_seconds"], 288)
+        self.assertEqual(status["today_xp"], 48)
+
+        # A check-in wins even when its XP is zero.
+        self.seed_checkin("owner", 0, day=WEEK_START)
+        self.seed_checkin(rival_id, 7, day=WEEK_START)
+
+        state = client.get("/v1/me/rival", headers=auth()).json()
+        self.assertEqual(state["me"]["today_xp"], 0)
+        self.assertEqual(state["rival"]["today_xp"], 7)
+
+        recent = client.get(
+            f"/v1/users/{rival_id}", headers=auth()
+        ).json()["recent_xp"]
+        self.assertEqual(recent["target"][-1], state["rival"]["today_xp"])
+        self.assertEqual(
+            client.get("/v1/me/status", headers=auth()).json()["today_xp"],
+            0,
+        )
 
 
 class BetAPITests(RivalAPITestBase):

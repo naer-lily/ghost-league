@@ -19,6 +19,7 @@ from ghost_league.game.rival import (
     daily_target_options,
     round_to_step,
 )
+from ghost_league.game import calendar as cal
 from ghost_league.game.store import GameStore
 from ghost_league.schedule import TZ
 
@@ -102,6 +103,52 @@ def seed_assignment(
         )
 
 
+def seed_channel_seconds(
+    store: GameStore,
+    player_id: str,
+    seconds: int,
+    *,
+    day: str = WEEK,
+    event_id: str,
+) -> None:
+    occurred_at = f"{day}T12:00:00+08:00"
+    with store.transaction() as conn:
+        conn.execute(
+            "INSERT INTO channel_events "
+            "(event_id, channel_id, player_ref, player_id, seconds, "
+            "occurred_at, week_start, created_at) "
+            "VALUES (?, 'test-channel', ?, ?, ?, ?, ?, ?)",
+            (
+                event_id,
+                player_id,
+                player_id,
+                seconds,
+                occurred_at,
+                cal.week_start(day).isoformat(),
+                occurred_at,
+            ),
+        )
+
+
+def seed_checkin(
+    store: GameStore,
+    player_id: str,
+    xp: int,
+    *,
+    day: str = WEEK,
+    seconds: int = 600,
+) -> None:
+    checked_at = f"{day}T09:00:00+08:00"
+    with store.transaction() as conn:
+        conn.execute(
+            "INSERT INTO checkins "
+            "(player_id, date, source, seconds, xp, checked_at, repaired_at, "
+            "repair_cost, status, created_at) "
+            "VALUES (?, ?, 'verified', ?, ?, ?, NULL, 0, 'verified', ?)",
+            (player_id, day, seconds, xp, checked_at, 0),
+        )
+
+
 def test_monday_candidates_and_manual_change(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     add_player(store, "h1", power=500)
@@ -159,6 +206,56 @@ def test_monday_candidates_and_manual_change(tmp_path: Path) -> None:
     assert locked_state["selection"]["auto_select_at"] == (
         "2026-11-03T00:00:00+08:00"
     )
+
+
+def test_today_xp_falls_back_to_channel_events_for_me_and_rival(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path)
+    add_player(store, "h1", power=500)
+    add_player(store, "rival", power=600)
+    store.create_group(WEEK, tier="Bronze", player_ids=["h1"], now=MONDAY)
+    store.create_group(WEEK, tier="Bronze", player_ids=["rival"], now=MONDAY)
+    set_week_xp(store, "h1", 100)
+    set_week_xp(store, "rival", 100)
+    seed_channel_seconds(store, "h1", 288, event_id="h1-today")
+    seed_channel_seconds(store, "rival", 300, event_id="rival-today")
+
+    state = store.rival_state("h1", now=MONDAY)
+    assert state["me"]["today_xp"] == 48
+    assert store.rival_candidates("h1", now=MONDAY)[0]["today_xp"] == 50
+
+    store.select_rival("h1", "rival", now=MONDAY, request_id="channel-today")
+    state = store.rival_state("h1", now=MONDAY)
+    assert state["me"]["today_xp"] == 48
+    assert state["rival"]["today_xp"] == 50
+
+    # A check-in wins even when its XP is zero; it never falls through to
+    # Channel seconds.
+    seed_checkin(store, "h1", 0)
+    seed_checkin(store, "rival", 7)
+    state = store.rival_state("h1", now=MONDAY)
+    assert state["me"]["today_xp"] == 0
+    assert state["rival"]["today_xp"] == 7
+    assert store.rival_candidates("h1", now=MONDAY)[0]["today_xp"] == 7
+
+
+def test_today_xp_is_zero_without_checkin_or_channel_events(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path)
+    add_player(store, "h1", power=500)
+    add_player(store, "rival", power=600)
+    store.create_group(WEEK, tier="Bronze", player_ids=["h1"], now=MONDAY)
+    store.create_group(WEEK, tier="Bronze", player_ids=["rival"], now=MONDAY)
+    set_week_xp(store, "h1", 100)
+    set_week_xp(store, "rival", 100)
+
+    store.select_rival("h1", "rival", now=MONDAY, request_id="no-today")
+    state = store.rival_state("h1", now=MONDAY)
+    assert state["me"]["today_xp"] == 0
+    assert state["rival"]["today_xp"] == 0
+    assert store.rival_candidates("h1", now=MONDAY)[0]["today_xp"] == 0
 
 
 def test_selection_rejects_self_same_group_and_unknown(tmp_path: Path) -> None:

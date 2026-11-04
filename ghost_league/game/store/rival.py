@@ -40,6 +40,7 @@ from ..rival import (
     week_lock_display,
 )
 from ..rules import PlayerNotFound
+from .channel import CHANNEL_DAY_SECONDS_JOIN_SQL
 from .core import _row_to_dict
 
 _GROUP_VIEW_SQL = (
@@ -47,6 +48,14 @@ _GROUP_VIEW_SQL = (
     "g.group_no AS group_no, g.tier AS tier "
     "FROM group_members gm JOIN groups g ON g.id = gm.group_id "
     "WHERE g.week_start = ?"
+)
+
+# A check-in is authoritative even when its XP is zero; otherwise fall back to
+# the local day's Channel seconds.  ``day_channel`` comes from
+# :data:`CHANNEL_DAY_SECONDS_JOIN_SQL`.
+_TODAY_XP_SQL = (
+    "CASE WHEN ci.player_id IS NOT NULL THEN ci.xp "
+    "ELSE COALESCE(day_channel.seconds, 0) / 6 END AS today_xp"
 )
 
 
@@ -76,15 +85,16 @@ class RivalMixin:
             "COALESCE(ws.xp, 0) AS week_xp, "
             "COALESCE(ws.seconds, 0) AS week_seconds, "
             "grp.group_id AS group_id, grp.group_no AS group_no, "
-            "grp.tier AS tier, COALESCE(ci.xp, 0) AS today_xp "
+            f"grp.tier AS tier, {_TODAY_XP_SQL} "
             "FROM players p "
             "LEFT JOIN weekly_scores ws "
             "ON ws.week_start = ? AND ws.player_id = p.id "
             f"LEFT JOIN ({_GROUP_VIEW_SQL}) grp ON grp.player_id = p.id "
             "LEFT JOIN checkins ci "
             "ON ci.player_id = p.id AND ci.date = ? "
+            f"{CHANNEL_DAY_SECONDS_JOIN_SQL} "
             "WHERE p.id = ?",
-            (week_iso, week_iso, day_iso, player_id),
+            (week_iso, week_iso, day_iso, *self._channel_day_bounds(day_iso), player_id),
         ).fetchone()
         if row is None:
             raise PlayerNotFound(player_id)
@@ -121,16 +131,17 @@ class RivalMixin:
             "SELECT p.id AS user_id, p.display_name, p.power, p.kind, "
             "ws.xp AS week_xp, ws.seconds AS week_seconds, "
             "grp.group_id AS group_id, grp.group_no AS group_no, "
-            "grp.tier AS tier, COALESCE(ci.xp, 0) AS today_xp "
+            f"grp.tier AS tier, {_TODAY_XP_SQL} "
             "FROM players p "
             "JOIN weekly_scores ws "
             "ON ws.week_start = ? AND ws.player_id = p.id "
             f"LEFT JOIN ({_GROUP_VIEW_SQL}) grp ON grp.player_id = p.id "
             "LEFT JOIN checkins ci "
             "ON ci.player_id = p.id AND ci.date = ? "
+            f"{CHANNEL_DAY_SECONDS_JOIN_SQL} "
             "WHERE p.is_active = 1 AND p.id != ? "
             "ORDER BY p.id",
-            (week_iso, week_iso, day_iso, player_id),
+            (week_iso, week_iso, day_iso, *self._channel_day_bounds(day_iso), player_id),
         ).fetchall()
         candidates: list[dict[str, Any]] = []
         if my_group_id is None:

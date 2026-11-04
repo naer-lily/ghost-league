@@ -115,8 +115,14 @@ class SettlementMixin:
                 (week_iso, player_id),
             ).fetchone()
             today_seconds = self._day_seconds(conn, player_id, local_now.date())
+            today_seconds = max(
+                today_seconds,
+                self._channel_seconds_on_day_with(
+                    conn, player_id, local_now.date()
+                ),
+            )
             checkin = conn.execute(
-                "SELECT source FROM checkins WHERE player_id = ? AND date = ?",
+                "SELECT source, xp FROM checkins WHERE player_id = ? AND date = ?",
                 (player_id, local_now.date().isoformat()),
             ).fetchone()
             streak = conn.execute(
@@ -151,7 +157,11 @@ class SettlementMixin:
             "xp": int(score["xp"]) if score else 0,
             "lifetime_xp": int(lifetime["total"]) if lifetime else 0,
             "today_seconds": today_seconds,
-            "today_xp": xp_for_seconds(today_seconds),
+            "today_xp": (
+                int(checkin["xp"])
+                if checkin is not None
+                else xp_for_seconds(today_seconds)
+            ),
             "required_xp": CHECKIN_SECONDS // 6,
             "checkin": str(checkin["source"]) if checkin else None,
             "streak": dict(streak) if streak else {
