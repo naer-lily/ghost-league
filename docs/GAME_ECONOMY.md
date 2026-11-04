@@ -124,7 +124,32 @@ Current and intended sinks:
 - time-boxed boosts;
 - bets.
 
-A diamond payout should always be traceable to an XP or rank result. If a payout can be won without any drawing output, that is a settlement bug or an open rule, not a second economy.
+### Task chests
+
+The task system adds one bounded diamond source. A task chest only ever pays
+diamonds; it never pays XP, never applies a diamond boost multiplier, and never
+writes `weekly_scores`.
+
+| tier | name | diamonds (inclusive) | source |
+| --- | --- | --- | --- |
+| 1 | 木箱 | 3–6 | daily difficulty 1, repair |
+| 2 | 铜箱 | 6–10 | daily difficulty 2 |
+| 3 | 银箱 | 10–16 | daily difficulty 3 |
+| 4 | 金箱 | 18–28 | reserved |
+| 5 | 星箱 | 30–48 | weekend |
+
+- The server picks the amount uniformly inside the tier range; the client never
+  submits an amount.
+- Claims write `diamond_ledger` with `reason='task_chest'`, `ref_type='task'`,
+  `ref_id=<task_id>`, and the idempotency key `task-chest:<task_id>`.
+- A chest must be claimed before `ends_at`; an unclaimed chest is forfeited and
+  hidden with the task.
+- Manual task photo completion can pay a chest without adding XP. That diamond
+  is tied to a completed task, not to an XP conversion.
+
+A diamond payout should always be traceable to real activity, a rank result, or
+a completed task. If a payout can be won without any drawing output or task
+completion, that is a settlement bug or an open rule, not a second economy.
 
 ## Current shop tuning
 

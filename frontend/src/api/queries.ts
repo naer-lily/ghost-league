@@ -24,6 +24,11 @@ import type {
   Standings,
   StarPurchaseResult,
   Status,
+  TaskChestResult,
+  TaskCompleteResult,
+  TaskDefinition,
+  TaskDefinitionInput,
+  TaskListResponse,
   UserSummary,
 } from './types'
 import { useUiStore } from '../store/useUiStore'
@@ -34,6 +39,8 @@ export const collectionQueryKey: QueryKey = ['collection']
 export const friendsQueryKey: QueryKey = ['friends', 'standings']
 export const historyQueryKey: QueryKey = ['history', 'timeline']
 export const feedQueryKey: QueryKey = ['feed', 'league']
+export const tasksQueryKey: QueryKey = ['tasks', 'list']
+export const taskDefinitionsQueryKey: QueryKey = ['tasks', 'definitions']
 
 export function userProfileQueryKey(userId: string): QueryKey {
   return ['user', userId]
@@ -411,6 +418,131 @@ export function useSetFollow() {
         queryClient.invalidateQueries({
           queryKey: userProfileQueryKey(variables.userId),
         }),
+      ])
+    },
+  })
+}
+
+export function useTasks(enabled = true) {
+  return useQuery({
+    queryKey: tasksQueryKey,
+    queryFn: ({ signal }) =>
+      apiFetch<TaskListResponse>('/v1/me/tasks', signal ? { signal } : {}),
+    enabled,
+    staleTime: 15_000,
+    refetchInterval: enabled ? 30_000 : false,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
+    retry: (count, error) =>
+      !(error instanceof ApiError && error.status === 401) && count < 1,
+  })
+}
+
+export function useTaskDefinitions(enabled = true) {
+  return useQuery({
+    queryKey: taskDefinitionsQueryKey,
+    queryFn: ({ signal }) =>
+      apiFetch<TaskDefinition[]>(
+        '/v1/me/task-definitions',
+        signal ? { signal } : {},
+      ),
+    enabled,
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+    retry: (count, error) =>
+      !(error instanceof ApiError && error.status === 401) && count < 1,
+  })
+}
+
+export interface CompleteTaskVariables {
+  taskId: string
+  file: File
+}
+
+export function useCompleteTask() {
+  const queryClient = useQueryClient()
+  return useMutation<TaskCompleteResult, Error, CompleteTaskVariables>({
+    mutationFn: ({ taskId, file }) => {
+      const body = new FormData()
+      body.append('file', file)
+      return apiFetch<TaskCompleteResult>(
+        `/v1/me/tasks/${encodeURIComponent(taskId)}/complete`,
+        { method: 'POST', body },
+      )
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: tasksQueryKey })
+    },
+  })
+}
+
+export function useClaimTaskChest() {
+  const queryClient = useQueryClient()
+  return useMutation<TaskChestResult, Error, string>({
+    mutationFn: (taskId: string) =>
+      apiFetch<TaskChestResult>(
+        `/v1/me/tasks/${encodeURIComponent(taskId)}/chest`,
+        { method: 'POST' },
+      ),
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
+        queryClient.invalidateQueries({ queryKey: homeQueryKey }),
+      ])
+    },
+  })
+}
+
+export function useCreateTaskDefinition() {
+  const queryClient = useQueryClient()
+  return useMutation<TaskDefinition, Error, TaskDefinitionInput>({
+    mutationFn: (input: TaskDefinitionInput) =>
+      apiFetch<TaskDefinition>('/v1/me/task-definitions', {
+        method: 'POST',
+        body: input,
+      }),
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: taskDefinitionsQueryKey }),
+        queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
+      ])
+    },
+  })
+}
+
+export interface UpdateTaskDefinitionVariables extends TaskDefinitionInput {
+  id: string
+}
+
+export function useUpdateTaskDefinition() {
+  const queryClient = useQueryClient()
+  return useMutation<TaskDefinition, Error, UpdateTaskDefinitionVariables>({
+    mutationFn: ({ id, ...input }: UpdateTaskDefinitionVariables) =>
+      apiFetch<TaskDefinition>(
+        `/v1/me/task-definitions/${encodeURIComponent(id)}`,
+        { method: 'PATCH', body: input },
+      ),
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: taskDefinitionsQueryKey }),
+        queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
+      ])
+    },
+  })
+}
+
+export function useDeleteTaskDefinition() {
+  const queryClient = useQueryClient()
+  return useMutation<void, Error, string>({
+    mutationFn: (id: string) =>
+      apiFetch<void>(
+        `/v1/me/task-definitions/${encodeURIComponent(id)}`,
+        { method: 'DELETE' },
+      ),
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: taskDefinitionsQueryKey }),
+        queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
       ])
     },
   })

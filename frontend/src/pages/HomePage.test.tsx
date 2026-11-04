@@ -152,6 +152,7 @@ interface MockOptions {
   snapshot?: ReturnType<typeof makeSnapshot>
   rival?: RivalState
   candidates?: RivalPlayer[]
+  tasks?: unknown[]
   homeFails?: () => boolean
 }
 
@@ -161,6 +162,15 @@ function mockApi(options: MockOptions = {}) {
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
     if (options.homeFails?.()) return response({ detail: 'unauthorized' }, 401)
+    if (url.includes('/v1/me/tasks')) {
+      return response({
+        server_now: rival.server_now,
+        tasks: options.tasks ?? [],
+      })
+    }
+    if (url.includes('/v1/me/task-definitions')) {
+      return response([])
+    }
     if (url.includes('/v1/me/rival/candidates')) {
       return response({
         server_now: rival.server_now,
@@ -462,5 +472,41 @@ describe('HomePage rework', () => {
     await waitFor(() =>
       expect(screen.getByTestId('pull-to-refresh')).toBeInTheDocument(),
     )
+  })
+
+  it('shows the task section between today progress and the rival card', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockApi({
+        tasks: [
+          {
+            id: 'ti_1',
+            source: 'daily_manual',
+            title: '速写一张',
+            description: '',
+            difficulty: 2,
+            chest_tier: 2,
+            starts_at: '2026-11-04T00:00:00+08:00',
+            ends_at: '2026-11-05T00:00:00+08:00',
+            status: 'active',
+            completed_at: null,
+            chest_status: 'none',
+            chest_amount: null,
+            proof_url: null,
+            progress: null,
+          },
+        ],
+      }),
+    )
+
+    renderHome()
+
+    const list = await screen.findByTestId('task-list')
+    expect(list).toHaveTextContent('任务')
+    expect(await screen.findByText('速写一张')).toBeInTheDocument()
+    expect(list).toHaveTextContent('截止 11/05 00:00')
+    expect(within(list).getByRole('button', { name: /拍照完成/ })).toBeVisible()
+    expect(within(list).getByRole('button', { name: '任务设置' })).toBeVisible()
+    expect(screen.queryByText(/概率|机制|DSL/)).not.toBeInTheDocument()
   })
 })

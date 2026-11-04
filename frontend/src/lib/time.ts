@@ -51,6 +51,14 @@ export function formatAbsoluteTime(value: string): string {
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`
 }
 
+/** Task deadlines are stored on the hour and shown as ``MM/DD HH:00``. */
+export function formatTaskDeadline(value: string): string {
+  const parsed = parseDate(value)
+  if (!parsed) return '时间未知'
+  const parts = zonedParts(parsed)
+  return `${parts.month}/${parts.day} ${parts.hour}:00`
+}
+
 /**
  * Relative label for history and feed timestamps. Calendar-day differences are
  * evaluated in the game timezone so “昨天” matches the server's day, not the

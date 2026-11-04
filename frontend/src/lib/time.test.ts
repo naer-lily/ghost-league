@@ -3,6 +3,7 @@ import {
   formatAbsoluteTime,
   formatDateOnly,
   formatRelativeTime,
+  formatTaskDeadline,
 } from './time'
 
 const NOW = new Date('2026-11-02T22:30:00+08:00')
@@ -28,6 +29,7 @@ describe('time formatting', () => {
     expect(formatAbsoluteTime('2026-11-02T22:31:00+08:00')).toBe(
       '2026-11-02 22:31',
     )
+    expect(formatTaskDeadline('2026-11-05T00:00:00+08:00')).toBe('11/05 00:00')
   })
 
   it('does not crash on malformed input', () => {

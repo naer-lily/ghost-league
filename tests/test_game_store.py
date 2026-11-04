@@ -46,12 +46,14 @@ def test_schema_meta_and_epoch(tmp_path) -> None:
         "shop_cap_upgrades",
         "bets",
         "group_bets",
+        "task_definitions",
+        "task_instances",
         "job_runs",
         "game_config",
         "diamond_boosts",
     } <= tables
     meta = store.meta_snapshot()
-    assert meta["schema_version"] == "9"
+    assert meta["schema_version"] == "10"
     assert meta["algorithm_version"] == "phase1-v1"
     assert meta["epoch_id"]
     assert store.active_epoch()["status"] == "active"

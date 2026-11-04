@@ -523,3 +523,63 @@ export interface LeagueFeed {
   generated_at: string
   items: FeedItem[]
 }
+
+export type TaskSource = 'daily_manual' | 'repair' | 'weekend'
+
+export type TaskStatus = 'active' | 'completed' | 'expired'
+
+export type ChestStatus = 'none' | 'available' | 'claimed' | 'forfeited'
+
+export interface TaskProgress {
+  current: number
+  target: number
+}
+
+export interface TaskItem {
+  id: string
+  source: TaskSource
+  title: string
+  description: string
+  difficulty: number
+  chest_tier: number
+  starts_at: string
+  ends_at: string
+  status: TaskStatus
+  completed_at: string | null
+  chest_status: ChestStatus
+  chest_amount: number | null
+  proof_url: string | null
+  progress: TaskProgress | null
+}
+
+export interface TaskListResponse {
+  server_now: string
+  tasks: TaskItem[]
+}
+
+export interface TaskDefinition {
+  id: string
+  user_id: string
+  title: string
+  description: string
+  difficulty: number
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface TaskDefinitionInput {
+  title: string
+  description?: string
+  difficulty: number
+}
+
+export interface TaskChestResult {
+  amount: number
+  balance: number
+  duplicate: boolean
+}
+
+export interface TaskCompleteResult {
+  task: TaskItem
+}

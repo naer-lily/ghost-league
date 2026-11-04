@@ -104,7 +104,9 @@ async function request(
   if (options.token) headers.set('Authorization', `Bearer ${options.token}`)
 
   let body: BodyInit | null = null
-  if (options.body !== undefined) {
+  if (options.body instanceof FormData) {
+    body = options.body
+  } else if (options.body !== undefined) {
     headers.set('Content-Type', 'application/json')
     body = JSON.stringify(options.body)
   }

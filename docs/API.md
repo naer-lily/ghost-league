@@ -26,6 +26,12 @@ Channel token。`/badge/...`、`/embed/...`、`/health` 和 `/avatars/...` 公�
 | POST | `/v1/me/avatar` | 上传头像 |
 | GET | `/avatars/{user_id}` | 读取头像，无鉴权 |
 | GET | `/v1/me/status` | 助理轮询状态快照 |
+| GET | `/v1/me/tasks` | 当前可见任务 |
+| POST | `/v1/me/tasks/{task_id}/complete` | 上传照片完成手动任务 |
+| GET | `/v1/me/tasks/{task_id}/proof` | 本人读取任务照片 |
+| POST | `/v1/me/tasks/{task_id}/chest` | 领取任务宝箱 |
+| GET/POST | `/v1/me/task-definitions` | 列出/新增每日手动任务定义 |
+| PATCH/DELETE | `/v1/me/task-definitions/{id}` | 修改/停用每日手动任务定义 |
 | GET | `/v1/me/rival` | 本周宿敌、选择窗口、下注与上次结果 |
 | GET | `/v1/me/rival/candidates` | 可选择的宿敌候选（跨组） |
 | POST | `/v1/me/rival/select` | 手动选择/改选本周宿敌 |
@@ -423,6 +429,115 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
 不会报错或伪造内容。下注 `data` 保留 `period_key`；组注 `data` 另含 `market`、
 `market_label` 和该盘口的 `target_rank`，同一周三笔会显示为三条 `group_bet`；
 宿敌、星星和周结算的 `data` 只包含本人可读的展示字段。
+
+## 任务
+
+任务按当前登录用户归属。每日手动任务由用户配置；补断联和周末任务由 Ghost
+内部生成，不能通过 API 配置条件。读取列表时服务端会幂等生成当天任务，并刷新
+完成、过期和宝箱作废状态；前端不自行判断过期。
+
+### `GET /v1/me/tasks`
+
+```json
+{
+  "server_now": "2026-11-04T12:00:00+08:00",
+  "tasks": [
+    {
+      "id": "ti_...",
+      "source": "daily_manual",
+      "title": "速写一张",
+      "description": "",
+      "difficulty": 2,
+      "chest_tier": 2,
+      "starts_at": "2026-11-04T00:00:00+08:00",
+      "ends_at": "2026-11-05T00:00:00+08:00",
+      "status": "active",
+      "completed_at": null,
+      "chest_status": "none",
+      "chest_amount": null,
+      "proof_url": null,
+      "progress": null
+    }
+  ]
+}
+```
+
+- 只返回 `status IN ('active','completed')` 且 `starts_at <= now < ends_at` 的任务，
+  按 `ends_at` 升序。
+- `source`：`daily_manual` / `repair` / `weekend`。
+- `status`：`active` / `completed` / `expired`。
+- `chest_status`：`none` / `available` / `claimed` / `forfeited`。
+- `progress` 只对系统 DSL 任务返回 `{"current": int, "target": int}`；手动任务为
+  `null`。周六周日任务统计两天累计 XP，补断联任务为 `0/1` 或 `1/1`。
+- 截止后任务整条隐藏；已完成但未领取的宝箱在截止时作废。
+
+### `POST /v1/me/tasks/{task_id}/complete`
+
+`multipart/form-data`，字段 `file` 必填。只允许本人、`active` 的每日手动任务，
+且 `now < ends_at`。
+
+- 只接受 JPEG / PNG / WebP，单文件 ≤ 8 MB；其他类型 `415`，超限 `413`。
+- 文件存到 `data/api/task-proofs/<user_id>/<task_id>.<ext>`，目录 700、文件 600。
+- 成功后任务变为 `completed`、`chest_status='available'`，返回 `{"task": {...}}`。
+- 无文件为 `422`；非本人为 `404`；状态不允许或已截止为 `409`。
+
+### `GET /v1/me/tasks/{task_id}/proof`
+
+返回本人任务照片，`Cache-Control: private, no-store`。任务截止隐藏后仍可按 id
+读取，但 UI 不再显示入口；非本人或没有照片返回 `404`。
+
+### `POST /v1/me/tasks/{task_id}/chest`
+
+只允许 `completed`、`chest_status='available'`、`now < ends_at` 的本人任务。
+
+```json
+{"amount": 7, "balance": 1007, "duplicate": false}
+```
+
+- 金额由服务端在宝箱档位的闭区间内均匀抽取；客户端不能传金额。
+- 写 `diamond_ledger`：`reason='task_chest'`、`ref_type='task'`、
+  `ref_id=<task_id>`、幂等键 `task-chest:<task_id>`；不产生 XP，不写
+  `weekly_scores`。
+- 重复请求返回原金额，`duplicate=true`；未完成或宝箱不可用返回 `409`。
+
+### `GET /v1/me/task-definitions`
+
+列出本人 active 的每日手动任务定义：
+
+```json
+[
+  {
+    "id": "td_...",
+    "user_id": "owner",
+    "title": "速写一张",
+    "description": "",
+    "difficulty": 2,
+    "active": true,
+    "created_at": "2026-11-04T12:00:00+08:00",
+    "updated_at": "2026-11-04T12:00:00+08:00"
+  }
+]
+```
+
+### `POST /v1/me/task-definitions`
+
+Body：
+
+```json
+{"title": "速写一张", "description": "可选", "difficulty": 2}
+```
+
+- `title` 1–80 字，`description` ≤ 500 字，`difficulty` 1–3。
+- 同一用户最多 20 条 active 定义，超出返回 `422`。
+- 保存后读取任务列表会生成当天实例；宝箱档位由难度映射，不接受客户端指定。
+
+### `PATCH /v1/me/task-definitions/{id}`
+
+Body 与创建相同，只允许 owner。修改只影响之后生成的实例，已有实例不变。
+
+### `DELETE /v1/me/task-definitions/{id}`
+
+软停用（`active=0`），返回 `204`；已有实例不受影响。非 owner 返回 `404`。
 
 ## 组内动态
 

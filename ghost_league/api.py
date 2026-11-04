@@ -73,6 +73,7 @@ from .game.store import (
     SOURCE_HUMAN,
     GameStore,
 )
+from .game.tasks import TaskNotFound, TaskStateRejected
 from .runtime_jobs import build_scheduled_tasks
 from .schedule import TZ
 from .social import FollowStore
@@ -91,6 +92,12 @@ DEFAULT_WAKATIME_CACHE_PATH = PROJECT_ROOT / "data" / "cache" / "wakatime-profil
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 AVATAR_SIZE = 256
 ALLOWED_IMAGE_FORMATS = {"PNG", "JPEG", "WEBP"}
+TASK_PROOF_FORMATS = {
+    "JPEG": (".jpg", "image/jpeg"),
+    "PNG": (".png", "image/png"),
+    "WEBP": (".webp", "image/webp"),
+}
+MAX_TASK_PROOF_BYTES = 8 * 1024 * 1024
 SAFE_USER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
@@ -100,6 +107,10 @@ class FutureTimestampError(ValueError):
 
 class AvatarValidationError(ValueError):
     """Raised when an uploaded file is not a supported avatar image."""
+
+
+class TaskProofValidationError(ValueError):
+    """Raised when a manual task proof is not a supported image."""
 
 
 class DrawingIncrementRequest(BaseModel):
@@ -163,6 +174,14 @@ class LoadoutPatchRequest(BaseModel):
     frame_id: str | None = None
     backdrop_id: str | None = None
     badge_accent_id: str | None = None
+
+
+class TaskDefinitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=500)
+    difficulty: int = Field(strict=True, ge=1, le=3)
 
 
 class RivalSelectRequest(BaseModel):
@@ -269,6 +288,36 @@ def _local(value: datetime) -> datetime:
 
 def _iso(value: datetime) -> str:
     return _local(value).isoformat(timespec="seconds")
+
+
+def _task_proof_meta(data: bytes) -> tuple[str, str]:
+    """Validate a proof image and return its storage extension and MIME type."""
+
+    if not data:
+        raise TaskProofValidationError("empty image")
+    if len(data) > MAX_TASK_PROOF_BYTES:
+        raise TaskProofValidationError("image exceeds 8MB")
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            fmt = source.format
+            if fmt not in TASK_PROOF_FORMATS:
+                raise TaskProofValidationError(
+                    "only JPEG, PNG or WebP images are allowed"
+                )
+            if source.width * source.height > 40_000_000:
+                raise TaskProofValidationError("image dimensions are too large")
+            source.verify()
+    except TaskProofValidationError:
+        raise
+    except (
+        Image.DecompressionBombError,
+        UnidentifiedImageError,
+        OSError,
+        ValueError,
+    ) as exc:
+        raise TaskProofValidationError("invalid image file") from exc
+    extension, mime = TASK_PROOF_FORMATS[str(fmt)]
+    return extension, mime
 
 
 def _week_start(value: date | datetime | str) -> date:
@@ -423,6 +472,7 @@ class GameService:
             Path(social_db) if social_db is not None else self.api_dir / "social.db"
         )
         self.avatar_dir = self.api_dir / "avatars"
+        self.task_proofs_dir = self.api_dir / "task-proofs"
         self.accounts = AccountsStore(
             accounts_db or self.api_dir / "accounts.db",
             secret_path=secret_path,
@@ -453,8 +503,10 @@ class GameService:
             return
         self.api_dir.mkdir(parents=True, exist_ok=True)
         self.avatar_dir.mkdir(parents=True, exist_ok=True)
+        self.task_proofs_dir.mkdir(parents=True, exist_ok=True)
         try:
             self.avatar_dir.chmod(0o700)
+            self.task_proofs_dir.chmod(0o700)
         except OSError:
             pass
         self.accounts.initialize()
@@ -1276,6 +1328,159 @@ class GameService:
             now=self.now(),
         )
 
+    # -- tasks ---------------------------------------------------------
+    def tasks_for(self, account: dict[str, Any]) -> dict[str, Any]:
+        self.initialize()
+        assert self.store is not None
+        now = self.now()
+        user_id = str(account["user_id"])
+        self._ensure_human(account, _week_start(now), now)
+        self.store.ensure_user_tasks(user_id, now)
+        self.store.ensure_repair_tasks(user_id, now.date(), now=now)
+        self.store.ensure_weekend_tasks(user_id, now.date(), now=now)
+        return {
+            "server_now": _iso(now),
+            "tasks": self.store.list_visible_tasks(user_id, now),
+        }
+
+    def task_definitions_for(self, account: dict[str, Any]) -> list[dict[str, Any]]:
+        self._prepare_player(account)
+        assert self.store is not None
+        return self.store.list_task_definitions(str(account["user_id"]))
+
+    def create_task_definition_for(
+        self,
+        account: dict[str, Any],
+        *,
+        title: str,
+        description: str,
+        difficulty: int,
+    ) -> dict[str, Any]:
+        self._prepare_player(account)
+        assert self.store is not None
+        return self.store.create_task_definition(
+            str(account["user_id"]),
+            title=title,
+            description=description,
+            difficulty=difficulty,
+            now=self.now(),
+        )
+
+    def update_task_definition_for(
+        self,
+        account: dict[str, Any],
+        definition_id: str,
+        *,
+        title: str,
+        description: str,
+        difficulty: int,
+    ) -> dict[str, Any]:
+        self._prepare_player(account)
+        assert self.store is not None
+        return self.store.update_task_definition(
+            str(account["user_id"]),
+            definition_id,
+            title=title,
+            description=description,
+            difficulty=difficulty,
+            now=self.now(),
+        )
+
+    def delete_task_definition_for(
+        self, account: dict[str, Any], definition_id: str
+    ) -> None:
+        self._prepare_player(account)
+        assert self.store is not None
+        self.store.deactivate_task_definition(
+            str(account["user_id"]), definition_id, now=self.now()
+        )
+
+    def _task_proof_storage(
+        self, user_id: str, task_id: str, extension: str
+    ) -> tuple[Path, str]:
+        if not SAFE_USER_ID.fullmatch(user_id) or not re.fullmatch(
+            r"[A-Za-z0-9_-]{1,80}", task_id
+        ):
+            raise TaskNotFound("task not found")
+        user_dir = self.task_proofs_dir / user_id
+        user_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            user_dir.chmod(0o700)
+        except OSError:
+            pass
+        path = user_dir / f"{task_id}{extension}"
+        relative = path.relative_to(self.api_dir).as_posix()
+        return path, relative
+
+    def complete_task_for(
+        self,
+        account: dict[str, Any],
+        task_id: str,
+        data: bytes,
+    ) -> dict[str, Any]:
+        self._prepare_player(account)
+        assert self.store is not None
+        user_id = str(account["user_id"])
+        now = self.now()
+        task = self.store.get_task(user_id, task_id)
+        if task is None:
+            raise TaskNotFound("task not found")
+        if str(task["completion_mode"]) != "manual":
+            raise TaskStateRejected("this task completes automatically")
+        if str(task["status"]) != "active":
+            raise TaskStateRejected("task is not active")
+        if _iso(now) >= str(task["ends_at"]):
+            raise TaskStateRejected("task has ended")
+
+        extension, mime = _task_proof_meta(data)
+        path, relative = self._task_proof_storage(user_id, task_id, extension)
+        temporary = path.with_name(f"{path.name}.tmp")
+        try:
+            temporary.write_bytes(data)
+            try:
+                temporary.chmod(0o600)
+            except OSError:
+                pass
+            os.replace(temporary, path)
+        finally:
+            if temporary.exists():
+                temporary.unlink(missing_ok=True)
+        try:
+            payload = self.store.complete_manual_task(
+                user_id,
+                task_id,
+                proof_path=relative,
+                proof_mime=mime,
+                now=now,
+            )
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        return {"task": payload}
+
+    def task_proof_path(
+        self, account: dict[str, Any], task_id: str
+    ) -> tuple[Path, str]:
+        self._prepare_player(account)
+        assert self.store is not None
+        task = self.store.get_task(str(account["user_id"]), task_id)
+        if task is None or not task.get("proof_path"):
+            raise TaskNotFound("task proof not found")
+        root = self.task_proofs_dir.resolve()
+        path = (self.api_dir / str(task["proof_path"])).resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            raise TaskNotFound("task proof not found")
+        return path, str(task.get("proof_mime") or "application/octet-stream")
+
+    def claim_task_chest_for(
+        self, account: dict[str, Any], task_id: str
+    ) -> dict[str, Any]:
+        self._prepare_player(account)
+        assert self.store is not None
+        return self.store.claim_task_chest(
+            str(account["user_id"]), task_id, now=self.now()
+        )
+
     def embers_for(self, account: dict[str, Any]) -> dict[str, Any]:
         now, week = self._prepare_read(account)
         assert self.store is not None
@@ -1970,6 +2175,10 @@ def create_app(
         return response
 
     def game_error(exc: Exception) -> HTTPException:
+        if isinstance(exc, TaskNotFound):
+            return HTTPException(status_code=404, detail=str(exc))
+        if isinstance(exc, TaskStateRejected):
+            return HTTPException(status_code=409, detail=exc.detail)
         if isinstance(exc, ChannelRosterMissing):
             return HTTPException(status_code=404, detail=str(exc))
         if isinstance(exc, FutureTimestampError):
@@ -2183,6 +2392,102 @@ def create_app(
     @app.get("/v1/me/status")
     def status_snapshot(account: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         return service.status_for(account)
+
+    @app.get("/v1/me/tasks")
+    def my_tasks(account: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return service.tasks_for(account)
+
+    @app.get("/v1/me/task-definitions")
+    def my_task_definitions(
+        account: dict[str, Any] = Depends(auth),
+    ) -> list[dict[str, Any]]:
+        return service.task_definitions_for(account)
+
+    @app.post("/v1/me/task-definitions")
+    def create_task_definition(
+        request: TaskDefinitionRequest,
+        account: dict[str, Any] = Depends(auth),
+    ) -> dict[str, Any]:
+        try:
+            return service.create_task_definition_for(
+                account,
+                title=request.title,
+                description=request.description,
+                difficulty=request.difficulty,
+            )
+        except (GameError, ValueError) as exc:
+            raise game_error(exc) from exc
+
+    @app.patch("/v1/me/task-definitions/{definition_id}")
+    def update_task_definition(
+        definition_id: str,
+        request: TaskDefinitionRequest,
+        account: dict[str, Any] = Depends(auth),
+    ) -> dict[str, Any]:
+        try:
+            return service.update_task_definition_for(
+                account,
+                definition_id,
+                title=request.title,
+                description=request.description,
+                difficulty=request.difficulty,
+            )
+        except (GameError, ValueError) as exc:
+            raise game_error(exc) from exc
+
+    @app.delete("/v1/me/task-definitions/{definition_id}", status_code=204)
+    def delete_task_definition(
+        definition_id: str,
+        account: dict[str, Any] = Depends(auth),
+    ) -> None:
+        try:
+            service.delete_task_definition_for(account, definition_id)
+        except (GameError, ValueError) as exc:
+            raise game_error(exc) from exc
+
+    @app.post("/v1/me/tasks/{task_id}/complete")
+    async def complete_task(
+        task_id: str,
+        file: UploadFile = File(...),
+        account: dict[str, Any] = Depends(auth),
+    ) -> dict[str, Any]:
+        data = await file.read(MAX_TASK_PROOF_BYTES + 1)
+        await file.close()
+        if len(data) > MAX_TASK_PROOF_BYTES:
+            raise HTTPException(
+                status_code=413, detail="task proof must be at most 8MB"
+            )
+        try:
+            return service.complete_task_for(account, task_id, data)
+        except TaskProofValidationError as exc:
+            raise HTTPException(status_code=415, detail=str(exc)) from exc
+        except (GameError, ValueError) as exc:
+            raise game_error(exc) from exc
+
+    @app.get("/v1/me/tasks/{task_id}/proof")
+    def task_proof(
+        task_id: str,
+        account: dict[str, Any] = Depends(auth),
+    ) -> FileResponse:
+        try:
+            path, media_type = service.task_proof_path(account, task_id)
+        except (GameError, ValueError) as exc:
+            raise game_error(exc) from exc
+        return FileResponse(
+            path,
+            media_type=media_type,
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.post("/v1/me/tasks/{task_id}/chest")
+    def claim_task_chest(
+        task_id: str,
+        account: dict[str, Any] = Depends(auth),
+    ) -> dict[str, Any]:
+        try:
+            return service.claim_task_chest_for(account, task_id)
+        except (GameError, ValueError) as exc:
+            raise game_error(exc) from exc
 
     @app.get("/v1/me/rival")
     def me_rival(account: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

@@ -101,6 +101,7 @@ from ..stars import (
     validate_star_name,
 )
 from .settlement import ScoreRowLike, SettlementMixin
+from .tasks import TasksMixin
 from .shop import (
     CAP_ITEM_PREFIX,
     DIAMOND_CAP_MAX_LEVEL,
@@ -137,6 +138,7 @@ class GameStore(
     BetsMixin,
     JobRunMixin,
     HistoryMixin,
+    TasksMixin,
 ):
     """Transactional access to one ``league.db`` file."""
 

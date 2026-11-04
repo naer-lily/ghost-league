@@ -1,0 +1,236 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  background: rgba(4, 10, 13, 0.72);
+  backdrop-filter: blur(5px);
+  animation: overlayIn 0.16s ease-out;
+}
+
+.content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 250;
+  width: min(460px, calc(100vw - 28px));
+  max-height: min(86dvh, 720px);
+  overflow: auto;
+  padding: 20px;
+  border: 2px solid var(--border);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(206, 130, 255, 0.1), transparent 38%),
+    var(--surface);
+  box-shadow: var(--shadow-float);
+  transform: translate(-50%, -50%);
+  animation: contentIn 0.2s var(--ease-spring);
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  margin-top: 2px;
+  font-size: 1.35rem;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -6px -6px 0 0;
+  border-radius: 12px;
+  color: var(--muted);
+}
+
+.close:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.listHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid rgba(127, 255, 212, 0.34);
+  border-radius: var(--radius-pill);
+  background: rgba(127, 255, 212, 0.08);
+  color: #7fffd4;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.itemCopy {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.itemCopy strong {
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.iconButton {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: var(--muted);
+}
+
+.iconButton:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.iconButton:disabled {
+  opacity: 0.5;
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.field {
+  display: grid;
+  gap: 5px;
+}
+
+.field > span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.84rem;
+  resize: vertical;
+}
+
+.field input:focus,
+.field textarea:focus {
+  border-color: var(--green);
+  outline: none;
+}
+
+.difficulty {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.difficultyOption {
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.difficultyActive {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--text);
+}
+
+.formActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.muted {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.error {
+  margin-top: 12px;
+  color: #ff9d9d;
+  font-size: 0.74rem;
+}
+
+.content > :global(.button--full) {
+  margin-top: 16px;
+}
+
+@keyframes overlayIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes contentIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -46%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}

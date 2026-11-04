@@ -1,8 +1,10 @@
 import { ChevronDown, ChevronUp, RotateCcw, Swords } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import type { CSSProperties } from 'react'
 import { useState } from 'react'
 import {
   createRequestId,
+  tasksQueryKey,
   useHomeSnapshot,
   useRival,
   useRivalCandidates,
@@ -15,6 +17,8 @@ import { PullToRefresh } from '../components/PullToRefresh'
 import { RivalBetDialog } from '../components/RivalBetDialog'
 import { RivalCandidatePicker } from '../components/RivalCandidatePicker'
 import { RivalDuelCard } from '../components/RivalDuelCard'
+import { TaskList } from '../components/TaskList'
+import { TaskSettingsDialog } from '../components/TaskSettingsDialog'
 import { TodayProgress } from '../components/TodayProgress'
 import { UserProfileSheet } from '../components/UserProfileSheet'
 import {
@@ -31,10 +35,12 @@ export function HomePage() {
   const home = useHomeSnapshot()
   const rivalQuery = useRival()
   const selectMutation = useSelectRival()
+  const queryClient = useQueryClient()
   const notify = useUiStore((state) => state.notify)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [dialogKind, setDialogKind] = useState<RivalBetTab | null>(null)
   const [profileId, setProfileId] = useState<string | null>(null)
+  const [tasksSettingsOpen, setTasksSettingsOpen] = useState(false)
 
   const data = rivalQuery.data
   const now = useServerNow(data?.server_now, Boolean(data))
@@ -49,6 +55,7 @@ export function HomePage() {
     const [homeResult, rivalResult] = await Promise.all([
       home.refetch(),
       rivalQuery.refetch(),
+      queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
     ])
     const error = homeResult.error ?? rivalResult.error
     if (error) {
@@ -107,6 +114,8 @@ export function HomePage() {
             tier={view.tier}
           />
         </div>
+
+        <TaskList onOpenSettings={() => setTasksSettingsOpen(true)} />
 
         <section
           className={styles.rival}
@@ -265,6 +274,11 @@ export function HomePage() {
         onOpenChange={(open) => {
           if (!open) setProfileId(null)
         }}
+      />
+
+      <TaskSettingsDialog
+        open={tasksSettingsOpen}
+        onOpenChange={setTasksSettingsOpen}
       />
     </PullToRefresh>
   )

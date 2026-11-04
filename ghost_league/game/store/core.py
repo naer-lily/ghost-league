@@ -23,7 +23,7 @@ from ..stars import (
     is_valid_palette,
 )
 
-SCHEMA_VERSION = "9"
+SCHEMA_VERSION = "10"
 ALGORITHM_VERSION = "phase1-v1"
 SHOP_ECONOMY_UPDATE_KEY = "shop_economy_update_2026_11"
 DEFAULT_DB_PATH = Path("data/league/league.db")
@@ -535,6 +535,52 @@ CREATE INDEX IF NOT EXISTS idx_group_bets_week_group
     ON group_bets (week_start, group_id);
 CREATE INDEX IF NOT EXISTS idx_group_bets_week_status
     ON group_bets (week_start, status);
+
+CREATE TABLE IF NOT EXISTS task_definitions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    difficulty INTEGER NOT NULL CHECK(difficulty BETWEEN 1 AND 3),
+    active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_task_definitions_user_active
+    ON task_definitions (user_id, active);
+
+CREATE TABLE IF NOT EXISTS task_instances (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    definition_id TEXT,
+    source TEXT NOT NULL CHECK(source IN ('daily_manual', 'repair', 'weekend')),
+    system_key TEXT,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    difficulty INTEGER NOT NULL CHECK(difficulty BETWEEN 1 AND 5),
+    chest_tier INTEGER NOT NULL CHECK(chest_tier BETWEEN 1 AND 5),
+    starts_at TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    completion_mode TEXT NOT NULL CHECK(completion_mode IN ('manual', 'dsl')),
+    condition_json TEXT,
+    status TEXT NOT NULL CHECK(status IN ('active', 'completed', 'expired')),
+    completed_at TEXT,
+    proof_path TEXT,
+    proof_mime TEXT,
+    chest_status TEXT NOT NULL DEFAULT 'none'
+        CHECK(chest_status IN ('none', 'available', 'claimed', 'forfeited')),
+    claimed_at TEXT,
+    chest_amount INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_task_instances_user_status_ends
+    ON task_instances (user_id, status, ends_at);
+CREATE INDEX IF NOT EXISTS idx_task_instances_user_source_starts
+    ON task_instances (user_id, source, starts_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_task_instances_user_system
+    ON task_instances (user_id, system_key)
+    WHERE system_key IS NOT NULL;
 """
 
 _TABLE_NAMES = (
@@ -581,6 +627,8 @@ _TABLE_NAMES = (
     "rival_results",
     "bets",
     "group_bets",
+    "task_definitions",
+    "task_instances",
 )
 
 
@@ -629,6 +677,7 @@ class CoreMixin:
                 or self._table_count(conn, "weekly_results") > 0
             )
             conn.executescript(_SCHEMA)
+            self._migrate_tasks(conn)
             self._migrate_checkins(conn)
             self._migrate_sources(conn)
             self._migrate_players(conn)
@@ -1023,6 +1072,31 @@ class CoreMixin:
                 "500 钻石抽一颗当季随机星；每个自然月最多一颗，名字可省略。",
                 "当月限定星星；每个自然月最多购买一颗，必须命名。",
             ),
+        )
+
+    @staticmethod
+    def _migrate_tasks(conn: sqlite3.Connection) -> None:
+        """Ensure task tables have the indexes the lifecycle queries rely on.
+
+        New databases get these from ``_SCHEMA``; this pass makes the same
+        indexes idempotent for a database created by an older binary.
+        """
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_task_definitions_user_active "
+            "ON task_definitions (user_id, active)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_task_instances_user_status_ends "
+            "ON task_instances (user_id, status, ends_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_task_instances_user_source_starts "
+            "ON task_instances (user_id, source, starts_at)"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_task_instances_user_system "
+            "ON task_instances (user_id, system_key) WHERE system_key IS NOT NULL"
         )
 
     @staticmethod
