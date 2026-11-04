@@ -13,7 +13,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { useId } from 'react'
-import type { RecentXp, UserSummary } from '../api/types'
+import type { RecentXp } from '../api/types'
 import { useSetFollow, useUserProfile } from '../api/queries'
 import { Avatar } from './Avatar'
 import { TierIcon } from './TierIcon'
@@ -29,10 +29,6 @@ interface UserProfileSheetProps {
 function rankLabel(rank: number | null, groupSize: number): string {
   if (rank === null) return '—'
   return groupSize > 0 ? `第 ${rank} / ${groupSize} 名` : `第 ${rank} 名`
-}
-
-function handleLabel(data: UserSummary): string {
-  return data.handle ? `@${data.handle}` : 'AI 选手'
 }
 
 function seven(values: number[]): number[] {
@@ -279,7 +275,11 @@ export function UserProfileSheet({ userId, onOpenChange }: UserProfileSheetProps
                     />
                     {data.tier ? tierMeta(data.tier).label : '暂无段位'}
                   </span>
-                  <p className={styles.handle}>{handleLabel(data)}</p>
+                  {data.handle ? (
+                    <p className={styles.handle} data-testid="profile-handle">
+                      @{data.handle}
+                    </p>
+                  ) : null}
                 </section>
 
                 {follow.error ? (

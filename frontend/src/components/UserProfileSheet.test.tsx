@@ -65,7 +65,7 @@ function selfSummary(): UserSummary {
   })
 }
 
-function aiSummary(): UserSummary {
+function handlelessSummary(): UserSummary {
   return makeSummary({
     user_id: 'ch-kookouse',
     handle: null,
@@ -113,6 +113,9 @@ describe('UserProfileSheet', () => {
     expect(
       within(sheet).queryByRole('button', { name: '关闭选手资料' }),
     ).not.toBeInTheDocument()
+    expect(within(sheet).getByTestId('profile-handle')).toHaveTextContent(
+      '@friend-a',
+    )
     expect(within(sheet).getByText('@friend-a')).toBeVisible()
     expect(within(sheet).getByTestId('profile-xp')).toHaveTextContent('900')
     expect(within(sheet).getByTestId('profile-power')).toHaveTextContent('450')
@@ -194,8 +197,8 @@ describe('UserProfileSheet', () => {
     )
   })
 
-  it('does not expose an AI generated user id as a handle', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => response(aiSummary())))
+  it('omits the handle row without identity wording when handle is missing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response(handlelessSummary())))
 
     renderSheet('ch-kookouse')
 
@@ -203,8 +206,11 @@ describe('UserProfileSheet', () => {
     expect(
       await within(sheet).findByRole('heading', { name: 'Kookouse' }),
     ).toBeVisible()
+    expect(within(sheet).queryByTestId('profile-handle')).not.toBeInTheDocument()
     expect(within(sheet).queryByText('@ch-kookouse')).not.toBeInTheDocument()
-    expect(within(sheet).getByText('AI 选手')).toBeVisible()
+    for (const word of ['AI 选手', 'AI', '机器人', '人机', 'Channel', 'provider']) {
+      expect(within(sheet).queryByText(word, { exact: false })).toBeNull()
+    }
     expect(within(sheet).getByTestId('profile-follow')).toBeVisible()
   })
 
