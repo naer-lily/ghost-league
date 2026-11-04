@@ -40,7 +40,6 @@ from ..rival import (
     week_lock_display,
 )
 from ..rules import PlayerNotFound
-from .channel import CHANNEL_DAY_SECONDS_JOIN_SQL
 from .core import _row_to_dict
 
 _GROUP_VIEW_SQL = (
@@ -48,14 +47,6 @@ _GROUP_VIEW_SQL = (
     "g.group_no AS group_no, g.tier AS tier "
     "FROM group_members gm JOIN groups g ON g.id = gm.group_id "
     "WHERE g.week_start = ?"
-)
-
-# A check-in is authoritative even when its XP is zero; otherwise fall back to
-# the local day's Channel seconds.  ``day_channel`` comes from
-# :data:`CHANNEL_DAY_SECONDS_JOIN_SQL`.
-_TODAY_XP_SQL = (
-    "CASE WHEN ci.player_id IS NOT NULL THEN ci.xp "
-    "ELSE COALESCE(day_channel.seconds, 0) / 6 END AS today_xp"
 )
 
 
@@ -85,16 +76,13 @@ class RivalMixin:
             "COALESCE(ws.xp, 0) AS week_xp, "
             "COALESCE(ws.seconds, 0) AS week_seconds, "
             "grp.group_id AS group_id, grp.group_no AS group_no, "
-            f"grp.tier AS tier, {_TODAY_XP_SQL} "
+            "grp.tier AS tier "
             "FROM players p "
             "LEFT JOIN weekly_scores ws "
             "ON ws.week_start = ? AND ws.player_id = p.id "
             f"LEFT JOIN ({_GROUP_VIEW_SQL}) grp ON grp.player_id = p.id "
-            "LEFT JOIN checkins ci "
-            "ON ci.player_id = p.id AND ci.date = ? "
-            f"{CHANNEL_DAY_SECONDS_JOIN_SQL} "
             "WHERE p.id = ?",
-            (week_iso, week_iso, day_iso, *self._channel_day_bounds(day_iso), player_id),
+            (week_iso, week_iso, player_id),
         ).fetchone()
         if row is None:
             raise PlayerNotFound(player_id)
@@ -103,6 +91,9 @@ class RivalMixin:
             tier = self._tier_for_player_with(  # type: ignore[attr-defined]
                 conn, player_id, week_iso
             )
+        daily = self._daily_activity_on_day_with(  # type: ignore[attr-defined]
+            conn, player_id, day_iso
+        )
         return {
             "user_id": str(row["user_id"]),
             "display_name": str(row["display_name"]),
@@ -112,7 +103,7 @@ class RivalMixin:
             "tier": str(tier),
             "power": int(row["power"]) if row["power"] is not None else 0,
             "week_xp": int(row["week_xp"]),
-            "today_xp": int(row["today_xp"]),
+            "today_xp": int(daily["xp"]),
             "_group_id": (
                 int(row["group_id"]) if row["group_id"] is not None else None
             ),
@@ -131,17 +122,14 @@ class RivalMixin:
             "SELECT p.id AS user_id, p.display_name, p.power, p.kind, "
             "ws.xp AS week_xp, ws.seconds AS week_seconds, "
             "grp.group_id AS group_id, grp.group_no AS group_no, "
-            f"grp.tier AS tier, {_TODAY_XP_SQL} "
+            "grp.tier AS tier "
             "FROM players p "
             "JOIN weekly_scores ws "
             "ON ws.week_start = ? AND ws.player_id = p.id "
             f"LEFT JOIN ({_GROUP_VIEW_SQL}) grp ON grp.player_id = p.id "
-            "LEFT JOIN checkins ci "
-            "ON ci.player_id = p.id AND ci.date = ? "
-            f"{CHANNEL_DAY_SECONDS_JOIN_SQL} "
             "WHERE p.is_active = 1 AND p.id != ? "
             "ORDER BY p.id",
-            (week_iso, week_iso, day_iso, *self._channel_day_bounds(day_iso), player_id),
+            (week_iso, week_iso, player_id),
         ).fetchall()
         candidates: list[dict[str, Any]] = []
         if my_group_id is None:
@@ -162,6 +150,9 @@ class RivalMixin:
                 tier = self._tier_for_player_with(  # type: ignore[attr-defined]
                     conn, user_id, week_iso
                 )
+            daily = self._daily_activity_on_day_with(  # type: ignore[attr-defined]
+                conn, user_id, day_iso
+            )
             candidates.append(
                 {
                     "user_id": user_id,
@@ -176,7 +167,7 @@ class RivalMixin:
                         int(row["power"]) if row["power"] is not None else 0
                     ),
                     "week_xp": int(row["week_xp"]),
-                    "today_xp": int(row["today_xp"]),
+                    "today_xp": int(daily["xp"]),
                     "_group_id": group_id,
                     "_kind": str(row["kind"]),
                 }

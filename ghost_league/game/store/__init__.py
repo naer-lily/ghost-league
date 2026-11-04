@@ -35,6 +35,7 @@ from .boosts import (
 )
 from .channel import ChannelMixin
 from .checkins import CheckinsMixin
+from .daily import DailyActivityMixin
 from .core import (
     ALGORITHM_VERSION,
     DEFAULT_DB_PATH,
@@ -125,6 +126,7 @@ class GameStore(
     GroupsMixin,
     ActivityMixin,
     CheckinsMixin,
+    DailyActivityMixin,
     FeedMixin,
     ProgressionMixin,
     SettlementMixin,

@@ -64,7 +64,6 @@ from .game.rules import (
     earned_embers_for_week,
     group_movement,
     group_quota,
-    xp_for_seconds,
 )
 from .game.store import (
     DEFAULT_DB_PATH,
@@ -1354,28 +1353,17 @@ class GameService:
         assert self.store is not None
         week = _week_start(week_start or current_week)
         user_id = str(account["user_id"])
-        rows = {
-            str(row["date"]): row
-            for row in self.store.checkins_between(
-                user_id, week, week + timedelta(days=7)
-            )
-        }
         days: list[dict[str, Any]] = []
         for offset in range(7):
             day = week + timedelta(days=offset)
-            row = rows.get(day.isoformat())
-            seconds = self.store.day_seconds(user_id, day)
+            activity = self.store.daily_activity_on_day(user_id, day)
             days.append(
                 {
                     "date": day.isoformat(),
-                    "checked_in": row is not None,
-                    "source": str(row["source"]) if row is not None else None,
-                    "seconds": int(row["seconds"]) if row is not None else seconds,
-                    "xp": (
-                        int(row["xp"])
-                        if row is not None
-                        else xp_for_seconds(seconds)
-                    ),
+                    "checked_in": activity["checkin_source"] is not None,
+                    "source": activity["checkin_source"],
+                    "seconds": int(activity["seconds"]),
+                    "xp": int(activity["xp"]),
                 }
             )
         return {
@@ -1642,20 +1630,12 @@ class GameService:
         days = [start + timedelta(days=offset) for offset in range(7)]
         weekday_labels = ("一", "二", "三", "四", "五", "六", "日")
 
-        def xp_by_day(player_id: str) -> dict[str, int]:
-            xp = {
-                str(row["date"]): int(row.get("xp") or 0)
-                for row in self.store.checkins_between(player_id, start, end)
-            }
-            for row in self.store.channel_seconds_between(player_id, start, end):
-                day = str(row["date"])
-                if day in xp:
-                    continue
-                xp[day] = xp_for_seconds(int(row.get("seconds") or 0))
-            return xp
-
-        target_xp = xp_by_day(target_id)
-        viewer_xp = target_xp if viewer_id == target_id else xp_by_day(viewer_id)
+        target_xp = self.store.daily_xp_between(target_id, start, end)
+        viewer_xp = (
+            target_xp
+            if viewer_id == target_id
+            else self.store.daily_xp_between(viewer_id, start, end)
+        )
         target = [target_xp.get(day.isoformat(), 0) for day in days]
         viewer = [viewer_xp.get(day.isoformat(), 0) for day in days]
         return {

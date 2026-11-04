@@ -12,18 +12,6 @@ from typing import Any
 from .. import calendar as cal
 from .core import SOURCE_CHANNEL
 
-# Aggregate one local day of Channel seconds, keyed by player.  The two ``?``
-# parameters are the day's start and end timestamps; the outer player table
-# must be aliased ``p``.
-CHANNEL_DAY_SECONDS_JOIN_SQL = (
-    "LEFT JOIN ("
-    "SELECT player_id, COALESCE(SUM(seconds), 0) AS seconds "
-    "FROM channel_events "
-    "WHERE occurred_at >= ? AND occurred_at < ? "
-    "GROUP BY player_id"
-    ") day_channel ON day_channel.player_id = p.id"
-)
-
 
 def _channel_player_id(channel_id: str, player_ref: str) -> str:
     digest = hashlib.sha256(

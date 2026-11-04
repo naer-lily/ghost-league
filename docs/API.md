@@ -557,6 +557,22 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 100 XP。当前连胜、最长连胜和最近打卡日期在 `GET /v1/me/status` 中返回；没有独立的
 `/v1/me/streak` 路由。
 
+### 每日 XP 的唯一口径
+
+`activity_events`（本地活动）、`channel_events`（Channel 推送）和 `checkins`（日结
+缓存）只能由 store 的 resolver 组合：`daily_activity_on_day()` /
+`_daily_activity_on_day_with()` 返回单日结果，`daily_xp_between()` 返回
+`{date: xp}`。规则固定为：
+
+- `checkins` 行存在时，`seconds` / `xp` 直接取该行；`xp=0` 也以 check-in 为准；
+- 没有 check-in 时，`seconds = max(activity_events 当日秒数, channel_events 当日秒数)`，
+  `xp = seconds // 6`，两个来源不双计；
+- 两种原始事件都没有时为 `0`。
+
+`/v1/me/status`、`/v1/me/rival`、`/v1/users/{id}` 与 `/v1/me/checkins` 都调用该
+resolver；API/页面不得另写 check-in 或 Channel fallback。性能优化只能改 resolver
+内部，不能复制第二套日结 SQL。
+
 ### `GET /v1/me/embers`
 
 返回当前余烬余额、本周可获得上限和最近 20 条流水：
@@ -618,7 +634,9 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 
 按周返回 7 天打卡状态。`week_start` 缺省为当前周；可选 `week_start` 查询过去周。
 每天包含 `date`、`checked_in`、`source`（`verified` / `repaired` / `null`）、`seconds`
-与 `xp`。该接口用于 PWA 列出最近七天可补日期，不会自动补签。
+与 `xp`。`seconds` / `xp` 与其他读取点一样走 store 的 `daily_activity_on_day()`
+resolver，`source` 即其 `checkin_source`；该接口用于 PWA 列出最近七天可补日期，
+不会自动补签。
 
 ```json
 {
@@ -716,9 +734,10 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 ```
 
 - 该接口只读当前 token 的账号，不提供全员状态。
-- `today_xp` 优先取当天 `checkins.xp`（0 也以 check-in 为准）；没有 check-in 行时，
-  用当天 `activity_events` 与 `channel_events` 中较大的秒数按 `seconds // 6` 折算，
-  保证历史 Channel 数据在 `activity_events` 缺失时仍能显示。`week_xp` 不受影响。
+- `today_seconds` / `today_xp` 由唯一的 daily resolver 解析：当天有 `checkins` 行时
+  无条件取该行 `seconds` / `xp`（`xp=0` 也以 check-in 为准）；没有 check-in 时取当天
+  `activity_events` 与 `channel_events` 中较大的秒数，并按 `seconds // 6` 折算 XP。
+  `week_xp` 不受影响。
 - `last_activity_at` 是本周最后一条 `activity_events.occurred_at`，没有活动时为 `null`。
   前端用它计算“刚刚更新/N 分钟前更新”，超过 1 小时不再显示“刚刚更新”；`updated_at`
   仍是响应生成时间，两者语义不同。
@@ -1297,9 +1316,10 @@ odds = clamp(1.2, 15.0, 1.2 + 0.8 * ratio ** 1.4)
 - `selection.open` 只在周一 `00:05–23:59:59` 且没有已锁定 assignment 时为 `true`。
 - `selection.mode` 为 `manual` / `auto` / `null`。
 - `me` / `rival` 只含公开字段；不返回 `kind`、`is_ai`、钱包或钻石余额。
-- `me` / `rival` 的 `today_xp` 优先取当天 `checkins.xp`（0 也以 check-in 为准）；
-  没有 check-in 行时回退到当天 `channel_events.seconds // 6`，两者都没有为 `0`。
-  `week_xp` 仍只来自 `weekly_scores`，不受该回退影响。
+- `me` / `rival` 的 `today_xp` 由 store 的 `_daily_activity_on_day_with()` resolver
+  填充，候选/宿敌 SQL 不再拼接 `checkins` 或 `channel_events`。当天有 check-in 时取
+  `checkins.xp`（0 也权威）；没有时取 `max(activity_events, channel_events)` 当日秒数
+  并按 `seconds // 6` 折算，两者都没有为 `0`。`week_xp` 仍只来自 `weekly_scores`。
 - `result` 是最近一次已结算宿敌结果（`outcome`、`my_xp`、`rival_xp`、
   `reward_diamonds`、`settled_at`），没有则为 `null`。
 - `bet_options` 与 `bets` 并列，存放前端可直接渲染的下注参数。`weekly` / `daily`
@@ -1583,11 +1603,13 @@ paid_stake`，`free_stake = 20`，`paid_stake` 原样保存；下注只扣 `paid
 
 `recent_xp` 固定返回含今天在内的最近 7 个自然日，按日期升序；`days` 是
 `YYYY-MM-DD`，`labels` 是由服务端算好的中文单字星期（日/一/二/三/四/五/六）。
-`target` 是被查看用户的每日 XP，`viewer` 是登录用户自己的每日 XP。每日 XP
-**优先取该日的 `checkins.xp`**；没有 check-in 行时，回退到该日 `channel_events.seconds`
-总和并按 `seconds // 6` 折算，已有 check-in 的日期不会被 Channel 事件覆盖。只查询
-最近 7 天窗口，仍没有数据的日期补 `0`；两个 `*_total` 是各自 7 天总和。查看自己时
-`target` 与 `viewer` 相同。该字段只出现在单个用户详情，不改变好友榜或榜单结构：
+`target` 是被查看用户的每日 XP，`viewer` 是登录用户自己的每日 XP。每日 XP 统一由
+store 的 `daily_xp_between()` resolver 返回：该日有 `checkins` 行时取 `checkins.xp`
+（0 也以 check-in 为准）；没有时取 `max(activity_events, channel_events)` 当日秒数
+并按 `seconds // 6` 折算，已有 check-in 的日期不会被原始事件覆盖。只查询最近 7 天
+窗口，resolver 为窗口内每一天都返回一个点（没有数据为 `0`）；两个 `*_total` 是各自
+7 天总和。查看自己时 `target` 与 `viewer` 相同。该字段只出现在单个用户详情，不改变
+好友榜或榜单结构：
 
 ```json
 {

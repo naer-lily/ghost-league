@@ -440,6 +440,36 @@ class RivalTodayXpAPITests(RivalAPITestBase):
             0,
         )
 
+    def test_same_player_today_xp_is_identical_across_endpoints(self) -> None:
+        client = self.client()
+        # Ensure the owner player exists before writing a raw Channel event.
+        client.get("/v1/me/status", headers=auth())
+        self.seed_channel_event(
+            "owner", 288, "owner-consistency", day=WEEK_START
+        )
+
+        status = client.get("/v1/me/status", headers=auth()).json()
+        state = client.get("/v1/me/rival", headers=auth()).json()
+        recent = client.get(
+            "/v1/users/owner", headers=auth()
+        ).json()["recent_xp"]
+        self.assertEqual(status["today_xp"], 48)
+        self.assertEqual(state["me"]["today_xp"], 48)
+        self.assertEqual(recent["target"][-1], 48)
+        self.assertEqual(recent["viewer"][-1], 48)
+
+        # A zero-XP check-in is still authoritative on all three reads.
+        self.seed_checkin("owner", 0, day=WEEK_START)
+        status = client.get("/v1/me/status", headers=auth()).json()
+        state = client.get("/v1/me/rival", headers=auth()).json()
+        recent = client.get(
+            "/v1/users/owner", headers=auth()
+        ).json()["recent_xp"]
+        self.assertEqual(status["today_xp"], 0)
+        self.assertEqual(state["me"]["today_xp"], 0)
+        self.assertEqual(recent["target"][-1], 0)
+        self.assertEqual(recent["viewer"][-1], 0)
+
 
 class BetAPITests(RivalAPITestBase):
     def test_weekly_and_daily_bets_are_idempotent_and_do_not_leak(self) -> None:
