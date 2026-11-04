@@ -770,7 +770,9 @@ class ShopMixin:
                             "available": True,
                         }
                     )
-            catalog.extend(self._boost_catalog_with(conn))
+            catalog.extend(
+                self._boost_catalog_with(conn, player_id, local_now)
+            )
             return catalog
 
     @staticmethod

@@ -50,7 +50,7 @@ describe('AppShell navigation', () => {
     vi.unstubAllGlobals()
   })
 
-  it('shows five icon-only nav entries with the inventory label', () => {
+  it('shows four icon-only nav entries without a history tab', () => {
     renderShell()
 
     const navs = Array.from(
@@ -60,7 +60,7 @@ describe('AppShell navigation', () => {
 
     const bottom = navs[1]!
     const bottomLinks = within(bottom).getAllByRole('link')
-    expect(bottomLinks).toHaveLength(5)
+    expect(bottomLinks).toHaveLength(4)
     for (const link of bottomLinks) {
       expect(link.textContent).toBe('')
       expect(link.getAttribute('aria-label')).toBeTruthy()
@@ -71,16 +71,17 @@ describe('AppShell navigation', () => {
       '首页',
       '小组',
       '物品栏',
-      '历史',
       '我的',
     ])
     expect(bottomLinks.map((link) => link.getAttribute('href'))).toEqual([
       '/',
       '/league',
       '/inventory',
-      '/history',
       '/me',
     ])
+    expect(
+      within(bottom).queryByRole('link', { name: '历史' }),
+    ).not.toBeInTheDocument()
     expect(
       within(bottom).queryByRole('link', { name: '宿敌' }),
     ).not.toBeInTheDocument()

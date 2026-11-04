@@ -89,6 +89,29 @@ Current and intended sinks:
 
 A diamond payout should always be traceable to an XP or rank result. If a payout can be won without any drawing output, that is a settlement bug or an open rule, not a second economy.
 
+## Current shop tuning
+
+The first tuning pass lowers the boost entry price and caps repeat buying so a
+boost supports a planned drawing session instead of becoming a standing
+multiplier:
+
+| item | price | duration | purchase limit |
+| --- | --- | --- | --- |
+| `diamond_boost_25` | 20 diamonds | 25 minutes | 2 per Asia/Shanghai calendar day |
+| `diamond_boost_60` | 40 diamonds | 60 minutes | 2 per Asia/Shanghai calendar day |
+| `ember` | 800 diamonds | immediate | 1 purchase per 7 days |
+
+Daily boost limits are per SKU, configurable through
+`diamond_boost_25_daily_limit` and `diamond_boost_60_daily_limit`, and checked
+inside the purchase transaction. A limit is a guardrail, not a replacement for
+player choice: the shop shows `bought_today` and `remaining_today`, but the
+server still rejects the next purchase with `daily_limit_reached`.
+
+The ember cooldown is 7 days (`shop_items.ember.cooldown_seconds = 604800`).
+Seeds, startup migration, and the idempotent
+`scripts/apply_shop_economy_update.py` keep new and existing databases aligned
+without overwriting later operator edits.
+
 ## Balance tuning
 
 Parameters that affect the economy should be configurable, including prices, durations, multipliers, reward tiers, and availability. Balance changes should be data changes where possible, not code changes.

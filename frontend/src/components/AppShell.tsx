@@ -4,7 +4,6 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   Diamond,
   Flame,
-  History,
   Home,
   Package,
   Trophy,
@@ -47,14 +46,6 @@ const NAV_ITEMS = [
     end: false,
     color: '#ce82ff',
     soft: 'rgba(206, 130, 255, 0.16)',
-  },
-  {
-    to: '/history',
-    label: '历史',
-    icon: History,
-    end: false,
-    color: '#1cb0f6',
-    soft: 'rgba(28, 176, 246, 0.16)',
   },
   {
     to: '/me',

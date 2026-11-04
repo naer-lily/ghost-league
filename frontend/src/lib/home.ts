@@ -338,10 +338,25 @@ export function formatPower(power: number | null): string {
   return power === null ? '—' : formatNumber(power)
 }
 
+function apiDetailCode(error: ApiError): string | null {
+  const payload = error.detail
+  if (!payload || typeof payload !== 'object') return null
+  const detail = (payload as { detail?: unknown }).detail
+  const source =
+    detail && typeof detail === 'object'
+      ? (detail as Record<string, unknown>)
+      : (payload as Record<string, unknown>)
+  const code = source.code
+  return typeof code === 'string' ? code : null
+}
+
 export function describeApiError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 0) return error.message
     if (error.status === 401) return '登录已失效，请重新输入令牌。'
+    if (apiDetailCode(error) === 'daily_limit_reached') {
+      return '今日购买次数已达上限。'
+    }
     if (error.status === 403) return '当前账号没有查看这些数据的权限。'
     if (error.status === 404) return '没有找到本周的联赛数据。'
     if (error.status >= 500) return '服务暂时不可用，请稍后重试。'

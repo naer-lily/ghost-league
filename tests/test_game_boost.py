@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from ghost_league.game import calendar as cal
-from ghost_league.game.rules import ShopNotAvailable, xp_for_seconds
+from ghost_league.game.rules import (
+    ShopCooldown,
+    ShopNotAvailable,
+    xp_for_seconds,
+)
 from ghost_league.game.store import GameStore
 from ghost_league.schedule import TZ
 
@@ -61,11 +65,13 @@ def test_game_config_and_boost_tables_are_seeded_once(tmp_path) -> None:
     store = make_store(tmp_path)
     assert store.list_game_config() == {
         "diamond_boost_25_active": "1",
+        "diamond_boost_25_daily_limit": "2",
         "diamond_boost_25_minutes": "25",
-        "diamond_boost_25_price": "25",
+        "diamond_boost_25_price": "20",
         "diamond_boost_60_active": "1",
+        "diamond_boost_60_daily_limit": "2",
         "diamond_boost_60_minutes": "60",
-        "diamond_boost_60_price": "60",
+        "diamond_boost_60_price": "40",
         "diamond_boost_multiplier": "2",
     }
     with sqlite3.connect(tmp_path / "league.db") as connection:
@@ -96,8 +102,8 @@ def test_shop_skus_come_from_config(tmp_path) -> None:
     items = catalog(store, human)
     assert {BOOST_25, BOOST_60} <= set(items)
     for item_id, price, minutes in (
-        (BOOST_25, 25, 25),
-        (BOOST_60, 60, 60),
+        (BOOST_25, 20, 25),
+        (BOOST_60, 40, 60),
     ):
         item = items[item_id]
         assert item["kind"] == "boost"
@@ -105,6 +111,9 @@ def test_shop_skus_come_from_config(tmp_path) -> None:
         assert item["price_diamonds"] == price
         assert item["minutes"] == minutes
         assert item["multiplier"] == 2
+        assert item["daily_limit"] == 2
+        assert item["bought_today"] == 0
+        assert item["remaining_today"] == 2
         assert item["active"] is True
         assert item["available"] is True
 
@@ -160,7 +169,7 @@ def test_active_boost_extends_from_stored_expiry(tmp_path) -> None:
     second = store.purchase_shop_item(human, BOOST_60, 1, "second", now=later)
     assert second["diamond_boost"]["expires_at"] == "2026-11-02T13:25:00+08:00"
     assert second["diamond_boost"]["remaining_seconds"] == 75 * 60
-    assert store.get_diamond_balance(human, now=later) == 1000 - 25 - 60
+    assert store.get_diamond_balance(human, now=later) == 1000 - 20 - 40
 
 
 def test_expired_boost_does_not_apply_or_extend_old_expiry(tmp_path) -> None:
@@ -197,15 +206,15 @@ def test_duplicate_requests_do_not_double_charge_or_double_credit(tmp_path) -> N
     replay = store.purchase_shop_item(human, BOOST_25, 1, "same", now=NOW)
     assert replay["replayed"] is True
     assert replay["diamond_boost"] == first["diamond_boost"]
-    assert store.get_diamond_balance(human, now=NOW) == 975
-    assert [row["delta"] for row in store.diamond_ledger(human)] == [-25]
+    assert store.get_diamond_balance(human, now=NOW) == 980
+    assert [row["delta"] for row in store.diamond_ledger(human)] == [-20]
 
     boosted = normal_credit(store, human, 10, key="same-credit")
     duplicate = normal_credit(store, human, 10, key="same-credit")
     assert boosted["delta"] == 20
     assert duplicate["duplicate"] is True
     assert duplicate["balance"] == boosted["balance"]
-    assert store.get_diamond_balance(human, now=NOW) == 995
+    assert store.get_diamond_balance(human, now=NOW) == 1000 - 20 + 20
 
 
 def test_boost_quantity_and_inactive_or_invalid_config_fail_closed(tmp_path) -> None:
@@ -240,6 +249,129 @@ def test_boost_quantity_and_inactive_or_invalid_config_fail_closed(tmp_path) -> 
     assert BOOST_60 not in catalog(store, human)
     with pytest.raises(ShopNotAvailable):
         store.purchase_shop_item(human, BOOST_60, 1, "missing", now=NOW)
+
+
+
+def test_daily_limit_rejects_third_purchase_and_does_not_count_replays(
+    tmp_path,
+) -> None:
+    store = make_store(tmp_path)
+    human = make_human(store)
+
+    first = store.purchase_shop_item(human, BOOST_25, 1, "day-1", now=NOW)
+    store.purchase_shop_item(human, BOOST_25, 1, "day-2", now=NOW)
+    assert first["diamonds"] == 980
+    assert store.get_diamond_balance(human, now=NOW) == 960
+
+    items = catalog(store, human, now=NOW)
+    assert items[BOOST_25]["daily_limit"] == 2
+    assert items[BOOST_25]["bought_today"] == 2
+    assert items[BOOST_25]["remaining_today"] == 0
+    assert items[BOOST_25]["available"] is False
+
+    with pytest.raises(ShopNotAvailable) as blocked:
+        store.purchase_shop_item(human, BOOST_25, 1, "day-3", now=NOW)
+    assert blocked.value.code == "daily_limit_reached"
+    assert blocked.value.extra == {
+        "daily_limit": 2,
+        "bought_today": 2,
+        "remaining_today": 0,
+    }
+    assert store.get_diamond_balance(human, now=NOW) == 960
+
+    replay = store.purchase_shop_item(human, BOOST_25, 1, "day-1", now=NOW)
+    assert replay["replayed"] is True
+    assert replay["diamonds"] == 980
+    assert catalog(store, human, now=NOW)[BOOST_25]["bought_today"] == 2
+
+    other = catalog(store, human, now=NOW)[BOOST_60]
+    assert other["bought_today"] == 0
+    assert other["remaining_today"] == 2
+
+
+def test_daily_limit_resets_on_next_asia_shanghai_day(tmp_path) -> None:
+    store = make_store(tmp_path)
+    human = make_human(store)
+    late = datetime(2026, 11, 2, 23, 59, tzinfo=TZ)
+
+    store.purchase_shop_item(human, BOOST_25, 1, "late-1", now=late)
+    store.purchase_shop_item(human, BOOST_25, 1, "late-2", now=late)
+    with pytest.raises(ShopNotAvailable):
+        store.purchase_shop_item(human, BOOST_25, 1, "late-3", now=late)
+
+    next_day = datetime(2026, 11, 3, 0, 0, tzinfo=TZ)
+    items = catalog(store, human, now=next_day)
+    assert items[BOOST_25]["bought_today"] == 0
+    assert items[BOOST_25]["remaining_today"] == 2
+    assert items[BOOST_25]["available"] is True
+    bought = store.purchase_shop_item(
+        human, BOOST_25, 1, "next-day", now=next_day
+    )
+    assert bought["diamonds"] == 940
+    assert catalog(store, human, now=next_day)[BOOST_25]["bought_today"] == 1
+
+
+def test_ember_catalog_and_purchase_use_seven_day_cooldown(tmp_path) -> None:
+    store = make_store(tmp_path)
+    human = make_human(store)
+
+    ember = catalog(store, human, now=NOW)["ember"]
+    assert ember["cooldown_seconds"] == 604800
+    assert ember["description"] == "立即获得 1 枚余烬；每 7 天最多购买一次。"
+
+    bought = store.purchase_shop_item(human, "ember", 1, "ember-1", now=NOW)
+    assert bought["cooldown_until"] == "2026-11-09T12:00:00+08:00"
+
+    later = NOW + timedelta(days=7)
+    after = catalog(store, human, now=later)["ember"]
+    assert after["cooldown_until"] is None
+    assert after["available"] is True
+    with pytest.raises(ShopCooldown):
+        store.purchase_shop_item(
+            human, "ember", 1, "ember-too-soon", now=later - timedelta(seconds=1)
+        )
+
+
+def test_shop_economy_update_is_one_time_and_keeps_later_edits(tmp_path) -> None:
+    store = make_store(tmp_path)
+    store.set_game_config("diamond_boost_25_price", "21")
+    store.set_game_config("diamond_boost_60_price", "41")
+    store.set_game_config("diamond_boost_multiplier", "3")
+    store.initialize()
+    assert store.get_game_config("diamond_boost_25_price") == "21"
+    assert store.get_game_config("diamond_boost_60_price") == "41"
+    assert store.get_game_config("diamond_boost_multiplier") == "3"
+
+    with sqlite3.connect(tmp_path / "league.db") as connection:
+        connection.execute(
+            "DELETE FROM meta WHERE key = 'shop_economy_update_2026_11'"
+        )
+        connection.execute(
+            "UPDATE game_config SET value = '25' "
+            "WHERE key = 'diamond_boost_25_price'"
+        )
+        connection.execute(
+            "UPDATE game_config SET value = '60' "
+            "WHERE key = 'diamond_boost_60_price'"
+        )
+        connection.execute(
+            "UPDATE shop_items SET cooldown_seconds = 259200, "
+            "description = '立即获得 1 枚余烬；每 72 小时最多购买一次。' "
+            "WHERE id = 'ember'"
+        )
+        connection.commit()
+
+    store.initialize()
+    assert store.get_game_config("diamond_boost_25_price") == "20"
+    assert store.get_game_config("diamond_boost_60_price") == "40"
+    assert store.get_game_config("diamond_boost_multiplier") == "3"
+    ember = catalog(store, make_human(store), now=NOW)["ember"]
+    assert ember["cooldown_seconds"] == 604800
+    assert ember["description"] == "立即获得 1 枚余烬；每 7 天最多购买一次。"
+
+    store.set_game_config("diamond_boost_25_price", "22")
+    store.initialize()
+    assert store.get_game_config("diamond_boost_25_price") == "22"
 
 
 def test_boost_does_not_change_xp(tmp_path) -> None:

@@ -41,10 +41,12 @@ class BoostMixin:
 
         seeds = (
             (DIAMOND_BOOST_MULTIPLIER_KEY, "2"),
-            ("diamond_boost_25_price", "25"),
+            ("diamond_boost_25_price", "20"),
             ("diamond_boost_25_minutes", "25"),
-            ("diamond_boost_60_price", "60"),
+            ("diamond_boost_25_daily_limit", "2"),
+            ("diamond_boost_60_price", "40"),
             ("diamond_boost_60_minutes", "60"),
+            ("diamond_boost_60_daily_limit", "2"),
             ("diamond_boost_25_active", "1"),
             ("diamond_boost_60_active", "1"),
         )
@@ -144,6 +146,9 @@ class BoostMixin:
             minutes = self._config_int_with(
                 conn, f"{item_id}_minutes", minimum=1
             )
+            daily_limit = self._config_int_with(
+                conn, f"{item_id}_daily_limit", minimum=1
+            )
             active = self._config_bit_with(conn, f"{item_id}_active")
         except ValueError:
             return None
@@ -151,6 +156,7 @@ class BoostMixin:
             "id": item_id,
             "price_diamonds": price,
             "minutes": minutes,
+            "daily_limit": daily_limit,
             "multiplier": multiplier,
             "active": active,
         }
@@ -162,7 +168,10 @@ class BoostMixin:
         }
 
     def _boost_catalog_with(
-        self, conn: sqlite3.Connection
+        self,
+        conn: sqlite3.Connection,
+        player_id: str,
+        now: datetime,
     ) -> list[dict[str, Any]]:
         entries: list[dict[str, Any]] = []
         for suffix in BOOST_SKU_SUFFIXES:
@@ -171,6 +180,11 @@ class BoostMixin:
             if config is None:
                 continue
             minutes = int(config["minutes"])
+            daily_limit = int(config["daily_limit"])
+            bought_today = self._boost_purchases_today_with(
+                conn, player_id, item_id, now
+            )
+            remaining_today = max(0, daily_limit - bought_today)
             entries.append(
                 {
                     "id": item_id,
@@ -182,13 +196,41 @@ class BoostMixin:
                     "active": bool(config["active"]),
                     "minutes": minutes,
                     "multiplier": int(config["multiplier"]),
+                    "daily_limit": daily_limit,
+                    "bought_today": bought_today,
+                    "remaining_today": remaining_today,
                     "owned_quantity": 0,
                     "cooldown_seconds": 0,
                     "cooldown_until": None,
-                    "available": bool(config["active"]),
+                    "available": bool(config["active"]) and remaining_today > 0,
                 }
             )
         return entries
+
+    @staticmethod
+    def _boost_purchases_today_with(
+        conn: sqlite3.Connection,
+        player_id: str,
+        item_id: str,
+        now: datetime,
+    ) -> int:
+        """Count successful purchases for the player's local calendar day."""
+
+        day = cal.parse_datetime(now).date()
+        rows = conn.execute(
+            "SELECT created_at FROM shop_purchase_requests "
+            "WHERE player_id = ? AND item_id = ?",
+            (player_id, item_id),
+        ).fetchall()
+        count = 0
+        for row in rows:
+            try:
+                purchased_at = cal.parse_datetime(str(row["created_at"]))
+            except (TypeError, ValueError):
+                continue
+            if purchased_at.date() == day:
+                count += 1
+        return count
 
     # ------------------------------------------------------------------
     # Active boost state and boosted credits
@@ -266,6 +308,18 @@ class BoostMixin:
             raise ShopNotAvailable(
                 "boost_inactive",
                 "diamond boost is not active",
+            )
+        daily_limit = int(config["daily_limit"])
+        bought_today = self._boost_purchases_today_with(
+            conn, player_id, item_id, now
+        )
+        if bought_today >= daily_limit:
+            raise ShopNotAvailable(
+                "daily_limit_reached",
+                f"{item_id} daily limit reached ({daily_limit} per day)",
+                daily_limit=daily_limit,
+                bought_today=bought_today,
+                remaining_today=0,
             )
 
         base = now

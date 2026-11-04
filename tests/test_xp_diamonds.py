@@ -129,7 +129,7 @@ def test_boost_multiplies_xp_diamonds_without_changing_xp(
     ingest(store, player_id, seconds=60)
 
     # 10 XP earns 1 base diamond, doubled to 2 while the boost is active.
-    assert store.get_diamond_balance(player_id, now=NOW) == 977
+    assert store.get_diamond_balance(player_id, now=NOW) == 982
     assert store.get_week_score(player_id, NOW)["xp"] == 10
     ledger = xp_ledger(store, player_id)
     assert [row["delta"] for row in ledger] == [2]

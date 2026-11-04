@@ -252,7 +252,11 @@ function ProductCard({
   onBuy,
 }: ProductCardProps) {
   const shortfall = Math.max(0, item.price_diamonds - diamonds)
-  const unavailable = !item.available
+  const dailyLimitReached =
+    item.kind === 'boost' &&
+    typeof item.remaining_today === 'number' &&
+    item.remaining_today <= 0
+  const unavailable = !item.available || dailyLimitReached
   const isPending = pending && pendingItemId === item.id
   const cooldown = formatRemaining(item.cooldown_until)
   const capReady =
@@ -273,6 +277,7 @@ function ProductCard({
   if (item.kind === 'ember') label = '兑换余烬'
   else if (item.kind === 'cap') label = '升级仓库'
   if (isPending) label = '购买中…'
+  else if (dailyLimitReached) label = '今日已买满'
   else if (!capReady) label = '等级不匹配'
   else if (unavailable) label = '暂不可用'
   else if (cooldown) label = '冷却中'
@@ -310,6 +315,13 @@ function ProductCard({
 
       <div className={styles.chips}>
         <span>{stats}</span>
+        {item.kind === 'boost' && item.daily_limit !== undefined ? (
+          <span data-testid="boost-daily-limit">
+            {`今日 ${formatNumber(item.bought_today ?? 0)}/${formatNumber(
+              item.daily_limit,
+            )}`}
+          </span>
+        ) : null}
         {cooldown ? (
           <span className={styles.cooldownChip}>
             <Timer size={13} aria-hidden="true" />

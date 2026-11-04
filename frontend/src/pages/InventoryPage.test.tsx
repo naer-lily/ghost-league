@@ -80,7 +80,7 @@ function makeCatalog(): ShopItem[] {
       currency: 'diamonds',
       kind: 'ember',
       owned_quantity: 0,
-      cooldown_seconds: 259_200,
+      cooldown_seconds: 604_800,
       cooldown_until: null,
       available: true,
     },
@@ -88,12 +88,15 @@ function makeCatalog(): ShopItem[] {
       id: 'diamond_boost_25',
       name: '经验宝 · 25 分钟',
       description: '',
-      price_diamonds: 25,
+      price_diamonds: 20,
       currency: 'diamonds',
       kind: 'boost',
       active: true,
       minutes: 25,
       multiplier: 2,
+      daily_limit: 2,
+      bought_today: 0,
+      remaining_today: 2,
       owned_quantity: 0,
       cooldown_seconds: 0,
       cooldown_until: null,
@@ -103,12 +106,15 @@ function makeCatalog(): ShopItem[] {
       id: 'diamond_boost_60',
       name: '经验宝 · 60 分钟',
       description: '',
-      price_diamonds: 60,
+      price_diamonds: 40,
       currency: 'diamonds',
       kind: 'boost',
       active: true,
       minutes: 60,
       multiplier: 2,
+      daily_limit: 2,
+      bought_today: 0,
+      remaining_today: 2,
       owned_quantity: 0,
       cooldown_seconds: 0,
       cooldown_until: null,
@@ -440,6 +446,10 @@ describe('InventoryPage', () => {
       .toBeInTheDocument()
     expect(within(boostsCategory).getByTestId('shop-item-diamond_boost_60'))
       .toBeInTheDocument()
+    expect(
+      within(within(boostsCategory).getByTestId('shop-item-diamond_boost_25'))
+        .getByTestId('boost-daily-limit'),
+    ).toHaveTextContent('今日 0/2')
     expect(within(boostsCategory).queryByTestId('diamond-boost-status'))
       .not.toBeInTheDocument()
     expect(
@@ -781,6 +791,64 @@ describe('InventoryPage', () => {
     expect(body.item_id).toBe('diamond_boost_25')
     expect(body.quantity).toBe(1)
     expect(body.request_id.length).toBeGreaterThan(8)
+  })
+
+  it('shows daily boost usage and disables a sold-out boost', async () => {
+    const catalog = makeCatalog().map((item) =>
+      item.id === 'diamond_boost_25'
+        ? {
+            ...item,
+            bought_today: 2,
+            remaining_today: 0,
+            available: false,
+          }
+        : item,
+    )
+    mockApi({ catalog })
+    renderInventory()
+
+    const category = await screen.findByTestId('shop-category-boosts')
+    const soldOut = within(category).getByTestId('shop-item-diamond_boost_25')
+    expect(within(soldOut).getByTestId('boost-daily-limit')).toHaveTextContent(
+      '今日 2/2',
+    )
+    expect(within(soldOut).getByRole('button')).toBeDisabled()
+    expect(within(soldOut).getByRole('button')).toHaveTextContent('今日已买满')
+
+    const available = within(category).getByTestId('shop-item-diamond_boost_60')
+    expect(within(available).getByTestId('boost-daily-limit')).toHaveTextContent(
+      '今日 0/2',
+    )
+    expect(within(available).getByRole('button')).toBeEnabled()
+  })
+
+  it('uses the shared API error copy when the daily limit is reached', async () => {
+    mockApi({
+      purchase: () =>
+        jsonResponse(
+          {
+            detail: {
+              code: 'daily_limit_reached',
+              message: 'daily limit reached',
+              daily_limit: 2,
+              bought_today: 2,
+              remaining_today: 0,
+            },
+          },
+          409,
+        ),
+    })
+    renderInventory()
+
+    const category = await screen.findByTestId('shop-category-boosts')
+    await userEvent.click(
+      within(category).getByTestId('shop-item-diamond_boost_25')
+        .querySelector('button') as HTMLButtonElement,
+    )
+
+    expect(await screen.findByTestId('shop-purchase-error')).toHaveTextContent(
+      '今日购买次数已达上限。',
+    )
   })
 
   it('opens star details and closes them with Escape', async () => {

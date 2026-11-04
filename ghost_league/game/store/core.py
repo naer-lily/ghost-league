@@ -25,6 +25,7 @@ from ..stars import (
 
 SCHEMA_VERSION = "9"
 ALGORITHM_VERSION = "phase1-v1"
+SHOP_ECONOMY_UPDATE_KEY = "shop_economy_update_2026_11"
 DEFAULT_DB_PATH = Path("data/league/league.db")
 SOURCE_AI = "wakatime_public_leaderboard"
 SOURCE_HUMAN = "local_increment"
@@ -644,6 +645,7 @@ class CoreMixin:
             self._seed_catalog(conn)
             self._seed_game_config(conn, now=now)
             self._seed_shop(conn, now=now)
+            self._apply_shop_economy_update(conn, now=now)
             self._seed_progression_start(
                 conn,
                 now=now,
@@ -753,7 +755,7 @@ class CoreMixin:
             (
                 "ember",
                 "余烬",
-                "立即获得 1 枚余烬；每 72 小时最多购买一次。",
+                "立即获得 1 枚余烬；每 7 天最多购买一次。",
                 800,
                 "ember",
                 "ember",
@@ -761,7 +763,7 @@ class CoreMixin:
                 1,
                 None,
                 None,
-                259_200,
+                604_800,
                 20,
             ),
         )
@@ -822,6 +824,51 @@ class CoreMixin:
                 "updated_at = excluded.updated_at",
                 (level, price, delta, now, now),
             )
+
+    @staticmethod
+    def _apply_shop_economy_update(
+        conn: sqlite3.Connection,
+        *,
+        now: str,
+    ) -> None:
+        """Apply the one-time boost price and ember cooldown update.
+
+        The marker keeps later operator edits intact: only the exact legacy
+        values are replaced, and the whole block runs once per database.
+        """
+
+        marker = conn.execute(
+            "SELECT value FROM meta WHERE key = ?",
+            (SHOP_ECONOMY_UPDATE_KEY,),
+        ).fetchone()
+        if marker is not None:
+            return
+        conn.execute(
+            "UPDATE game_config SET value = '20', updated_at = ? "
+            "WHERE key = 'diamond_boost_25_price' AND value = '25'",
+            (now,),
+        )
+        conn.execute(
+            "UPDATE game_config SET value = '40', updated_at = ? "
+            "WHERE key = 'diamond_boost_60_price' AND value = '60'",
+            (now,),
+        )
+        conn.execute(
+            "UPDATE shop_items SET cooldown_seconds = 604800, "
+            "description = ?, updated_at = ? "
+            "WHERE id = 'ember' AND ("
+            "cooldown_seconds = 259200 OR description = ?)",
+            (
+                "立即获得 1 枚余烬；每 7 天最多购买一次。",
+                now,
+                "立即获得 1 枚余烬；每 72 小时最多购买一次。",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, 'applied') "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (SHOP_ECONOMY_UPDATE_KEY,),
+        )
 
     def _seed_progression_start(
         self,

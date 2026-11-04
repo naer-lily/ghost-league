@@ -1,4 +1,5 @@
 import { ApiError } from '../api/client'
+import { describeApiError } from './home'
 
 export const RARITY_LABELS: Record<string, string> = {
   common: '微光',
@@ -114,6 +115,7 @@ export function describeShopError(error: unknown): string {
   if (code === 'cap_unavailable') return '仓库等级已经变化，刷新后再试。'
   if (code === 'boost_inactive') return '这个经验宝现在不能购买。'
   if (code === 'boost_config_invalid') return '这个经验宝现在不能购买。'
+  if (code === 'daily_limit_reached') return describeApiError(error)
   if (code === 'unknown_item') return '商店里没有这个条目。'
   if (code === 'not_available') return '这个条目现在暂时不能购买。'
   if (code === 'not_allowed') return '当前账号不能购买这个条目。'

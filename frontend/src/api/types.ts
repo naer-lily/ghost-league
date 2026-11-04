@@ -68,6 +68,9 @@ export interface ShopItem {
   active?: boolean
   minutes?: number
   multiplier?: number
+  daily_limit?: number
+  bought_today?: number
+  remaining_today?: number
   gacha?: boolean
   rates?: Record<string, number>
   types?: string[]

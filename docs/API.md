@@ -814,25 +814,36 @@ python3 -m ghost_league.game.jobs grant-diamonds --player <id> --amount 3000 --r
 | --- | --- | --- | --- | --- | --- |
 | `star` | `star` | 普通星抽卡 | 300 钻石/抽 | 随机一颗星写 `player_stars`，并递增 `inventory_items.star` | 每次只能买 1 颗；名字可省略；可重复买 |
 | `seasonal_star` | `seasonal_star` | 季节星抽卡 | 500 钻石/抽 | 随机一颗当季星写 `player_stars`，并递增 `inventory_items.seasonal_star` | 每个玩家每个自然月最多 1 颗；名字可省略 |
-| `ember` | `ember` | 余烬 | 800 钻石/个 | 进入现有 `ember_balance`，不写 `inventory_items` | 每次只能买 1 个；72 小时冷却 |
+| `ember` | `ember` | 余烬 | 800 钻石/个 | 进入现有 `ember_balance`，不写 `inventory_items` | 每次只能买 1 个；7 天冷却（`604800` 秒） |
 | `diamond_cap_1` … `diamond_cap_5` | `cap` | 仓库上限升级 | 500 / 800 / 1200 / 1800 / 2600 | 扣钻石，上限 +500，等级 +1 | 只能按当前等级买下一级；5 级后不再出现 |
-| `diamond_boost_25` | `boost` | 经验宝 · 配置分钟数 | `diamond_boost_25_price` | 扣钻石，写入/顺延 `diamond_boosts` | 每次只能买 1 个；`diamond_boost_25_active=0` 时不可购买 |
-| `diamond_boost_60` | `boost` | 经验宝 · 配置分钟数 | `diamond_boost_60_price` | 扣钻石，写入/顺延 `diamond_boosts` | 每次只能买 1 个；`diamond_boost_60_active=0` 时不可购买 |
+| `diamond_boost_25` | `boost` | 经验宝 · 配置分钟数 | `diamond_boost_25_price` | 扣钻石，写入/顺延 `diamond_boosts` | 每次只能买 1 个；每个自然日最多 2 个；`diamond_boost_25_active=0` 时不可购买 |
+| `diamond_boost_60` | `boost` | 经验宝 · 配置分钟数 | `diamond_boost_60_price` | 扣钻石，写入/顺延 `diamond_boosts` | 每次只能买 1 个；每个自然日最多 2 个；`diamond_boost_60_active=0` 时不可购买 |
 
 经验宝是长期平衡参数，读取 `game_config`，不写死在代码里：
 
 | key | 种子值 | 含义 |
 | --- | --- | --- |
 | `diamond_boost_multiplier` | `2` | 生效期间 XP 里程碑倍率 |
-| `diamond_boost_25_price` | `25` | 25 档价格 |
+| `diamond_boost_25_price` | `20` | 25 档价格 |
 | `diamond_boost_25_minutes` | `25` | 25 档分钟数 |
-| `diamond_boost_60_price` | `60` | 60 档价格 |
+| `diamond_boost_25_daily_limit` | `2` | 25 档每自然日限购数量 |
+| `diamond_boost_60_price` | `40` | 60 档价格 |
 | `diamond_boost_60_minutes` | `60` | 60 档分钟数 |
+| `diamond_boost_60_daily_limit` | `2` | 60 档每自然日限购数量 |
 | `diamond_boost_25_active` | `1` | 25 档是否上架 |
 | `diamond_boost_60_active` | `1` | 60 档是否上架 |
 
-种子只在缺失时插入，不覆盖运营改过的值。配置缺省或非法时，该商品不出现、购买返回
-`409 boost_config_invalid`，不会按 0 价格或 0 倍率成交。调整示例：
+种子只在缺失时插入，不覆盖运营改过的值。每日限购按 Asia/Shanghai 自然日重置，购买时
+在同一事务内统计 `shop_purchase_requests` 的当日成功记录；幂等重放不重复计数。配置
+缺省或非法时，该商品不出现、购买返回 `409 boost_config_invalid`，不会按 0 价格或
+0 倍率成交。已有旧库可用一次性迁移脚本更新价格与余烬冷却（脚本先备份、可重复运行）：
+
+```bash
+python3 scripts/apply_shop_economy_update.py --dry-run
+python3 scripts/apply_shop_economy_update.py
+```
+
+调整示例：
 
 ```bash
 sqlite3 data/league/league.db \
@@ -888,9 +899,10 @@ sqlite3 data/league/league.db \
 Bearer 鉴权。返回当前可买商品数组。普通商品按 `sort` 排序；仓库升级只返回当前等级
 的下一级（5 级后无升级项）；经验宝不写 `shop_items`，每次由 `game_config` 生成两个
 固定 SKU。字段包含 `kind`；季节星额外带 `season_key`；上限升级额外带
-`required_cap_level`；经验宝额外带 `active`、`minutes`、`multiplier`，其中 `active`
-表示该档是否上架。`available` 综合考虑冷却、季节窗口、上限等级和经验宝上架状态；
-余额是否足够仍在购买时单独校验。
+`required_cap_level`；经验宝额外带 `active`、`minutes`、`multiplier`、`daily_limit`、
+`bought_today`、`remaining_today`，其中 `active` 表示该档是否上架，后三个字段按
+Asia/Shanghai 自然日统计。`available` 综合考虑冷却、季节窗口、上限等级、经验宝上架
+状态和当日剩余限购；余额是否足够仍在购买时单独校验。
 
 ```json
 [
@@ -928,13 +940,13 @@ Bearer 鉴权。返回当前可买商品数组。普通商品按 `sort` 排序�
   {
     "id": "ember",
     "name": "余烬",
-    "description": "立即获得 1 枚余烬；每 72 小时最多购买一次。",
+    "description": "立即获得 1 枚余烬；每 7 天最多购买一次。",
     "price_diamonds": 800,
     "currency": "diamonds",
     "kind": "ember",
     "owned_quantity": 1,
-    "cooldown_seconds": 259200,
-    "cooldown_until": "2026-11-05T12:00:00+08:00",
+    "cooldown_seconds": 604800,
+    "cooldown_until": "2026-11-09T12:00:00+08:00",
     "available": false
   },
   {
@@ -954,12 +966,15 @@ Bearer 鉴权。返回当前可买商品数组。普通商品按 `sort` 排序�
     "id": "diamond_boost_25",
     "name": "经验宝 · 25 分钟",
     "description": "",
-    "price_diamonds": 25,
+    "price_diamonds": 20,
     "currency": "diamonds",
     "kind": "boost",
     "active": true,
     "minutes": 25,
     "multiplier": 2,
+    "daily_limit": 2,
+    "bought_today": 0,
+    "remaining_today": 2,
     "owned_quantity": 0,
     "cooldown_seconds": 0,
     "cooldown_until": null,
@@ -969,12 +984,15 @@ Bearer 鉴权。返回当前可买商品数组。普通商品按 `sort` 排序�
     "id": "diamond_boost_60",
     "name": "经验宝 · 60 分钟",
     "description": "",
-    "price_diamonds": 60,
+    "price_diamonds": 40,
     "currency": "diamonds",
     "kind": "boost",
     "active": true,
     "minutes": 60,
     "multiplier": 2,
+    "daily_limit": 2,
+    "bought_today": 0,
+    "remaining_today": 2,
     "owned_quantity": 0,
     "cooldown_seconds": 0,
     "cooldown_until": null,
@@ -1053,7 +1071,7 @@ Bearer 鉴权。`request_id` 必填，用于幂等；同一个 `request_id` 重�
   "ok": true,
   "item_id": "diamond_boost_25",
   "quantity": 1,
-  "diamonds": 975,
+  "diamonds": 980,
   "diamond_cap": 1000,
   "diamond_cap_level": 0,
   "diamond_excess": 0,
@@ -1082,8 +1100,11 @@ Bearer 鉴权。`request_id` 必填，用于幂等；同一个 `request_id` 重�
 - 同月第二颗季节星：`409`，`detail.code='seasonal_star_owned'`，带 `season_key`。
 - 上限升级不是当前下一级或已经满级：`409`，`detail.code='cap_unavailable'`。
 - 经验宝已下架：`409`，`detail.code='boost_inactive'`。
+- 经验宝当日购买达到上限：`409`，响应顶层和 `detail` 都带 `daily_limit`、
+  `bought_today`、`remaining_today`，`detail.code='daily_limit_reached'`；服务端在
+  购买事务内校验，不依赖前端禁用。
 - 经验宝配置缺省或非法：`409`，`detail.code='boost_config_invalid'`，商品不会出现。
-- `ember` 冷却未到：`409`，响应顶层和 `detail` 都带 `cooldown_until`，
+- `ember` 冷却未到（7 天）：`409`，响应顶层和 `detail` 都带 `cooldown_until`，
   `detail.code` 为 `cooldown`。
 - 同一 `request_id` 用于不同商品/数量：`409`。
 

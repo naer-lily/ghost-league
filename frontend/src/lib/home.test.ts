@@ -183,5 +183,12 @@ describe('error copy', () => {
     expect(describeApiError(new Error('boom'))).toBe(
       '数据没有加载出来，请稍后重试。',
     )
+    expect(
+      describeApiError(
+        new ApiError('limit', 409, {
+          detail: { code: 'daily_limit_reached' },
+        }),
+      ),
+    ).toBe('今日购买次数已达上限。')
   })
 })

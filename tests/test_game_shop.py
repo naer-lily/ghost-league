@@ -1150,7 +1150,7 @@ class ShopAPITests(unittest.TestCase):
             self.assertEqual(first.status_code, 200, first.text)
             self.assertEqual(first.json()["diamonds"], 2200)
             self.assertEqual(
-                first.json()["cooldown_until"], "2026-11-05T12:00:00+08:00"
+                first.json()["cooldown_until"], "2026-11-09T12:00:00+08:00"
             )
 
             self.clock["now"] = NOW + timedelta(hours=1)
@@ -1163,10 +1163,10 @@ class ShopAPITests(unittest.TestCase):
             body = blocked.json()
             self.assertEqual(body["code"], "cooldown")
             self.assertEqual(
-                body["cooldown_until"], "2026-11-05T12:00:00+08:00"
+                body["cooldown_until"], "2026-11-09T12:00:00+08:00"
             )
             self.assertEqual(
-                body["detail"]["cooldown_until"], "2026-11-05T12:00:00+08:00"
+                body["detail"]["cooldown_until"], "2026-11-09T12:00:00+08:00"
             )
 
             with sqlite3.connect(self.game_db_path) as connection:
@@ -1177,8 +1177,8 @@ class ShopAPITests(unittest.TestCase):
                     "SELECT COUNT(*) FROM inventory_items WHERE player_id = 'owner'"
                 ).fetchone()[0] == 0
 
-            self.clock["now"] = NOW + timedelta(hours=72)
-            self.credit(client, 1000, key="credit-72")
+            self.clock["now"] = NOW + timedelta(days=7)
+            self.credit(client, 1000, key="credit-7d")
             second = client.post(
                 "/v1/shop/purchase",
                 headers=auth(),
@@ -1190,6 +1190,83 @@ class ShopAPITests(unittest.TestCase):
             status = client.get("/v1/me/status", headers=auth()).json()
             self.assertEqual(status["inventory"]["ember"], 2)
 
+
+    def test_boost_daily_limit_is_enforced_over_http(self) -> None:
+        with self.client() as client:
+            for index in (1, 2):
+                bought = client.post(
+                    "/v1/shop/purchase",
+                    headers=auth(),
+                    json={
+                        "item_id": "diamond_boost_25",
+                        "request_id": f"daily-{index}",
+                    },
+                )
+                self.assertEqual(bought.status_code, 200, bought.text)
+                self.assertEqual(bought.json()["diamonds"], 1000 - index * 20)
+
+            shop = {
+                item["id"]: item
+                for item in client.get("/v1/shop", headers=auth()).json()
+            }
+            boost = shop["diamond_boost_25"]
+            self.assertEqual(boost["price_diamonds"], 20)
+            self.assertEqual(boost["minutes"], 25)
+            self.assertEqual(boost["daily_limit"], 2)
+            self.assertEqual(boost["bought_today"], 2)
+            self.assertEqual(boost["remaining_today"], 0)
+            self.assertFalse(boost["available"])
+            self.assertEqual(shop["diamond_boost_60"]["price_diamonds"], 40)
+            self.assertEqual(shop["diamond_boost_60"]["daily_limit"], 2)
+
+            blocked = client.post(
+                "/v1/shop/purchase",
+                headers=auth(),
+                json={
+                    "item_id": "diamond_boost_25",
+                    "request_id": "daily-3",
+                },
+            )
+            self.assertEqual(blocked.status_code, 409, blocked.text)
+            body = blocked.json()
+            self.assertEqual(body["code"], "daily_limit_reached")
+            self.assertEqual(body["detail"]["code"], "daily_limit_reached")
+            self.assertEqual(body["daily_limit"], 2)
+            self.assertEqual(body["bought_today"], 2)
+            self.assertEqual(body["remaining_today"], 0)
+            self.assertEqual(
+                client.get("/v1/me/status", headers=auth()).json()["diamonds"],
+                960,
+            )
+
+            replay = client.post(
+                "/v1/shop/purchase",
+                headers=auth(),
+                json={
+                    "item_id": "diamond_boost_25",
+                    "request_id": "daily-1",
+                },
+            )
+            self.assertEqual(replay.status_code, 200, replay.text)
+            self.assertTrue(replay.json()["replayed"])
+
+            self.clock["now"] = NOW + timedelta(days=1)
+            reset = {
+                item["id"]: item
+                for item in client.get("/v1/shop", headers=auth()).json()
+            }["diamond_boost_25"]
+            self.assertEqual(reset["bought_today"], 0)
+            self.assertEqual(reset["remaining_today"], 2)
+            next_day = client.post(
+                "/v1/shop/purchase",
+                headers=auth(),
+                json={
+                    "item_id": "diamond_boost_25",
+                    "request_id": "daily-4",
+                },
+            )
+            self.assertEqual(next_day.status_code, 200, next_day.text)
+            self.assertEqual(next_day.json()["diamonds"], 940)
 
     def test_diamond_boost_shop_purchase_status_and_idempotency(self) -> None:
         with self.client() as client:
