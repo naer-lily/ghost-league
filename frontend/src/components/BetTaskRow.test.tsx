@@ -118,7 +118,7 @@ describe('BetTaskRow', () => {
     )
     expect(screen.getByTestId('bet-task-label-daily')).toHaveTextContent('日注')
     const settlement = screen.getByTestId('bet-task-settle-daily')
-    expect(settlement).toHaveTextContent('22:30 结算')
+    expect(settlement).toHaveTextContent('还剩 10 小时 30 分')
     expect(settlement).toHaveClass(styles.settlement ?? '')
     expect(screen.queryByTestId('bet-task-cutoff-daily')).not.toBeInTheDocument()
     expect(screen.queryByText('还剩 9 小时 0 分')).not.toBeInTheDocument()
@@ -140,7 +140,7 @@ describe('BetTaskRow', () => {
 
     expect(screen.getByTestId('bet-task-label-weekly')).toHaveTextContent('周注')
     expect(screen.getByTestId('bet-task-settle-weekly')).toHaveTextContent(
-      '周一 00:05 结算',
+      '还剩 108 小时 5 分',
     )
     expect(
       screen.queryByTestId('bet-task-cutoff-weekly'),
@@ -158,7 +158,7 @@ describe('BetTaskRow', () => {
     })
 
     expect(screen.getByTestId('bet-task-settle-daily')).toHaveTextContent(
-      '22:41 结算',
+      '已结算',
     )
     expect(screen.queryByTestId('bet-task-cutoff-daily')).not.toBeInTheDocument()
     expect(screen.getByTestId('bet-task-result-daily')).toHaveTextContent(
@@ -281,7 +281,7 @@ describe('BetTaskRow', () => {
     expect(screen.getByTestId('bet-task-rival-weekly')).toHaveTextContent('687')
     expect(screen.getByTestId('bet-task-diff-weekly')).toHaveTextContent('-49')
     expect(screen.getByTestId('bet-task-settle-weekly')).toHaveTextContent(
-      '周一 00:05 结算',
+      '已结算',
     )
     expect(screen.getByTestId('bet-task-result-weekly')).toHaveTextContent(
       '已输',

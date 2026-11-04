@@ -89,26 +89,7 @@ export function formatBetDiff(diff: number): string {
   return '0'
 }
 
-const GAME_TIME_ZONE = 'Asia/Shanghai'
 const DAY_MS = 86_400_000
-
-function gameClock(value: Date): { weekday: string; clock: string } | null {
-  if (Number.isNaN(value.getTime())) return null
-  const parts = new Intl.DateTimeFormat('zh-CN', {
-    timeZone: GAME_TIME_ZONE,
-    weekday: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(value)
-  const find = (type: string) =>
-    parts.find((part) => part.type === type)?.value
-  const weekday = find('weekday')
-  const hour = find('hour')
-  const minute = find('minute')
-  if (!weekday || !hour || !minute) return null
-  return { weekday, clock: `${hour}:${minute}` }
-}
 
 function parseTime(value: string): Date | null {
   const parsed = new Date(value)
@@ -127,31 +108,23 @@ function weeklySettlement(periodKey: string): Date | null {
 }
 
 /**
- * Main-row settlement line.  Settled bets prefer the real ``settled_at`` clock;
- * live daily bets use the window; live weekly bets derive the next Monday from
- * ``period_key``.
+ * Main-row settlement line.  Settled bets read "已结算"; live bets count down
+ * to the settlement moment so the row matches the task-card countdown.
  */
 export function formatSettlementTime(
   kind: RivalBetTab,
   bet: Bet,
   windows: BetWindows,
+  now: Date,
 ): string {
-  const settled = bet.settled_at ? parseTime(bet.settled_at) : null
-  const settledClock = settled ? gameClock(settled) : null
-  if (settledClock) {
-    return kind === 'daily'
-      ? `${settledClock.clock} 结算`
-      : `${settledClock.weekday} ${settledClock.clock} 结算`
-  }
+  if (bet.status !== 'placed') return '已结算'
 
-  if (kind === 'daily') {
-    const daily = gameClock(parseTime(windows.daily_settles_at) ?? new Date(NaN))
-    return daily ? `${daily.clock} 结算` : '时间未知'
-  }
-
-  const next = weeklySettlement(bet.period_key)
-  const weekly = next ? gameClock(next) : null
-  return weekly ? `${weekly.weekday} ${weekly.clock} 结算` : '周一 00:05 结算'
+  const target =
+    kind === 'daily'
+      ? parseTime(windows.daily_settles_at)
+      : weeklySettlement(bet.period_key)
+  if (!target) return '时间未知'
+  return formatTaskCountdown(target.toISOString(), now)
 }
 
 function settlementLabel(
@@ -285,7 +258,7 @@ export function BetTaskRow({
   const bar = clashBar(frozen.me, frozen.rival)
   const tone = toneName(diff)
   const status = settled ? betStatusText(bet) : null
-  const settlement = formatSettlementTime(kind, bet, windows)
+  const settlement = formatSettlementTime(kind, bet, windows, now)
   const gapCopy =
     diff > 0
       ? `领先 ${formatXp(diff)} XP`

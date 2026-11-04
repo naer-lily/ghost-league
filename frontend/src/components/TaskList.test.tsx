@@ -1216,7 +1216,7 @@ describe('TaskList', () => {
     ).toHaveTextContent('-15')
     expect(
       within(daily).getByTestId('bet-task-settle-daily'),
-    ).toHaveTextContent('22:30 结算')
+    ).toHaveTextContent('还剩 10 小时 30 分')
     expect(
       within(daily).queryByTestId('bet-task-cutoff-daily'),
     ).not.toBeInTheDocument()
@@ -1232,7 +1232,7 @@ describe('TaskList', () => {
     ).toHaveTextContent('0')
     expect(
       within(weekly).getByTestId('bet-task-settle-weekly'),
-    ).toHaveTextContent('周一 00:05 结算')
+    ).toHaveTextContent('还剩 108 小时 5 分')
     expect(
       within(weekly).queryByTestId('bet-task-cutoff-weekly'),
     ).not.toBeInTheDocument()
@@ -1310,7 +1310,7 @@ describe('TaskList', () => {
     expect(daily).toHaveAttribute('data-state', 'settled')
     expect(
       within(daily).getByTestId('bet-task-settle-daily'),
-    ).toHaveTextContent('22:30 结算')
+    ).toHaveTextContent('已结算')
     expect(
       within(daily).getByTestId('bet-task-result-daily'),
     ).toHaveTextContent('已赢 +240')
@@ -1322,7 +1322,7 @@ describe('TaskList', () => {
     expect(weekly).toHaveAttribute('data-state', 'settled')
     expect(
       within(weekly).getByTestId('bet-task-settle-weekly'),
-    ).toHaveTextContent('周一 00:05 结算')
+    ).toHaveTextContent('已结算')
     expect(
       within(weekly).getByTestId('bet-task-result-weekly'),
     ).toHaveTextContent('已输')
