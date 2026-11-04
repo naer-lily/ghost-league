@@ -1,5 +1,5 @@
 import { Camera, Check, Flame, Gift } from 'lucide-react'
-import { useRef, type ChangeEvent } from 'react'
+import { useRef, useState, type ChangeEvent } from 'react'
 import {
   useClaimTaskChest,
   useCompleteTask,
@@ -7,6 +7,7 @@ import {
 } from '../api/queries'
 import type { TaskItem } from '../api/types'
 import { describeApiError } from '../lib/home'
+import { compressTaskProof } from '../lib/image'
 import { formatTaskCountdown } from '../lib/time'
 import { useUiStore } from '../store/useUiStore'
 import styles from './TaskCard.module.css'
@@ -25,6 +26,8 @@ export function TaskCard({
   onClaimed,
 }: TaskCardProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const uploadingRef = useRef(false)
+  const [preparing, setPreparing] = useState(false)
   const completeTask = useCompleteTask()
   const claimChest = useClaimTaskChest()
   const repairTask = useRepairTask()
@@ -41,17 +44,31 @@ export function TaskCard({
   const canRepair = embersBalance >= 1
   const remaining = formatTaskCountdown(task.ends_at, now)
 
-  function onFileChange(event: ChangeEvent<HTMLInputElement>) {
+  async function onFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ''
-    if (!file) return
-    completeTask.mutate(
-      { taskId: task.id, file },
-      {
-        onSuccess: () => notify('任务完成。'),
-        onError: (error) => notify(describeApiError(error), 'error'),
-      },
-    )
+    if (!file || uploadingRef.current) return
+    uploadingRef.current = true
+    setPreparing(true)
+
+    let upload = file
+    try {
+      upload = await compressTaskProof(file)
+    } catch {
+      upload = file
+    } finally {
+      setPreparing(false)
+    }
+
+    try {
+      await completeTask.mutateAsync({ taskId: task.id, file: upload })
+      notify('任务完成。')
+    } catch (error) {
+      notify(describeApiError(error), 'error')
+    } finally {
+      uploadingRef.current = false
+      setPreparing(false)
+    }
   }
 
   function onClaim() {
@@ -93,15 +110,20 @@ export function TaskCard({
               capture="environment"
               aria-label={`上传${task.title}的照片`}
               onChange={onFileChange}
+              disabled={preparing || completeTask.isPending}
             />
             <button
               type="button"
               className={styles.action}
               onClick={() => inputRef.current?.click()}
-              disabled={completeTask.isPending}
+              disabled={preparing || completeTask.isPending}
             >
               <Camera size={16} aria-hidden="true" />
-              {completeTask.isPending ? '上传中…' : '拍照完成'}
+              {preparing
+                ? '处理中…'
+                : completeTask.isPending
+                  ? '上传中…'
+                  : '拍照完成'}
             </button>
           </>
         ) : repairActive ? (

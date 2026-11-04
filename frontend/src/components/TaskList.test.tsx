@@ -1,11 +1,23 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
 import type { TaskItem } from '../api/types'
+import { compressTaskProof } from '../lib/image'
 import { useUiStore } from '../store/useUiStore'
 import { TaskList } from './TaskList'
+
+vi.mock('../lib/image', () => ({
+  compressTaskProof: vi.fn((file: File) => Promise.resolve(file)),
+}))
 
 function response(payload: unknown, status = 200): Response {
   return {
@@ -112,6 +124,73 @@ describe('TaskList', () => {
       '+7 钻石',
     )
     expect(screen.queryByText(/概率|机制|DSL/)).not.toBeInTheDocument()
+  })
+
+  it('shows 处理中… while compressing and uploads the compressed file', async () => {
+    const deferred: { resolve: (file: File) => void } = {
+      resolve: () => {},
+    }
+    const compressed = new File(['jpeg-bytes'], 'big.jpg', {
+      type: 'image/jpeg',
+    })
+    vi.mocked(compressTaskProof).mockImplementationOnce(
+      () =>
+        new Promise<File>((resolve) => {
+          deferred.resolve = resolve
+        }),
+    )
+    let uploaded: File | null = null
+    let task = makeTask()
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/complete')) {
+          uploaded = (init?.body as FormData).get('file') as File
+          task = makeTask({
+            status: 'completed',
+            completed_at: '2026-11-04T12:30:00+08:00',
+            chest_status: 'available',
+            proof_url: '/v1/me/tasks/ti_1/proof',
+          })
+          return response({ task })
+        }
+        if (url.endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-04T14:51:00+08:00',
+            tasks: [task],
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      },
+    )
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container } = renderList()
+    expect(await screen.findByText('速写一张')).toBeInTheDocument()
+
+    const input = container.querySelector('input[type="file"]')
+    const original = new File(['large-bytes'], 'large.jpg', {
+      type: 'image/jpeg',
+    })
+    fireEvent.change(input as HTMLInputElement, {
+      target: { files: [original] },
+    })
+
+    const processing = await screen.findByRole('button', { name: '处理中…' })
+    expect(processing).toBeDisabled()
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes('/complete'),
+      ),
+    ).toBe(false)
+
+    await act(async () => deferred.resolve(compressed))
+
+    await waitFor(() => expect(uploaded).toBe(compressed))
+    expect(
+      await screen.findByRole('button', { name: '领取速写一张的宝箱' }),
+    ).toBeInTheDocument()
   })
 
   it('shows weekend progress without an action button', async () => {

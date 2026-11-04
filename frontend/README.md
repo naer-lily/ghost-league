@@ -129,6 +129,9 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
   页面容器支持 touch 下拉刷新（调用真实 refetch）。未选宿敌时显示内联候选；选好后首页
   显示完整宿敌卡：双方本周/今日 XP、对撞条、差距、本周剩余/日注锁注两个时间，以及
   周注/日注两个独立注面，两个下注按钮分别打开对应 dialog。
+- **任务拍照**：手动任务选图后先在浏览器里把可解码图片压到 ≤1MB（`lib/image.ts`），
+  压缩期间按钮显示“处理中…”，随后上传并显示“上传中…”。HEIC 等浏览器解不了的文件
+  原样上传，由服务端转换并兜底压到 ≤1MB。
 - **周注/日注 dialog**：目标差值只从服务端 `bet_options[tab].target_options` 渲染，
   显示 `+margin XP` 与该档赔率；自付钻石用数字输入 + `0–500` 滑杆，总本金为
   `free_stake + paid_stake`，总返为 `round(stake × 服务端赔率)`。自付 0 合法，默认只

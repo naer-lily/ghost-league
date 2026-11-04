@@ -105,8 +105,10 @@ TASK_PROOF_FORMATS = {
     # HEIC/HEIF are decoded by pillow-heif and normalized to JPEG.
     "HEIF": (".jpg", "image/jpeg"),
 }
-TASK_PROOF_JPEG_QUALITY = 90
-MAX_TASK_PROOF_BYTES = 8 * 1024 * 1024
+TASK_PROOF_QUALITY_STEPS = (90, 75, 60, 45)
+TASK_PROOF_LONG_EDGE_STEPS = (2400, 1600, 1200, 800)
+MAX_TASK_PROOF_BYTES = 1_000_000
+MAX_TASK_PROOF_UPLOAD_BYTES = 8 * 1024 * 1024
 SAFE_USER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
@@ -299,16 +301,79 @@ def _iso(value: datetime) -> str:
     return _local(value).isoformat(timespec="seconds")
 
 
+def _task_proof_jpeg(image: Image.Image, long_edge: int, quality: int) -> bytes:
+    """Encode one JPEG attempt, shrinking the long edge when needed."""
+
+    width, height = image.size
+    scale = min(1.0, long_edge / max(width, height))
+    rendered = image
+    if scale < 1:
+        rendered = image.resize(
+            (max(1, round(width * scale)), max(1, round(height * scale))),
+            Image.Resampling.LANCZOS,
+        )
+    try:
+        buffer = io.BytesIO()
+        rendered.save(buffer, format="JPEG", quality=quality, optimize=True)
+        return buffer.getvalue()
+    finally:
+        if rendered is not image:
+            rendered.close()
+
+
+def _compress_task_proof(data: bytes) -> bytes:
+    """Re-encode a proof photo as JPEG that fits within ``MAX_TASK_PROOF_BYTES``.
+
+    HEIC/HEIF always goes through this path; JPEG/PNG/WebP only does when the
+    uploaded file is still over the final proof limit.
+    """
+
+    with Image.open(io.BytesIO(data)) as source:
+        source.load()
+        image = ImageOps.exif_transpose(source)
+        try:
+            if image.mode != "RGB":
+                converted = image.convert("RGB")
+                if image is not source:
+                    image.close()
+                image = converted
+            smallest: bytes | None = None
+            for long_edge in TASK_PROOF_LONG_EDGE_STEPS:
+                for quality in TASK_PROOF_QUALITY_STEPS:
+                    candidate = _task_proof_jpeg(image, long_edge, quality)
+                    if smallest is None or len(candidate) < len(smallest):
+                        smallest = candidate
+                    if len(candidate) <= MAX_TASK_PROOF_BYTES:
+                        return candidate
+            # Pathological images can survive the documented ladder.  Keep
+            # shrinking until the stored proof is actually under the limit.
+            long_edge = 640
+            while long_edge >= 256:
+                candidate = _task_proof_jpeg(image, long_edge, 45)
+                if smallest is None or len(candidate) < len(smallest):
+                    smallest = candidate
+                if len(candidate) <= MAX_TASK_PROOF_BYTES:
+                    return candidate
+                long_edge //= 2
+            assert smallest is not None
+            return smallest
+        finally:
+            if image is not source:
+                image.close()
+
+
 def _task_proof_payload(data: bytes) -> tuple[bytes, str, str]:
     """Validate a proof image and return the stored bytes, extension and MIME.
 
     HEIC/HEIF uploads are normalized to RGB JPEG so proof storage and serving
-    stay on the existing ``.jpg`` / ``image/jpeg`` path.
+    stay on the existing ``.jpg`` / ``image/jpeg`` path.  Already-small proof
+    files keep their original bytes/format; larger JPEG/PNG/WebP uploads are
+    re-encoded as JPEG so every stored proof is at most 1MB.
     """
 
     if not data:
         raise TaskProofValidationError("empty image")
-    if len(data) > MAX_TASK_PROOF_BYTES:
+    if len(data) > MAX_TASK_PROOF_UPLOAD_BYTES:
         raise TaskProofValidationError("image exceeds 8MB")
     try:
         with Image.open(io.BytesIO(data)) as source:
@@ -330,17 +395,9 @@ def _task_proof_payload(data: bytes) -> tuple[bytes, str, str]:
     ) as exc:
         raise TaskProofValidationError("invalid image file") from exc
 
-    if fmt == "HEIF":
+    if fmt == "HEIF" or len(data) > MAX_TASK_PROOF_BYTES:
         try:
-            with Image.open(io.BytesIO(data)) as source:
-                source.load()
-                image = ImageOps.exif_transpose(source)
-                if image.mode != "RGB":
-                    image = image.convert("RGB")
-                converted = io.BytesIO()
-                image.save(
-                    converted, format="JPEG", quality=TASK_PROOF_JPEG_QUALITY
-                )
+            compressed = _compress_task_proof(data)
         except (
             Image.DecompressionBombError,
             UnidentifiedImageError,
@@ -348,7 +405,7 @@ def _task_proof_payload(data: bytes) -> tuple[bytes, str, str]:
             ValueError,
         ) as exc:
             raise TaskProofValidationError("invalid image file") from exc
-        return converted.getvalue(), ".jpg", "image/jpeg"
+        return compressed, ".jpg", "image/jpeg"
 
     extension, mime = TASK_PROOF_FORMATS[str(fmt)]
     return data, extension, mime
@@ -2492,9 +2549,9 @@ def create_app(
         file: UploadFile = File(...),
         account: dict[str, Any] = Depends(auth),
     ) -> dict[str, Any]:
-        data = await file.read(MAX_TASK_PROOF_BYTES + 1)
+        data = await file.read(MAX_TASK_PROOF_UPLOAD_BYTES + 1)
         await file.close()
-        if len(data) > MAX_TASK_PROOF_BYTES:
+        if len(data) > MAX_TASK_PROOF_UPLOAD_BYTES:
             raise HTTPException(
                 status_code=413, detail="task proof must be at most 8MB"
             )

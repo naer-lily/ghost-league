@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import random
 import sqlite3
 import stat
 import struct
@@ -38,6 +39,23 @@ def heic_bytes(size: tuple[int, int] = (320, 180)) -> bytes:
     Image.new("RGB", size, (40, 120, 200)).save(
         buffer, format="HEIF", quality=90
     )
+    return buffer.getvalue()
+
+
+def large_noise_bytes(
+    fmt: str = "JPEG",
+    size: tuple[int, int] = (1400, 1000),
+    quality: int = 95,
+) -> bytes:
+    """Deterministic noisy photo that stays over 1MB after normal encoding."""
+
+    rng = random.Random(11)
+    image = Image.frombytes("RGB", size, rng.randbytes(size[0] * size[1] * 3))
+    buffer = io.BytesIO()
+    if fmt == "PNG":
+        image.save(buffer, format=fmt)
+    else:
+        image.save(buffer, format=fmt, quality=quality)
     return buffer.getvalue()
 
 
@@ -608,10 +626,11 @@ class TaskApiTests(APITestBase):
                 },
             )
             self.assertEqual(oversized.status_code, 415)
+            source = image_bytes()
             done = client.post(
                 f"/v1/me/tasks/{task_id}/complete",
                 headers=auth(TOKEN),
-                files={"file": ("proof.png", image_bytes(), "image/png")},
+                files={"file": ("proof.png", source, "image/png")},
             )
             self.assertEqual(done.status_code, 200, done.text)
             payload = done.json()["task"]
@@ -625,6 +644,8 @@ class TaskApiTests(APITestBase):
                 (self.api_dir / "task-proofs" / "owner").glob(f"{task_id}.*")
             )
             self.assertEqual(len(stored), 1)
+            self.assertEqual(stored[0].suffix, ".png")
+            self.assertEqual(stored[0].read_bytes(), source)
             mode = stat.S_IMODE(stored[0].stat().st_mode)
             self.assertEqual(mode, 0o600)
 
@@ -660,6 +681,54 @@ class TaskApiTests(APITestBase):
                 self.assertEqual(image.format, "JPEG")
                 self.assertEqual(image.mode, "RGB")
                 self.assertEqual(image.size, (320, 180))
+
+    def test_large_proofs_are_compressed_to_one_megabyte(self) -> None:
+        formats = (
+            ("JPEG", "proof.jpeg", "image/jpeg"),
+            ("PNG", "proof.png", "image/png"),
+            ("WEBP", "proof.webp", "image/webp"),
+            ("HEIF", "proof.heic", "image/heic"),
+        )
+        with self.client() as client:
+            for fmt, filename, mime in formats:
+                with self.subTest(fmt=fmt):
+                    source = large_noise_bytes(fmt)
+                    self.assertGreater(len(source), 1_000_000)
+                    self.assertLess(len(source), 8 * 1024 * 1024)
+                    title = f"大图 {fmt}"
+                    created = client.post(
+                        "/v1/me/task-definitions",
+                        headers=auth(TOKEN),
+                        json={"title": title, "difficulty": 1},
+                    )
+                    self.assertEqual(created.status_code, 200, created.text)
+                    tasks = client.get(
+                        "/v1/me/tasks", headers=auth(TOKEN)
+                    ).json()["tasks"]
+                    task = next(row for row in tasks if row["title"] == title)
+                    done = client.post(
+                        f"/v1/me/tasks/{task['id']}/complete",
+                        headers=auth(TOKEN),
+                        files={"file": (filename, source, mime)},
+                    )
+                    self.assertEqual(done.status_code, 200, done.text)
+                    proof = client.get(
+                        done.json()["task"]["proof_url"], headers=auth(TOKEN)
+                    )
+                    self.assertEqual(proof.status_code, 200)
+                    self.assertEqual(proof.headers["content-type"], "image/jpeg")
+                    stored = list(
+                        (self.api_dir / "task-proofs" / "owner").glob(
+                            f"{task['id']}.*"
+                        )
+                    )
+                    self.assertEqual([path.suffix for path in stored], [".jpg"])
+                    stored_bytes = stored[0].read_bytes()
+                    self.assertLessEqual(len(stored_bytes), 1_000_000)
+                    self.assertNotEqual(stored_bytes, source)
+                    with Image.open(io.BytesIO(stored_bytes)) as image:
+                        self.assertEqual(image.format, "JPEG")
+                        self.assertEqual(image.mode, "RGB")
 
     def test_manual_complete_accepts_jpeg_proof(self) -> None:
         with self.client() as client:

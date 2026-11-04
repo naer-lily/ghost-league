@@ -40,10 +40,17 @@ Ghost 自有任务系统只有三类任务：
   `status='completed'`、`chest_status='available'`。
 - 图片存到 `data/api/task-proofs/<user_id>/<task_id>.<ext>`，目录 700、
   文件 600；只允许本人按 task id 读取。
-- 支持 JPEG / PNG / WebP / HEIC / HEIF；HEIC/HEIF 用 pillow-heif 解码后统一
-  转成 RGB JPEG（质量 90），仍以 `.jpg` + `image/jpeg` 存储，不保存原文件。
-  单文件 ≤ 8 MB、总像素 ≤ 40 MP；空文件、非图片和超限都按 `415` 拒绝，
-  超过 8 MB 为 `413`。其他图片路径不因此接受 HEIC/HEIF。
+- 前端上传前先调用 `compressTaskProof()`：已不超过 1,000,000 字节的文件原样
+  上传；更大的可解码图片按长边 2400 / 1600 / 1200 / 800、JPEG 质量
+  0.9 / 0.75 / 0.6 / 0.45 逐档压到 ≤1MB，返回 `.jpg` + `image/jpeg`。
+  浏览器无法解码（典型是 Chrome/Android 的 HEIC）时原样返回原文件，不报错，
+  交给服务端转换。
+- 支持 JPEG / PNG / WebP / HEIC / HEIF；HEIC/HEIF 用 pillow-heif 解码后
+  迭代缩质量/尺寸转成 RGB JPEG，最终 proof ≤ 1,000,000 字节，仍以 `.jpg` +
+  `image/jpeg` 存储，不保存原文件。客户端上传的 JPEG/PNG/WebP 原本
+  ≤1MB 时保持原字节和格式；超过 1MB 的也转成 JPEG 并压到 ≤1MB。
+  单文件上传上限 8 MB、总像素 ≤ 40 MP；空文件、非图片和超限都按 `415`
+  拒绝，超过 8 MB 为 `413`。其他图片路径不因此接受 HEIC/HEIF。
 
 ## 补断联任务
 
@@ -111,7 +118,9 @@ Ghost 自有任务系统只有三类任务：
 - 首页“任务”区按 `ends_at` 升序显示；没有任务时只留极简空态。
 - 任务卡显示相对剩余时间，由 `/v1/me/tasks` 的 `server_now` 驱动；任务查询每
   30 秒刷新，倒计时本身每秒随服务端时间前进。
-- 手动任务：隐藏 file input + `capture="environment"`，选图后直接上传。
+- 手动任务：隐藏 file input + `capture="environment"`；选图后先在浏览器里
+  调用 `compressTaskProof()` 压到 ≤1MB（HEIC 解不了则原样交给服务端），
+  压缩期间按钮显示“处理中…”，随后上传并显示“上传中…”，避免重复点击。
 - 系统任务：显示进度，例如 `420 / 1000 XP`。
 - active 的补断联任务显示“用余烬补”，点击调用既有的
   `POST /v1/me/repair`（`{date: missed_date, idempotency_key: ...}`）；成功后
