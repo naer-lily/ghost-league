@@ -2,6 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { Gift, Settings, X } from 'lucide-react'
 import { useState } from 'react'
 import { useTasks } from '../api/queries'
+import { useServerNow } from '../lib/useServerNow'
 import { TaskCard } from './TaskCard'
 import styles from './TaskList.module.css'
 
@@ -17,6 +18,7 @@ interface ClaimedChest {
 
 export function TaskList({ embersBalance, onOpenSettings }: TaskListProps) {
   const tasks = useTasks()
+  const now = useServerNow(tasks.data?.server_now, Boolean(tasks.data))
   const [claimed, setClaimed] = useState<ClaimedChest | null>(null)
   const items = tasks.data?.tasks ?? []
 
@@ -53,6 +55,7 @@ export function TaskList({ embersBalance, onOpenSettings }: TaskListProps) {
               key={task.id}
               task={task}
               embersBalance={embersBalance}
+              now={now}
               onClaimed={(amount, title) => setClaimed({ amount, title })}
             />
           ))}

@@ -78,7 +78,7 @@ describe('TaskList', () => {
         return response({ task })
       }
       if (url.endsWith('/v1/me/tasks')) {
-        return response({ server_now: '2026-11-04T12:00:00+08:00', tasks: [task] })
+        return response({ server_now: '2026-11-04T14:51:00+08:00', tasks: [task] })
       }
       return response({ detail: 'not found' }, 404)
     })
@@ -87,7 +87,8 @@ describe('TaskList', () => {
 
     const { container } = renderList()
     expect(await screen.findByText('速写一张')).toBeInTheDocument()
-    expect(screen.getByText('截止 11/05 00:00')).toBeInTheDocument()
+    expect(screen.getByText('还剩 9 小时 9 分')).toBeInTheDocument()
+    expect(screen.queryByText(/截止/)).not.toBeInTheDocument()
 
     const input = container.querySelector('input[type="file"]')
     expect(input).not.toBeNull()

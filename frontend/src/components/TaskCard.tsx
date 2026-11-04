@@ -7,19 +7,21 @@ import {
 } from '../api/queries'
 import type { TaskItem } from '../api/types'
 import { describeApiError } from '../lib/home'
-import { formatTaskDeadline } from '../lib/time'
+import { formatTaskCountdown } from '../lib/time'
 import { useUiStore } from '../store/useUiStore'
 import styles from './TaskCard.module.css'
 
 interface TaskCardProps {
   task: TaskItem
   embersBalance: number
+  now: Date
   onClaimed: (amount: number, title: string) => void
 }
 
 export function TaskCard({
   task,
   embersBalance,
+  now,
   onClaimed,
 }: TaskCardProps) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -37,7 +39,7 @@ export function TaskCard({
   const chestClaimed =
     task.status === 'completed' && task.chest_status === 'claimed'
   const canRepair = embersBalance >= 1
-  const deadline = formatTaskDeadline(task.ends_at)
+  const remaining = formatTaskCountdown(task.ends_at, now)
 
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -78,7 +80,7 @@ export function TaskCard({
           {task.description && task.source === 'daily_manual' ? (
             <p className={styles.description}>{task.description}</p>
           ) : null}
-          <p className={styles.deadline}>截止 {deadline}</p>
+          <p className={styles.deadline}>{remaining}</p>
         </div>
 
         {manualActive ? (

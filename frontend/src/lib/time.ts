@@ -51,12 +51,21 @@ export function formatAbsoluteTime(value: string): string {
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`
 }
 
-/** Task deadlines are stored on the hour and shown as ``MM/DD HH:00``. */
-export function formatTaskDeadline(value: string): string {
+/**
+ * Remaining time for a task card.  Callers pass the API's ``server_now`` (via
+ * ``useServerNow``) so a skewed browser clock cannot move the deadline.
+ */
+export function formatTaskCountdown(value: string, now: Date): string {
   const parsed = parseDate(value)
   if (!parsed) return '时间未知'
-  const parts = zonedParts(parsed)
-  return `${parts.month}/${parts.day} ${parts.hour}:00`
+  const diff = parsed.getTime() - now.getTime()
+  if (diff <= 0) return '已到期'
+
+  const totalMinutes = Math.max(1, Math.floor(diff / MINUTE))
+  if (totalMinutes < 60) return `还剩 ${totalMinutes} 分`
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return `还剩 ${hours} 小时 ${minutes} 分`
 }
 
 /**

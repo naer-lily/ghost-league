@@ -78,6 +78,73 @@ class DailyTaskTests(TaskStoreBase):
         self.assertIsNone(task["progress"])
         self.assertIsNone(task["missed_date"])
 
+    def test_definition_edit_syncs_active_instance(self) -> None:
+        definition = self.store.create_task_definition(
+            "u",
+            title="画五个 ghosting shape",
+            description="旧描述",
+            difficulty=1,
+            now=self.now,
+        )
+        self.store.ensure_user_tasks("u", self.now)
+        before = self.store.list_visible_tasks("u", self.now)[0]
+
+        self.store.update_task_definition(
+            "u",
+            definition["id"],
+            title="5 个 ghosting shape",
+            description="只要有笔有纸就能做！",
+            difficulty=3,
+            now=self.now,
+        )
+        self.assertEqual(self.store.ensure_user_tasks("u", self.now), 0)
+        after = self.store.list_visible_tasks("u", self.now)[0]
+
+        self.assertEqual(after["id"], before["id"])
+        self.assertEqual(after["title"], "5 个 ghosting shape")
+        self.assertEqual(after["description"], "只要有笔有纸就能做！")
+        self.assertEqual(after["difficulty"], 3)
+        self.assertEqual(after["chest_tier"], 3)
+        self.assertEqual(after["starts_at"], before["starts_at"])
+        self.assertEqual(after["ends_at"], before["ends_at"])
+
+    def test_definition_edit_keeps_completed_snapshot(self) -> None:
+        definition = self.store.create_task_definition(
+            "u",
+            title="画一张",
+            description="旧描述",
+            difficulty=1,
+            now=self.now,
+        )
+        self.store.ensure_user_tasks("u", self.now)
+        task = self.store.list_visible_tasks("u", self.now)[0]
+        completed = self.store.complete_manual_task(
+            "u",
+            task["id"],
+            proof_path="task-proofs/u/x.png",
+            proof_mime="image/png",
+            now=self.now,
+        )
+
+        self.store.update_task_definition(
+            "u",
+            definition["id"],
+            title="新的标题",
+            description="新的描述",
+            difficulty=3,
+            now=self.now,
+        )
+        self.store.ensure_user_tasks("u", self.now)
+        after = self.store.list_visible_tasks("u", self.now)[0]
+
+        self.assertEqual(after["id"], completed["id"])
+        self.assertEqual(after["status"], "completed")
+        self.assertEqual(after["title"], "画一张")
+        self.assertEqual(after["description"], "旧描述")
+        self.assertEqual(after["difficulty"], 1)
+        self.assertEqual(after["chest_tier"], 1)
+        self.assertEqual(after["completed_at"], completed["completed_at"])
+
     def test_difficulty_maps_to_wood_copper_silver(self) -> None:
         for difficulty, tier in ((1, 1), (2, 2), (3, 3)):
             self.store.create_task_definition(

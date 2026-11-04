@@ -17,7 +17,9 @@ Ghost 自有任务系统只有三类任务：
 
 ## 时间口径
 
-- 每个任务都有独立的 `starts_at` / `ends_at`，按整点存、界面显示到小时。
+- 每个任务都有独立的 `starts_at` / `ends_at`，按整点存。前端用
+  `GET /v1/me/tasks` 返回的 `server_now` 计算相对剩余时间：`还剩 X 小时 Y 分`、
+  不足 1 小时 `还剩 Y 分`、到点 `已到期`；不显示绝对截止时间，也不依赖手机时钟。
 - 判定窗口是 `starts_at <= now < ends_at`；到 `ends_at` 即隐藏。
 - 完成后到截止前仍显示；截止时未领取的宝箱变为 `forfeited`。
 - 任务进度和系统条件统一走 `GameStore.daily_activity_on_day()` /
@@ -29,6 +31,9 @@ Ghost 自有任务系统只有三类任务：
 - `task_definitions` 保存用户定义；同一用户最多 20 条 active 定义。
 - 读取任务列表时 `ensure_user_tasks()` 为每个 active 定义生成当天实例，
   幂等键 `daily:<definition_id>:<YYYY-MM-DD>`。
+- 当天已有 **active** 实例时，`ensure_user_tasks()` 用当前定义的
+  `title` / `description` / `difficulty` / `chest_tier` 同步该实例；编辑定义后
+  下一次读取即生效，不需要手工改库。`completed` / `expired` 实例保留历史快照。
 - 当天实例：`starts_at` = 当天 00:00，`ends_at` = 次日 00:00，
   `completion_mode='manual'`，`chest_tier=difficulty`。
 - 完成接口要求 `multipart/form-data` 的 `file` 图片；成功后
@@ -100,6 +105,8 @@ Ghost 自有任务系统只有三类任务：
 ## 前端
 
 - 首页“任务”区按 `ends_at` 升序显示；没有任务时只留极简空态。
+- 任务卡显示相对剩余时间，由 `/v1/me/tasks` 的 `server_now` 驱动；任务查询每
+  30 秒刷新，倒计时本身每秒随服务端时间前进。
 - 手动任务：隐藏 file input + `capture="environment"`，选图后直接上传。
 - 系统任务：显示进度，例如 `420 / 1000 XP`。
 - active 的补断联任务显示“用余烬补”，点击调用既有的

@@ -473,7 +473,11 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
 - `missed_date` 只有 `source=repair` 返回 `YYYY-MM-DD`（来自
   `system_key=repair:<date>`）；`daily_manual` 和 `weekend` 恒为 `null`。
   前端用它调用既有的 `POST /v1/me/repair`。
+- `server_now` 是任务卡倒计时的权威当前时间；前端不读手机时钟判断剩余时间。
 - 截止后任务整条隐藏；已完成但未领取的宝箱在截止时作废。
+- 每日手动任务读取时会用当前定义同步当天仍为 `active` 的实例
+  （`title` / `description` / `difficulty` / `chest_tier`）；`completed` / `expired`
+  实例保持历史快照。
 
 ### `POST /v1/me/tasks/{task_id}/complete`
 
@@ -537,7 +541,8 @@ Body：
 
 ### `PATCH /v1/me/task-definitions/{id}`
 
-Body 与创建相同，只允许 owner。修改只影响之后生成的实例，已有实例不变。
+Body 与创建相同，只允许 owner。修改会同步当天仍为 `active` 的实例；
+`completed` / `expired` 实例保持历史快照，不追溯改写。
 
 ### `DELETE /v1/me/task-definitions/{id}`
 

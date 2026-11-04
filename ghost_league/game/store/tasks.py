@@ -193,6 +193,10 @@ class TasksMixin:
             ).fetchall()
             for definition in definitions:
                 system_key = f"daily:{definition['id']}:{today.isoformat()}"
+                title = str(definition["title"])
+                description = str(definition["description"])
+                difficulty = int(definition["difficulty"])
+                chest_tier = MANUAL_CHEST_TIER[difficulty]
                 cursor = conn.execute(
                     "INSERT OR IGNORE INTO task_instances "
                     "(id, user_id, definition_id, source, system_key, title, "
@@ -208,10 +212,10 @@ class TasksMixin:
                         user_id,
                         definition["id"],
                         system_key,
-                        str(definition["title"]),
-                        str(definition["description"]),
-                        int(definition["difficulty"]),
-                        MANUAL_CHEST_TIER[int(definition["difficulty"])],
+                        title,
+                        description,
+                        difficulty,
+                        chest_tier,
                         starts_at,
                         ends_at,
                         stamp,
@@ -219,6 +223,28 @@ class TasksMixin:
                     ),
                 )
                 inserted += max(0, cursor.rowcount)
+                # Edits apply to today's still-active instance.  Completed and
+                # expired instances keep the snapshot they were earned with.
+                conn.execute(
+                    "UPDATE task_instances SET title = ?, description = ?, "
+                    "difficulty = ?, chest_tier = ?, updated_at = ? "
+                    "WHERE user_id = ? AND system_key = ? AND status = 'active' "
+                    "AND (title != ? OR description != ? OR difficulty != ? "
+                    "OR chest_tier != ?)",
+                    (
+                        title,
+                        description,
+                        difficulty,
+                        chest_tier,
+                        stamp,
+                        user_id,
+                        system_key,
+                        title,
+                        description,
+                        difficulty,
+                        chest_tier,
+                    ),
+                )
         return inserted
 
     def ensure_repair_tasks(
