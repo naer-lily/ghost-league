@@ -1214,6 +1214,12 @@ describe('TaskList', () => {
     expect(
       within(daily).getByTestId('bet-task-diff-daily'),
     ).toHaveTextContent('-15')
+    expect(
+      within(daily).getByTestId('bet-task-settle-daily'),
+    ).toHaveTextContent('22:30 结算')
+    expect(
+      within(daily).queryByTestId('bet-task-cutoff-daily'),
+    ).not.toBeInTheDocument()
     const weekly = screen.getByTestId('bet-task-weekly')
     expect(within(weekly).getByTestId('bet-task-me-weekly')).toHaveTextContent(
       '1,000',
@@ -1224,6 +1230,12 @@ describe('TaskList', () => {
     expect(
       within(weekly).getByTestId('bet-task-diff-weekly'),
     ).toHaveTextContent('0')
+    expect(
+      within(weekly).getByTestId('bet-task-settle-weekly'),
+    ).toHaveTextContent('周一 00:05 结算')
+    expect(
+      within(weekly).queryByTestId('bet-task-cutoff-weekly'),
+    ).not.toBeInTheDocument()
 
     expect(entryKeys(container)).toEqual([
       'bet',
@@ -1256,6 +1268,64 @@ describe('TaskList', () => {
       screen.queryByTestId('bet-task-details-daily'),
     ).not.toBeInTheDocument()
     expect(onOpenBets).not.toHaveBeenCalled()
+  })
+
+  it('keeps the settlement time and result chip on settled bet rows', async () => {
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-04T23:00:00+08:00',
+            tasks: [],
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      }),
+    )
+    const rivalState = makeRivalState({
+      bets: {
+        weekly: makeBet({
+          id: 2,
+          kind: 'weekly',
+          period_key: '2026-11-02',
+          status: 'lost',
+          result_diff: -5,
+          settled_at: '2026-11-09T00:05:00+08:00',
+        }),
+        daily: makeBet({
+          id: 1,
+          status: 'won',
+          result_diff: 15,
+          payout: 240,
+          settled_at: '2026-11-04T22:30:00+08:00',
+        }),
+        group: null,
+      },
+    })
+    renderList(1, vi.fn(), { rivalState, onOpenBets: vi.fn() })
+
+    const daily = await screen.findByTestId('bet-task-daily')
+    expect(daily).toHaveAttribute('data-state', 'settled')
+    expect(
+      within(daily).getByTestId('bet-task-settle-daily'),
+    ).toHaveTextContent('22:30 结算')
+    expect(
+      within(daily).getByTestId('bet-task-result-daily'),
+    ).toHaveTextContent('已赢 +240')
+    expect(
+      within(daily).queryByTestId('bet-task-cutoff-daily'),
+    ).not.toBeInTheDocument()
+
+    const weekly = screen.getByTestId('bet-task-weekly')
+    expect(weekly).toHaveAttribute('data-state', 'settled')
+    expect(
+      within(weekly).getByTestId('bet-task-settle-weekly'),
+    ).toHaveTextContent('周一 00:05 结算')
+    expect(
+      within(weekly).getByTestId('bet-task-result-weekly'),
+    ).toHaveTextContent('已输')
   })
 
   it('opens the matching bet dialog from the unbet rows', async () => {
