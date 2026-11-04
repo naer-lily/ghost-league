@@ -120,10 +120,14 @@ Ghost 自有任务系统只有三类任务：
 
 ## 前端
 
-- 首页“任务”区完全按 `GET /v1/me/tasks` 的返回顺序显示，前端不排序；
-  每日任务组内顺序与设置一致，补断联、周末任务继续按截止时间参与排序。
-  `completed` 且宝箱已领取（或作废/无宝箱）的任务沉到列表底部，未领取宝箱的
-  `completed` 任务与 active 任务一起按截止时间正常排序。
+- 后端 `GET /v1/me/tasks` 只保证稳定数据顺序
+  （`ends_at, sort_order, created_at, id`），不包含任何展示分组。
+- 首页“任务”区在前端用 `useMemo` 对返回数组生成排序副本，不改原数组：
+  先按 bucket 排，active 或 `completed + chest_status='available'` 为 bucket 0，
+  其余 completed（宝箱已领取/作废/无宝箱）为 bucket 1 沉底；bucket 内按
+  `ends_at`、`sort_order`、`id` 升序。未领取宝箱的 completed 任务留在原位，
+  补断联、周末任务按各自截止时间参与排序。
+- 设置里拖拽仍写 `sort_order`；重排后首页按新的 `sort_order` 生效，刷新保持。
 - 没有任务时只留极简空态。
 - 任务卡显示相对剩余时间，由 `/v1/me/tasks` 的 `server_now` 驱动；任务查询每
   30 秒刷新，倒计时本身每秒随服务端时间前进。

@@ -247,9 +247,7 @@ class DailyTaskTests(TaskStoreBase):
             ["B", "A", "补断联 · 10/29"],
         )
 
-    def test_claimed_completed_task_sinks_below_active_and_available_chests(
-        self,
-    ) -> None:
+    def test_list_visible_tasks_keeps_stable_order_without_ui_grouping(self) -> None:
         for title in ("A", "B", "C", "D"):
             self.store.create_task_definition(
                 "u", title=title, difficulty=1, now=self.now
@@ -278,12 +276,20 @@ class DailyTaskTests(TaskStoreBase):
 
         visible = self.store.list_visible_tasks("u", self.now)
         self.assertEqual(
-            [(task["title"], task["status"], task["chest_status"]) for task in visible],
             [
-                ("A", "active", "none"),
-                ("C", "active", "none"),
-                ("D", "completed", "available"),
-                ("B", "completed", "claimed"),
+                (
+                    task["title"],
+                    task["status"],
+                    task["chest_status"],
+                    task["sort_order"],
+                )
+                for task in visible
+            ],
+            [
+                ("A", "active", "none", 10),
+                ("B", "completed", "claimed", 20),
+                ("C", "active", "none", 30),
+                ("D", "completed", "available", 40),
             ],
         )
 
@@ -291,13 +297,13 @@ class DailyTaskTests(TaskStoreBase):
         self.store.ensure_repair_tasks("u", self.now.date(), now=self.now)
         visible = self.store.list_visible_tasks("u", self.now)
         self.assertEqual(
-            [(task["title"], task["ends_at"]) for task in visible],
+            [(task["title"], task["ends_at"], task["sort_order"]) for task in visible],
             [
-                ("A", "2026-11-05T00:00:00+08:00"),
-                ("C", "2026-11-05T00:00:00+08:00"),
-                ("D", "2026-11-05T00:00:00+08:00"),
-                ("补断联 · 10/29", "2026-11-06T00:00:00+08:00"),
-                ("B", "2026-11-05T00:00:00+08:00"),
+                ("A", "2026-11-05T00:00:00+08:00", 10),
+                ("B", "2026-11-05T00:00:00+08:00", 20),
+                ("C", "2026-11-05T00:00:00+08:00", 30),
+                ("D", "2026-11-05T00:00:00+08:00", 40),
+                ("补断联 · 10/29", "2026-11-06T00:00:00+08:00", 0),
             ],
         )
 
@@ -718,6 +724,7 @@ class TaskApiTests(APITestBase):
             self.assertEqual(len(tasks), 1)
             self.assertEqual(tasks[0]["title"], "新标题")
             self.assertEqual(tasks[0]["chest_tier"], 3)
+            self.assertEqual(tasks[0]["sort_order"], 10)
             deleted = client.delete(
                 f"/v1/me/task-definitions/{definition['id']}",
                 headers=auth(TOKEN),
@@ -779,11 +786,14 @@ class TaskApiTests(APITestBase):
             )
             before = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]
             self.assertEqual(
-                [(task["title"], task["ends_at"]) for task in before],
                 [
-                    ("A", "2026-11-05T00:00:00+08:00"),
-                    ("B", "2026-11-05T00:00:00+08:00"),
-                    ("补断联 · 10/29", "2026-11-06T00:00:00+08:00"),
+                    (task["title"], task["ends_at"], task["sort_order"])
+                    for task in before
+                ],
+                [
+                    ("A", "2026-11-05T00:00:00+08:00", 10),
+                    ("B", "2026-11-05T00:00:00+08:00", 20),
+                    ("补断联 · 10/29", "2026-11-06T00:00:00+08:00", 0),
                 ],
             )
 
@@ -799,11 +809,14 @@ class TaskApiTests(APITestBase):
             )
             tasks = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]
             self.assertEqual(
-                [(task["title"], task["ends_at"]) for task in tasks],
                 [
-                    ("B", "2026-11-05T00:00:00+08:00"),
-                    ("A", "2026-11-05T00:00:00+08:00"),
-                    ("补断联 · 10/29", "2026-11-06T00:00:00+08:00"),
+                    (task["title"], task["ends_at"], task["sort_order"])
+                    for task in tasks
+                ],
+                [
+                    ("B", "2026-11-05T00:00:00+08:00", 10),
+                    ("A", "2026-11-05T00:00:00+08:00", 20),
+                    ("补断联 · 10/29", "2026-11-06T00:00:00+08:00", 0),
                 ],
             )
 
@@ -832,6 +845,54 @@ class TaskApiTests(APITestBase):
             self.assertEqual(
                 [task["title"] for task in tasks],
                 ["B", "A", "补断联 · 10/29"],
+            )
+
+    def test_task_list_keeps_stable_order_after_chest_claim(self) -> None:
+        self.clock["now"] = datetime(2026, 11, 4, 12, 0, 0, tzinfo=TZ)
+        with self.client() as client:
+            for title in ("A", "B", "C"):
+                self.assertEqual(
+                    client.post(
+                        "/v1/me/task-definitions",
+                        headers=auth(TOKEN),
+                        json={"title": title, "difficulty": 1},
+                    ).status_code,
+                    200,
+                )
+            by_title = {
+                task["title"]: task
+                for task in client.get(
+                    "/v1/me/tasks", headers=auth(TOKEN)
+                ).json()["tasks"]
+            }
+            completed = client.post(
+                f"/v1/me/tasks/{by_title['B']['id']}/complete",
+                headers=auth(TOKEN),
+                files={"file": ("proof.png", image_bytes(), "image/png")},
+            )
+            self.assertEqual(completed.status_code, 200, completed.text)
+            claimed = client.post(
+                f"/v1/me/tasks/{by_title['B']['id']}/chest",
+                headers=auth(TOKEN),
+            )
+            self.assertEqual(claimed.status_code, 200, claimed.text)
+
+            visible = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]
+            self.assertEqual(
+                [
+                    (
+                        task["title"],
+                        task["status"],
+                        task["chest_status"],
+                        task["sort_order"],
+                    )
+                    for task in visible
+                ],
+                [
+                    ("A", "active", "none", 10),
+                    ("B", "completed", "claimed", 20),
+                    ("C", "active", "none", 30),
+                ],
             )
 
     def test_manual_complete_requires_image_and_returns_task(self) -> None:

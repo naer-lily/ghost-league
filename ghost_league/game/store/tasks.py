@@ -555,6 +555,7 @@ class TasksMixin:
             "description": str(task["description"]),
             "difficulty": int(task["difficulty"]),
             "chest_tier": int(task["chest_tier"]),
+            "sort_order": int(task["sort_order"]),
             "starts_at": str(task["starts_at"]),
             "ends_at": str(task["ends_at"]),
             "missed_date": missed.isoformat() if missed is not None else None,
@@ -577,11 +578,9 @@ class TasksMixin:
     ) -> list[dict[str, Any]]:
         """Refresh then return active/completed tasks whose deadline has not passed.
 
-        Completed tasks with an unclaimed chest stay in the normal deadline
-        order so users can find and claim them. Completed tasks whose chest is
-        claimed, forfeited, or absent sink below every active task and every
-        completed task with an available chest. Within each group the usual
-        deadline, sort order, and creation order still apply.
+        The store only guarantees a stable data order. Display ordering (for
+        example sinking completed tasks whose chest was claimed) belongs to the
+        UI, not to this query.
         """
 
         local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
@@ -592,12 +591,7 @@ class TasksMixin:
                 "SELECT * FROM task_instances "
                 "WHERE user_id = ? AND status IN ('active', 'completed') "
                 "AND starts_at <= ? AND ends_at > ? "
-                "ORDER BY CASE "
-                "WHEN status = 'completed' AND chest_status = 'available' "
-                "THEN 0 "
-                "WHEN status = 'completed' THEN 1 "
-                "ELSE 0 END ASC, "
-                "ends_at ASC, sort_order ASC, created_at ASC, id ASC",
+                "ORDER BY ends_at ASC, sort_order ASC, created_at ASC, id ASC",
                 (user_id, now_iso, now_iso),
             ).fetchall()
             return [

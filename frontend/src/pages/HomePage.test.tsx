@@ -1,5 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -486,6 +492,7 @@ describe('HomePage rework', () => {
             description: '',
             difficulty: 2,
             chest_tier: 2,
+            sort_order: 10,
             starts_at: '2026-11-04T00:00:00+08:00',
             ends_at: '2026-11-05T00:00:00+08:00',
             status: 'active',
@@ -511,14 +518,79 @@ describe('HomePage rework', () => {
     expect(screen.queryByText(/概率|机制|DSL/)).not.toBeInTheDocument()
   })
 
-  it('renders task cards in the exact order returned by the API', async () => {
-    const task = (id: string, title: string) => ({
+  it('sorts task cards on the client instead of trusting the API order', async () => {
+    const task = (
+      id: string,
+      title: string,
+      sortOrder: number,
+      overrides: Record<string, unknown> = {},
+    ) => ({
       id,
       source: 'daily_manual',
       title,
       description: '',
       difficulty: 1,
       chest_tier: 1,
+      sort_order: sortOrder,
+      starts_at: '2026-11-04T00:00:00+08:00',
+      ends_at: '2026-11-05T00:00:00+08:00',
+      status: 'active',
+      completed_at: null,
+      chest_status: 'none',
+      chest_amount: null,
+      proof_url: null,
+      progress: null,
+      ...overrides,
+    })
+    vi.stubGlobal(
+      'fetch',
+      mockApi({
+        tasks: [
+          task('ti_b', 'B', 20, {
+            status: 'completed',
+            chest_status: 'claimed',
+          }),
+          task('ti_d', 'D', 40, {
+            status: 'completed',
+            chest_status: 'available',
+          }),
+          task('ti_a', 'A', 10),
+          task('ti_c', 'C', 30),
+        ],
+      }),
+    )
+
+    renderHome()
+
+    const list = await screen.findByTestId('task-list')
+    await screen.findByText('A')
+    expect(
+      within(list)
+        .getAllByRole('heading', { level: 3 })
+        .map((heading) => heading.textContent),
+    ).toEqual(['A', 'C', 'D', 'B'])
+  })
+
+  it('updates the home task order after a settings drag reorder', async () => {
+    const makeDefinition = (id: string, title: string, sortOrder: number) => ({
+      id,
+      user_id: 'owner',
+      title,
+      description: '',
+      difficulty: 1,
+      active: true,
+      sort_order: sortOrder,
+      created_at: '2026-11-04T10:00:00+08:00',
+      updated_at: '2026-11-04T10:00:00+08:00',
+    })
+    const makeTask = (id: string, title: string, sortOrder: number) => ({
+      id,
+      source: 'daily_manual',
+      title,
+      description: '',
+      difficulty: 1,
+      chest_tier: 1,
+      sort_order: sortOrder,
       starts_at: '2026-11-04T00:00:00+08:00',
       ends_at: '2026-11-05T00:00:00+08:00',
       status: 'active',
@@ -528,19 +600,96 @@ describe('HomePage rework', () => {
       proof_url: null,
       progress: null,
     })
+    let definitions = [
+      makeDefinition('td_a', 'A', 10),
+      makeDefinition('td_b', 'B', 20),
+    ]
+    let tasks = [makeTask('ti_a', 'A', 10), makeTask('ti_b', 'B', 20)]
+    const base = mockApi()
     vi.stubGlobal(
       'fetch',
-      mockApi({ tasks: [task('ti_b', '先做这个'), task('ti_a', '再做这个')] }),
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (
+          url.endsWith('/v1/me/task-definitions/order') &&
+          init?.method === 'PUT'
+        ) {
+          const ids = JSON.parse(String(init.body)).ids as string[]
+          definitions = ids.map((id, index) => {
+            const row = definitions.find((item) => item.id === id)!
+            return { ...row, sort_order: (index + 1) * 10 }
+          })
+          const taskById = new Map(tasks.map((row) => [row.id, row]))
+          tasks = ids.map((id, index) => ({
+            ...taskById.get(id.replace('td_', 'ti_'))!,
+            sort_order: (index + 1) * 10,
+          }))
+          return response(definitions)
+        }
+        if (url.endsWith('/v1/me/task-definitions')) {
+          return response(definitions)
+        }
+        if (url.endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: new Date().toISOString(),
+            tasks,
+          })
+        }
+        return base(input)
+      }),
     )
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const top = this.dataset.taskId === 'td_b' ? 58 : 0
+        return {
+          top,
+          bottom: top + 50,
+          height: 50,
+          left: 0,
+          right: 300,
+          width: 300,
+          x: 0,
+          y: top,
+          toJSON: () => undefined,
+        } as DOMRect
+      })
 
     renderHome()
 
     const list = await screen.findByTestId('task-list')
-    await screen.findByText('先做这个')
-    expect(
-      within(list)
-        .getAllByRole('heading', { level: 3 })
-        .map((heading) => heading.textContent),
-    ).toEqual(['先做这个', '再做这个'])
+    await screen.findByText('A')
+    const homeTitles = () =>
+      Array.from(list.querySelectorAll('h3')).map(
+        (heading) => heading.textContent ?? '',
+      )
+    expect(homeTitles()).toEqual(['A', 'B'])
+
+    await userEvent.click(screen.getByRole('button', { name: '任务设置' }))
+    const handle = await screen.findByRole('button', { name: '拖动排序 A' })
+    fireEvent.pointerDown(handle, {
+      pointerId: 1,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientY: 20,
+    })
+    fireEvent.pointerMove(handle, {
+      pointerId: 1,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientY: 100,
+    })
+    fireEvent.pointerUp(handle, {
+      pointerId: 1,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientY: 100,
+    })
+
+    await waitFor(() => expect(homeTitles()).toEqual(['B', 'A']))
+    rectSpy.mockRestore()
   })
 })

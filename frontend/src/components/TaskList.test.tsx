@@ -10,6 +10,7 @@ import {
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
+import { tasksQueryKey } from '../api/queries'
 import type { TaskItem } from '../api/types'
 import { compressTaskProof } from '../lib/image'
 import { useUiStore } from '../store/useUiStore'
@@ -35,6 +36,7 @@ function makeTask(overrides: Partial<TaskItem> = {}): TaskItem {
     description: '',
     difficulty: 2,
     chest_tier: 2,
+    sort_order: 10,
     starts_at: '2026-11-04T00:00:00+08:00',
     ends_at: '2026-11-05T00:00:00+08:00',
     missed_date: null,
@@ -57,6 +59,7 @@ function renderList(embersBalance = 1, onOpenSettings = vi.fn()) {
   })
   return {
     onOpenSettings,
+    queryClient,
     ...render(
       <QueryClientProvider client={queryClient}>
         <TaskList
@@ -66,6 +69,12 @@ function renderList(embersBalance = 1, onOpenSettings = vi.fn()) {
       </QueryClientProvider>,
     ),
   }
+}
+
+function taskTitles(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll('h3')).map(
+    (heading) => heading.textContent ?? '',
+  )
 }
 
 describe('TaskList', () => {
@@ -386,6 +395,113 @@ describe('TaskList', () => {
     expect(
       screen.getByRole('button', { name: '领取补断联 · 10/29的宝箱' }),
     ).toBeInTheDocument()
+  })
+
+  it('sorts active and unclaimed-chest tasks ahead of claimed completions', async () => {
+    const tasks = [
+      makeTask({
+        id: 'ti_b',
+        title: 'B',
+        status: 'completed',
+        chest_status: 'claimed',
+        sort_order: 20,
+      }),
+      makeTask({
+        id: 'ti_d',
+        title: 'D',
+        status: 'completed',
+        chest_status: 'available',
+        sort_order: 40,
+      }),
+      makeTask({ id: 'ti_a', title: 'A', sort_order: 10 }),
+      makeTask({ id: 'ti_c', title: 'C', sort_order: 30 }),
+    ]
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-04T12:00:00+08:00',
+            tasks,
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      }),
+    )
+
+    const { container } = renderList()
+    await screen.findByText('A')
+
+    expect(taskTitles(container)).toEqual(['A', 'C', 'D', 'B'])
+  })
+
+  it("puts an active repair task after today's tasks by its 11/06 deadline", async () => {
+    const tasks = [
+      makeTask({
+        id: 'ti_repair',
+        source: 'repair',
+        title: '补断联 · 10/29',
+        ends_at: '2026-11-06T00:00:00+08:00',
+        missed_date: '2026-10-29',
+        sort_order: 0,
+        progress: { current: 0, target: 1 },
+      }),
+      makeTask({ id: 'ti_b', title: 'B', sort_order: 20 }),
+      makeTask({ id: 'ti_a', title: 'A', sort_order: 10 }),
+    ]
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-04T12:00:00+08:00',
+            tasks,
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      }),
+    )
+
+    const { container } = renderList()
+    await screen.findByText('A')
+
+    expect(taskTitles(container)).toEqual(['A', 'B', '补断联 · 10/29'])
+  })
+
+  it('follows the new sort_order after a settings reorder refetch', async () => {
+    let tasks = [
+      makeTask({ id: 'ti_a', title: 'A', sort_order: 10 }),
+      makeTask({ id: 'ti_b', title: 'B', sort_order: 20 }),
+    ]
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-04T12:00:00+08:00',
+            tasks,
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      }),
+    )
+
+    const { container, queryClient } = renderList()
+    await screen.findByText('A')
+    expect(taskTitles(container)).toEqual(['A', 'B'])
+
+    tasks = [
+      makeTask({ id: 'ti_a', title: 'A', sort_order: 20 }),
+      makeTask({ id: 'ti_b', title: 'B', sort_order: 10 }),
+    ]
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: tasksQueryKey })
+    })
+
+    await waitFor(() => expect(taskTitles(container)).toEqual(['B', 'A']))
   })
 
   it('opens task settings from the section header', async () => {

@@ -450,6 +450,7 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
       "description": "",
       "difficulty": 2,
       "chest_tier": 2,
+      "sort_order": 10,
       "starts_at": "2026-11-04T00:00:00+08:00",
       "ends_at": "2026-11-05T00:00:00+08:00",
       "missed_date": null,
@@ -465,22 +466,12 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
 ```
 
 - 只返回 `status IN ('active','completed')` 且 `starts_at <= now < ends_at` 的任务。
-  排序先分组：`completed` 且 `chest_status='available'` 与所有 active 任务同组，
-  按 `ends_at ASC, sort_order ASC, created_at ASC, id ASC` 排；`completed` 但宝箱已
-  `claimed` / `forfeited` / 无宝箱的任务沉到最底部，组内仍按同样的截止时间与
-  `sort_order` 排。等价排序键：
-
-  ```sql
-  CASE
-    WHEN status = 'completed' AND chest_status = 'available' THEN 0
-    WHEN status = 'completed' THEN 1
-    ELSE 0
-  END ASC,
-  ends_at ASC, sort_order ASC, created_at ASC, id ASC
-  ```
-
-  每日手动任务截止时间都在当天 24:00，组内顺序由定义顺序决定；补断联、周末任务
-  仍按各自截止时间参与排序，不会因为沉底规则被提前。前端不再二次排序。
+  后端只保证稳定的数据顺序，排序键固定为
+  `ends_at ASC, sort_order ASC, created_at ASC, id ASC`；不再按 completed / 宝箱
+  状态分组或沉底。展示排序（active、未领宝箱的 completed 靠前，已领取/作废/
+  无宝箱的 completed 沉底）由前端在排序副本上完成，SQL 不写 UI 规则。
+- `sort_order` 是该任务实例当前的排序值；每日手动任务随设置里的拖拽/重排更新，
+  系统任务使用生成时的值。
 - `source`：`daily_manual` / `repair` / `weekend`。
 - `status`：`active` / `completed` / `expired`。
 - `chest_status`：`none` / `available` / `claimed` / `forfeited`。

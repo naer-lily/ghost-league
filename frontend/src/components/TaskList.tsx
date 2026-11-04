@@ -1,7 +1,8 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { Gift, Settings, X } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTasks } from '../api/queries'
+import type { TaskItem } from '../api/types'
 import { useServerNow } from '../lib/useServerNow'
 import { TaskCard } from './TaskCard'
 import styles from './TaskList.module.css'
@@ -16,11 +17,35 @@ interface ClaimedChest {
   title: string
 }
 
+function displayBucket(task: TaskItem): number {
+  if (
+    task.status === 'active' ||
+    (task.status === 'completed' && task.chest_status === 'available')
+  ) {
+    return 0
+  }
+  return 1
+}
+
+export function sortTasksForDisplay(tasks: readonly TaskItem[]): TaskItem[] {
+  return [...tasks].sort((left, right) => {
+    const bucket = displayBucket(left) - displayBucket(right)
+    if (bucket !== 0) return bucket
+    if (left.ends_at !== right.ends_at) return left.ends_at < right.ends_at ? -1 : 1
+    if (left.sort_order !== right.sort_order) {
+      return left.sort_order - right.sort_order
+    }
+    if (left.id === right.id) return 0
+    return left.id < right.id ? -1 : 1
+  })
+}
+
 export function TaskList({ embersBalance, onOpenSettings }: TaskListProps) {
   const tasks = useTasks()
   const now = useServerNow(tasks.data?.server_now, Boolean(tasks.data))
   const [claimed, setClaimed] = useState<ClaimedChest | null>(null)
-  const items = tasks.data?.tasks ?? []
+  const items = useMemo(() => tasks.data?.tasks ?? [], [tasks.data])
+  const ordered = useMemo(() => sortTasksForDisplay(items), [items])
 
   return (
     <section className={styles.section} aria-labelledby="home-tasks-title" data-testid="task-list">
@@ -50,7 +75,7 @@ export function TaskList({ embersBalance, onOpenSettings }: TaskListProps) {
         <p className={styles.empty}>今天还没有任务。</p>
       ) : (
         <div className={styles.list}>
-          {items.map((task) => (
+          {ordered.map((task) => (
             <TaskCard
               key={task.id}
               task={task}

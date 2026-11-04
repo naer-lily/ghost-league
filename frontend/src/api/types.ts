@@ -542,6 +542,7 @@ export interface TaskItem {
   description: string
   difficulty: number
   chest_tier: number
+  sort_order: number
   starts_at: string
   ends_at: string
   missed_date: string | null
