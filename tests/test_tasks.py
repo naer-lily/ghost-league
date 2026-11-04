@@ -76,6 +76,7 @@ class DailyTaskTests(TaskStoreBase):
         self.assertEqual(task["starts_at"], "2026-11-04T00:00:00+08:00")
         self.assertEqual(task["ends_at"], "2026-11-05T00:00:00+08:00")
         self.assertIsNone(task["progress"])
+        self.assertIsNone(task["missed_date"])
 
     def test_difficulty_maps_to_wood_copper_silver(self) -> None:
         for difficulty, tier in ((1, 1), (2, 2), (3, 3)):
@@ -258,6 +259,7 @@ class RepairTaskTests(TaskStoreBase):
         self.assertEqual(task["starts_at"], "2026-11-04T00:00:00+08:00")
         self.assertEqual(task["ends_at"], "2026-11-06T00:00:00+08:00")
         self.assertEqual(task["progress"], {"current": 0, "target": 1})
+        self.assertEqual(task["missed_date"], "2026-10-29")
 
     def test_repaired_checkin_auto_completes(self) -> None:
         self.add_activity("2026-10-29", 444)
@@ -302,6 +304,7 @@ class WeekendTaskTests(TaskStoreBase):
         self.assertEqual(task["starts_at"], "2026-10-31T00:00:00+08:00")
         self.assertEqual(task["ends_at"], "2026-11-02T00:00:00+08:00")
         self.assertEqual(task["progress"], {"current": 0, "target": 1000})
+        self.assertIsNone(task["missed_date"])
 
     def test_sunday_generates_the_same_weekend_instance(self) -> None:
         sunday = datetime(2026, 11, 1, 12, 0, 0, tzinfo=TZ)
@@ -634,6 +637,7 @@ class TaskApiTests(APITestBase):
             self.assertEqual(repair[0]["description"], "当天只拿到 74 XP；用余烬补上。")
             self.assertEqual(repair[0]["ends_at"], "2026-11-02T00:00:00+08:00")
             self.assertEqual(repair[0]["progress"], {"current": 0, "target": 1})
+            self.assertEqual(repair[0]["missed_date"], "2026-10-25")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
-import { Camera, Check, Gift } from 'lucide-react'
+import { Camera, Check, Flame, Gift } from 'lucide-react'
 import { useRef, type ChangeEvent } from 'react'
 import {
   useClaimTaskChest,
   useCompleteTask,
+  useRepairTask,
 } from '../api/queries'
 import type { TaskItem } from '../api/types'
 import { describeApiError } from '../lib/home'
@@ -19,9 +20,12 @@ export function TaskCard({ task, onClaimed }: TaskCardProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const completeTask = useCompleteTask()
   const claimChest = useClaimTaskChest()
+  const repairTask = useRepairTask()
   const notify = useUiStore((state) => state.notify)
 
   const manualActive = task.source === 'daily_manual' && task.status === 'active'
+  const repairActive =
+    task.source === 'repair' && task.status === 'active' && task.missed_date
   const dslActive = task.source !== 'daily_manual' && task.status === 'active'
   const chestAvailable =
     task.status === 'completed' && task.chest_status === 'available'
@@ -47,6 +51,17 @@ export function TaskCard({ task, onClaimed }: TaskCardProps) {
       onSuccess: (result) => onClaimed(result.amount, task.title),
       onError: (error) => notify(describeApiError(error), 'error'),
     })
+  }
+
+  function onRepair() {
+    if (!task.missed_date) return
+    repairTask.mutate(
+      { date: task.missed_date },
+      {
+        onSuccess: () => notify('补上了。'),
+        onError: (error) => notify(describeApiError(error), 'error'),
+      },
+    )
   }
 
   return (
@@ -81,6 +96,16 @@ export function TaskCard({ task, onClaimed }: TaskCardProps) {
               {completeTask.isPending ? '上传中…' : '拍照完成'}
             </button>
           </>
+        ) : repairActive ? (
+          <button
+            type="button"
+            className={styles.action}
+            onClick={onRepair}
+            disabled={repairTask.isPending}
+          >
+            <Flame size={16} aria-hidden="true" />
+            {repairTask.isPending ? '补录中…' : '用余烬补'}
+          </button>
         ) : dslActive && task.progress ? (
           <p className={styles.progress} data-testid="task-progress">
             {task.progress.current} / {task.progress.target}

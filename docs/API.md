@@ -451,6 +451,7 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
       "chest_tier": 2,
       "starts_at": "2026-11-04T00:00:00+08:00",
       "ends_at": "2026-11-05T00:00:00+08:00",
+      "missed_date": null,
       "status": "active",
       "completed_at": null,
       "chest_status": "none",
@@ -469,6 +470,9 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
 - `chest_status`：`none` / `available` / `claimed` / `forfeited`。
 - `progress` 只对系统 DSL 任务返回 `{"current": int, "target": int}`；手动任务为
   `null`。周六周日任务统计两天累计 XP，补断联任务为 `0/1` 或 `1/1`。
+- `missed_date` 只有 `source=repair` 返回 `YYYY-MM-DD`（来自
+  `system_key=repair:<date>`）；`daily_manual` 和 `weekend` 恒为 `null`。
+  前端用它调用既有的 `POST /v1/me/repair`。
 - 截止后任务整条隐藏；已完成但未领取的宝箱在截止时作废。
 
 ### `POST /v1/me/tasks/{task_id}/complete`

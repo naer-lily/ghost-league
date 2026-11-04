@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
 import type { TaskItem } from '../api/types'
+import { useUiStore } from '../store/useUiStore'
 import { TaskList } from './TaskList'
 
 function response(payload: unknown, status = 200): Response {
@@ -24,6 +25,7 @@ function makeTask(overrides: Partial<TaskItem> = {}): TaskItem {
     chest_tier: 2,
     starts_at: '2026-11-04T00:00:00+08:00',
     ends_at: '2026-11-05T00:00:00+08:00',
+    missed_date: null,
     status: 'active',
     completed_at: null,
     chest_status: 'none',
@@ -142,6 +144,126 @@ describe('TaskList', () => {
     )
     expect(screen.queryByRole('button', { name: /拍照完成/ })).not.toBeInTheDocument()
     expect(screen.queryByText('周六周日累计 1000 XP。')).not.toBeInTheDocument()
+  })
+
+  it('repairs a missed day from the task card and then shows completed', async () => {
+    let task = makeTask({
+      id: 'ti_repair',
+      source: 'repair',
+      title: '补断联 · 10/29',
+      description: '当天只拿到 74 XP；用余烬补上。',
+      difficulty: 1,
+      chest_tier: 1,
+      starts_at: '2026-11-04T00:00:00+08:00',
+      ends_at: '2026-11-06T00:00:00+08:00',
+      missed_date: '2026-10-29',
+      progress: { current: 0, target: 1 },
+    })
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.endsWith('/v1/me/repair')) {
+          expect(init?.method).toBe('POST')
+          task = makeTask({
+            id: 'ti_repair',
+            source: 'repair',
+            title: '补断联 · 10/29',
+            description: '当天只拿到 74 XP；用余烬补上。',
+            difficulty: 1,
+            chest_tier: 1,
+            starts_at: '2026-11-04T00:00:00+08:00',
+            ends_at: '2026-11-06T00:00:00+08:00',
+            missed_date: '2026-10-29',
+            status: 'completed',
+            completed_at: '2026-11-04T12:30:00+08:00',
+            chest_status: 'available',
+            progress: { current: 1, target: 1 },
+          })
+          return response({ repaired: true })
+        }
+        if (url.endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-04T12:00:00+08:00',
+            tasks: [task],
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      },
+    )
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderList()
+    const repair = await screen.findByRole('button', { name: '用余烬补' })
+    await userEvent.click(repair)
+
+    const repairCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).endsWith('/v1/me/repair'),
+    )
+    expect(repairCall).toBeTruthy()
+    const body = JSON.parse(String(repairCall?.[1]?.body)) as {
+      date: string
+      idempotency_key: string
+    }
+    expect(body.date).toBe('2026-10-29')
+    expect(typeof body.idempotency_key).toBe('string')
+    expect(body.idempotency_key.length).toBeGreaterThan(0)
+
+    expect(
+      await screen.findByRole('button', { name: '领取补断联 · 10/29的宝箱' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '用余烬补' })).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe('补上了。'),
+    )
+  })
+
+  it('does not offer repair for completed or expired repair tasks', async () => {
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-04T12:00:00+08:00',
+            tasks: [
+              makeTask({
+                id: 'ti_done',
+                source: 'repair',
+                title: '补断联 · 10/29',
+                difficulty: 1,
+                chest_tier: 1,
+                missed_date: '2026-10-29',
+                status: 'completed',
+                completed_at: '2026-11-04T12:30:00+08:00',
+                chest_status: 'available',
+                progress: { current: 1, target: 1 },
+              }),
+              makeTask({
+                id: 'ti_expired',
+                source: 'repair',
+                title: '补断联 · 10/30',
+                difficulty: 1,
+                chest_tier: 1,
+                missed_date: '2026-10-30',
+                status: 'expired',
+                chest_status: 'forfeited',
+                progress: { current: 0, target: 1 },
+              }),
+            ],
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      }),
+    )
+
+    renderList()
+    expect(await screen.findByText('补断联 · 10/29')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '用余烬补' })).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '领取补断联 · 10/29的宝箱' }),
+    ).toBeInTheDocument()
   })
 
   it('opens task settings from the section header', async () => {

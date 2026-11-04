@@ -43,6 +43,8 @@ Ghost 自有任务系统只有三类任务：
 - 某天 `daily_activity_on_day(day).xp < 100` 且 `seconds > 0` 时生成一条
   `repair:<YYYY-MM-DD>` 任务；0 秒和已达到 100 XP 的日期不生成。
 - 标题 `补断联 · MM/DD`，描述只写当天实际 XP。
+- 任务 payload 的 `missed_date` 为该断联日的 ISO 日期；其他来源恒为 `null`。
+  数据只从现有 `system_key=repair:<YYYY-MM-DD>` 解析，不新增表或接口。
 - `starts_at` = 发现当天 00:00，`ends_at` = 被断联日 +8 天 00:00。
 - 条件是该日期存在 `checkins.source='repaired'`；读取任务列表时自动完成，
   用户不需要再点完成。
@@ -100,6 +102,10 @@ Ghost 自有任务系统只有三类任务：
 - 首页“任务”区按 `ends_at` 升序显示；没有任务时只留极简空态。
 - 手动任务：隐藏 file input + `capture="environment"`，选图后直接上传。
 - 系统任务：显示进度，例如 `420 / 1000 XP`。
+- active 的补断联任务显示“用余烬补”，点击调用既有的
+  `POST /v1/me/repair`（`{date: missed_date, idempotency_key: ...}`）；成功后
+  刷新任务和首页，提示“补上了。”，任务在下一次刷新时变为 `completed`，
+  宝箱仍需用户手动领取。completed / expired 任务不显示该按钮。
 - 完成后显示宝箱按钮，领取后轻量 dialog 显示钻石数。
 - “设置”打开 `TaskSettingsDialog`，只管理每日手动定义，不出现 DSL、
   系统任务或宝箱档位。

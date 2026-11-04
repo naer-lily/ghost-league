@@ -544,6 +544,7 @@ export interface TaskItem {
   chest_tier: number
   starts_at: string
   ends_at: string
+  missed_date: string | null
   status: TaskStatus
   completed_at: string | null
   chest_status: ChestStatus

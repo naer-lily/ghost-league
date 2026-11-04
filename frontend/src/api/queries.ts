@@ -476,6 +476,27 @@ export function useCompleteTask() {
   })
 }
 
+export interface RepairTaskVariables {
+  date: string
+}
+
+export function useRepairTask() {
+  const queryClient = useQueryClient()
+  return useMutation<unknown, Error, RepairTaskVariables>({
+    mutationFn: ({ date }) =>
+      apiFetch<unknown>('/v1/me/repair', {
+        method: 'POST',
+        body: { date, idempotency_key: createRequestId() },
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
+        queryClient.invalidateQueries({ queryKey: homeQueryKey }),
+      ])
+    },
+  })
+}
+
 export function useClaimTaskChest() {
   const queryClient = useQueryClient()
   return useMutation<TaskChestResult, Error, string>({

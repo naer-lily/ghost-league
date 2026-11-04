@@ -22,6 +22,7 @@ from ..tasks import (
     TaskStateRejected,
     condition_progress,
     evaluate_condition,
+    missed_date_from_system_key,
     repair_condition,
     repair_task_description,
     repair_task_title,
@@ -418,15 +419,22 @@ class TasksMixin:
         progress = self._task_progress(
             task, store=self, user_id=user_id, now=now
         )
+        source = str(task["source"])
+        missed = (
+            missed_date_from_system_key(task.get("system_key"))
+            if source == "repair"
+            else None
+        )
         return {
             "id": task_id,
-            "source": str(task["source"]),
+            "source": source,
             "title": str(task["title"]),
             "description": str(task["description"]),
             "difficulty": int(task["difficulty"]),
             "chest_tier": int(task["chest_tier"]),
             "starts_at": str(task["starts_at"]),
             "ends_at": str(task["ends_at"]),
+            "missed_date": missed.isoformat() if missed is not None else None,
             "status": str(task["status"]),
             "completed_at": task["completed_at"],
             "chest_status": str(task["chest_status"]),
