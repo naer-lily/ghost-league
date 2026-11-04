@@ -450,8 +450,18 @@ export interface UserComparison {
   leader: 'me' | 'them' | 'tie'
 }
 
+export interface RecentXp {
+  days: string[]
+  labels: string[]
+  target: number[]
+  viewer: number[]
+  target_total: number
+  viewer_total: number
+}
+
 export interface UserSummary extends FriendSummary {
   comparison?: UserComparison | null
+  recent_xp: RecentXp
 }
 
 export type HistoryType =

@@ -1,8 +1,104 @@
 from __future__ import annotations
 
+import sqlite3
 import unittest
+from datetime import datetime
 
+from ghost_league.schedule import TZ
 from test_api import APITestBase, FRIEND_TOKEN, TOKEN, auth
+
+
+class RecentXpAPITests(APITestBase):
+    def seed_checkin(self, player_id: str, day: str, xp: int) -> None:
+        checked_at = datetime.fromisoformat(f"{day}T09:00:00").replace(tzinfo=TZ)
+        with sqlite3.connect(self.game_db_path) as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO checkins "
+                "(player_id, date, source, seconds, xp, checked_at, repaired_at, "
+                "repair_cost, status, created_at) "
+                "VALUES (?, ?, 'verified', 600, ?, ?, NULL, 0, 'verified', ?)",
+                (
+                    player_id,
+                    day,
+                    xp,
+                    checked_at.isoformat(timespec="seconds"),
+                    int(checked_at.timestamp()),
+                ),
+            )
+
+    def test_recent_xp_fills_missing_days_and_uses_the_seven_day_window(
+        self,
+    ) -> None:
+        self.add_account("friend-1", "Friend", FRIEND_TOKEN)
+        with self.client() as client:
+            # Create both human players before writing their daily snapshots.
+            client.get("/v1/users/friend-1", headers=auth(TOKEN))
+            self.seed_checkin("friend-1", "2026-10-19", 999)
+            self.seed_checkin("friend-1", "2026-10-20", 50)
+            self.seed_checkin("friend-1", "2026-10-21", 189)
+            self.seed_checkin("friend-1", "2026-10-24", 182)
+            self.seed_checkin("friend-1", "2026-10-26", 150)
+            self.seed_checkin("owner", "2026-10-22", 77)
+            self.seed_checkin("owner", "2026-10-26", 441)
+
+            response = client.get(
+                "/v1/users/friend-1", headers=auth(TOKEN)
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            recent = response.json()["recent_xp"]
+            self.assertEqual(
+                recent["days"],
+                [
+                    "2026-10-20",
+                    "2026-10-21",
+                    "2026-10-22",
+                    "2026-10-23",
+                    "2026-10-24",
+                    "2026-10-25",
+                    "2026-10-26",
+                ],
+            )
+            self.assertEqual(
+                recent["labels"],
+                ["二", "三", "四", "五", "六", "日", "一"],
+            )
+            self.assertEqual(recent["target"], [50, 189, 0, 0, 182, 0, 150])
+            self.assertEqual(recent["viewer"], [0, 0, 77, 0, 0, 0, 441])
+            self.assertEqual(recent["target_total"], 571)
+            self.assertEqual(recent["viewer_total"], 518)
+
+    def test_recent_xp_is_identical_for_self_and_zero_without_checkins(self) -> None:
+        self.add_account("friend-1", "Friend", FRIEND_TOKEN)
+        with self.client() as client:
+            client.get("/v1/users/owner", headers=auth(TOKEN))
+            client.get("/v1/users/friend-1", headers=auth(TOKEN))
+            self.seed_checkin("owner", "2026-10-24", 123)
+
+            mine = client.get("/v1/users/owner", headers=auth(TOKEN))
+            self.assertEqual(mine.status_code, 200, mine.text)
+            recent = mine.json()["recent_xp"]
+            self.assertEqual(recent["target"], recent["viewer"])
+            self.assertEqual(recent["target_total"], recent["viewer_total"])
+            self.assertEqual(recent["target"], [0, 0, 0, 0, 123, 0, 0])
+
+            empty = client.get(
+                "/v1/users/friend-1", headers=auth(TOKEN)
+            ).json()["recent_xp"]
+            self.assertEqual(empty["target"], [0] * 7)
+            self.assertEqual(empty["viewer"], [0, 0, 0, 0, 123, 0, 0])
+            self.assertEqual(empty["target_total"], 0)
+            self.assertEqual(empty["viewer_total"], 123)
+
+    def test_other_endpoints_do_not_gain_recent_xp(self) -> None:
+        self.add_account("friend-1", "Friend", FRIEND_TOKEN)
+        with self.client() as client:
+            client.get("/v1/users/friend-1", headers=auth(TOKEN))
+            friends = client.get(
+                "/v1/me/friends/standings", headers=auth(TOKEN)
+            )
+            self.assertEqual(friends.status_code, 200, friends.text)
+            for member in friends.json()["members"]:
+                self.assertNotIn("recent_xp", member)
 
 
 class UsersComparisonAPITests(APITestBase):

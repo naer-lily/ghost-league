@@ -48,7 +48,7 @@ Channel token。`/badge/...`、`/embed/...`、`/health` 和 `/avatars/...` 公�
 | POST | `/v1/me/repair` | 补签 |
 | GET | `/v1/me/checkins` | 按周读取打卡 |
 | GET | `/v1/me/history` | 自己的统一个人历史时间线 |
-| GET | `/v1/users/{user_id}` | 登录态公开卡片 + 与我的本周对比 |
+| GET | `/v1/users/{user_id}` | 登录态公开卡片 + 本周对比 + 最近 7 天每日 XP |
 | POST/DELETE | `/v1/me/follows/{user_id}` | 关注/取消关注 |
 | GET | `/v1/me/follows` | 我关注的人 |
 | GET | `/v1/me/followers` | 关注我的人 |
@@ -1541,12 +1541,13 @@ paid_stake`，`free_stake = 20`，`paid_stake` 原样保存；下注只扣 `paid
 ### `GET /v1/users/{user_id}`
 
 需要普通账号 Bearer token。返回本地账号或 Channel player 的公开卡片，并附带
-“我与目标”的本周对比。公开响应**不包含** `kind`、`is_ai`、`origin`、`synthetic`、
-钻石、钱包、下注、私有库存或原始秒数。顶层字段包括 `user_id`、`handle`、
-`display_name`、`avatar_url`、`activity_label`、`tier`、`group_id`、`week_start`、
-`xp`、`power`、`rank`、`group_size`、`checkin`、`streak`、`equipped_title`、`frame`、
-`backdrop`、`badge_accent`、`is_following`、`followers_count`、`following_count` 和
-`comparison`。未知 user_id 返回 `404`；无 token 返回 `401`。
+“我与目标”的本周对比和最近 7 天每日 XP。公开响应**不包含** `kind`、`is_ai`、
+`origin`、`synthetic`、钻石、钱包、下注、私有库存或原始秒数。顶层字段包括 `user_id`、
+`handle`、`display_name`、`avatar_url`、`activity_label`、`tier`、`group_id`、
+`week_start`、`xp`、`power`、`rank`、`group_size`、`checkin`、`streak`、
+`equipped_title`、`frame`、`backdrop`、`badge_accent`、`is_following`、
+`followers_count`、`following_count`、`comparison` 和 `recent_xp`。未知 user_id
+返回 `404`；无 token 返回 `401`。
 
 `handle` 只对本地人类账号返回其 `user_id`；Channel/AI 玩家返回 `null`，前端不得把
 随机 `ch-...` 标识当作 handle 展示。`power` 是公开的当前战力，没有可用周数据时为
@@ -1572,6 +1573,26 @@ paid_stake`，`free_stake = 20`，`paid_stake` 原样保存；下注只扣 `paid
 `xp_diff = viewer_xp - target_xp`，正数表示我领先；`leader` 只有 `me` / `them` /
 `tie`。任一方本周没有小组数据时，对应 `*_rank` 为 `null`、`*_group_size` 为 `0`，
 对比仍按本周 XP 返回，不伪造名次。
+
+`recent_xp` 固定返回含今天在内的最近 7 个自然日，按日期升序；`days` 是
+`YYYY-MM-DD`，`labels` 是由服务端算好的中文单字星期（日/一/二/三/四/五/六）。
+`target` 是被查看用户的每日 `checkins.xp`，`viewer` 是登录用户自己的每日 XP；
+没有记录的日期补 `0`，两个 `*_total` 是各自 7 天总和。查看自己时 `target` 与
+`viewer` 相同。该字段只出现在单个用户详情，不改变好友榜或榜单结构：
+
+```json
+{
+  "recent_xp": {
+    "days": ["2026-10-29", "2026-10-30", "2026-10-31", "2026-11-01",
+             "2026-11-02", "2026-11-03", "2026-11-04"],
+    "labels": ["四", "五", "六", "日", "一", "二", "三"],
+    "target": [0, 0, 189, 182, 178, 150, 441],
+    "viewer": [0, 0, 0, 0, 0, 0, 0],
+    "target_total": 1140,
+    "viewer_total": 0
+  }
+}
+```
 
 ### 关注与发现
 

@@ -3,11 +3,37 @@ import type {
   GroupMarketOption,
   HomeSnapshot,
   Profile,
+  RecentXp,
   StandingRow,
   Standings,
   Star,
   Status,
 } from '../api/types'
+
+const RECENT_DAYS = [
+  '2026-10-29',
+  '2026-10-30',
+  '2026-10-31',
+  '2026-11-01',
+  '2026-11-02',
+  '2026-11-03',
+  '2026-11-04',
+]
+
+export function makeRecentXp(overrides: Partial<RecentXp> = {}): RecentXp {
+  const target = overrides.target ?? [0, 0, 189, 182, 178, 150, 441]
+  const viewer = overrides.viewer ?? [0, 0, 0, 0, 0, 0, 0]
+  return {
+    days: overrides.days ?? RECENT_DAYS,
+    labels: overrides.labels ?? ['四', '五', '六', '日', '一', '二', '三'],
+    target,
+    viewer,
+    target_total:
+      overrides.target_total ?? target.reduce((total, value) => total + value, 0),
+    viewer_total:
+      overrides.viewer_total ?? viewer.reduce((total, value) => total + value, 0),
+  }
+}
 
 export function makeGroupMarkets(
   overrides: Partial<Record<GroupMarketOption['market'], Partial<GroupMarketOption>>> = {},

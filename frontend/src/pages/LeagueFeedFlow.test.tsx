@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
 import type { FeedItem, FriendSummary, UserSummary } from '../api/types'
-import { makeSnapshot } from '../test/fixtures'
+import { makeRecentXp, makeSnapshot } from '../test/fixtures'
 import { LeaguePage } from './LeaguePage'
 
 function response(payload: unknown, status = 200): Response {
@@ -57,6 +57,10 @@ function publicProfile(following: boolean): UserSummary {
       xp_diff: -376,
       leader: 'them',
     },
+    recent_xp: makeRecentXp({
+      target: [0, 0, 189, 182, 178, 150, 201],
+      viewer: [0, 0, 0, 0, 0, 0, 524],
+    }),
   }
 }
 
@@ -181,19 +185,13 @@ describe('League feed and public profile', () => {
     expect(within(sheet).getByTestId('profile-following')).toHaveTextContent('3')
     expect(within(sheet).getByTestId('profile-followers')).toHaveTextContent('0')
     expect(within(sheet).queryByText('720')).not.toBeInTheDocument()
-    const comparison = within(sheet).getByTestId('profile-comparison')
-    expect(within(comparison).getByTestId('profile-comparison-me')).toHaveTextContent(
-      '524',
+    expect(within(sheet).getByTestId('profile-recent-chart')).toBeVisible()
+    expect(within(sheet).getByTestId('profile-recent-target')).toHaveAttribute(
+      'points',
     )
-    expect(
-      within(comparison).getByTestId('profile-comparison-them'),
-    ).toHaveTextContent('900')
-    expect(
-      within(comparison).getByTestId('profile-comparison-diff'),
-    ).toHaveTextContent('-376')
-    expect(
-      within(comparison).getByTestId('profile-comparison-leader'),
-    ).toHaveTextContent('阿岚领先 376 XP')
+    expect(within(sheet).getByTestId('profile-recent-viewer')).toHaveAttribute(
+      'points',
+    )
 
     const followButton = within(sheet).getByTestId('profile-follow')
     expect(followButton).toHaveAttribute('aria-pressed', 'false')
@@ -208,7 +206,7 @@ describe('League feed and public profile', () => {
     expect(followed).toBe(true)
 
     await user.click(
-      within(sheet).getByRole('button', { name: '关闭选手资料' }),
+      within(sheet).getByRole('button', { name: '返回' }),
     )
     await waitFor(() =>
       expect(screen.queryByTestId('user-profile-sheet')).not.toBeInTheDocument(),
@@ -233,7 +231,7 @@ describe('League feed and public profile', () => {
     expect(followed).toBe(false)
 
     await user.click(
-      within(reopened).getByRole('button', { name: '关闭选手资料' }),
+      within(reopened).getByRole('button', { name: '返回' }),
     )
     await user.click(screen.getByTestId('board-tab-friends'))
     expect(await screen.findByTestId('friends-empty')).toHaveTextContent(

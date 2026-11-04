@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN_KEY } from '../api/client'
 import type { Bet, RivalPlayer, RivalState } from '../api/types'
-import { makeBetOptions, makeSnapshot } from '../test/fixtures'
+import { makeBetOptions, makeRecentXp, makeSnapshot } from '../test/fixtures'
 import { HomePage } from './HomePage'
 
 const HOUR = 3_600_000
@@ -127,6 +127,10 @@ const PUBLIC_USER = {
     xp_diff: -236,
     leader: 'them',
   },
+  recent_xp: makeRecentXp({
+    target: [0, 0, 189, 182, 178, 150, 61],
+    viewer: [0, 0, 0, 0, 0, 0, 524],
+  }),
 }
 
 function renderHome() {
@@ -385,12 +389,13 @@ describe('HomePage rework', () => {
     await user.click(avatars[1]!)
 
     const sheet = await screen.findByTestId('user-profile-sheet')
-    expect(within(sheet).getByTestId('profile-comparison')).toHaveTextContent(
-      '我和他的本周对比',
+    expect(within(sheet).getByTestId('profile-recent-chart')).toBeVisible()
+    expect(within(sheet).getByTestId('profile-recent-target')).toHaveAttribute(
+      'points',
     )
-    expect(
-      within(sheet).getByTestId('profile-comparison-leader'),
-    ).toHaveTextContent('林间领先 236 XP')
+    expect(within(sheet).getByTestId('profile-recent-viewer')).toHaveAttribute(
+      'points',
+    )
     expect(within(sheet).getByTestId('profile-follow')).toBeVisible()
     expect(within(sheet).queryByTestId('me-diamonds')).not.toBeInTheDocument()
     expect(within(sheet).queryByText('720')).not.toBeInTheDocument()

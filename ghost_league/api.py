@@ -1630,6 +1630,37 @@ class GameService:
             "leader": leader,
         }
 
+    def _recent_xp_payload(
+        self, target_id: str, viewer_id: str, now: datetime
+    ) -> dict[str, Any]:
+        """Seven local calendar days of daily XP for target and viewer."""
+
+        assert self.store is not None
+        today = now.date()
+        start = today - timedelta(days=6)
+        end = today + timedelta(days=1)
+        days = [start + timedelta(days=offset) for offset in range(7)]
+        weekday_labels = ("一", "二", "三", "四", "五", "六", "日")
+
+        def xp_by_day(player_id: str) -> dict[str, int]:
+            return {
+                str(row["date"]): int(row.get("xp") or 0)
+                for row in self.store.checkins_between(player_id, start, end)
+            }
+
+        target_xp = xp_by_day(target_id)
+        viewer_xp = target_xp if viewer_id == target_id else xp_by_day(viewer_id)
+        target = [target_xp.get(day.isoformat(), 0) for day in days]
+        viewer = [viewer_xp.get(day.isoformat(), 0) for day in days]
+        return {
+            "days": [day.isoformat() for day in days],
+            "labels": [weekday_labels[day.weekday()] for day in days],
+            "target": target,
+            "viewer": viewer,
+            "target_total": sum(target),
+            "viewer_total": sum(viewer),
+        }
+
     def user_detail(self, user_id: str, viewer_id: str) -> dict[str, Any]:
         self._prepare_read(self.accounts.get(viewer_id) or {"user_id": viewer_id})
         now = self.now()
@@ -1648,6 +1679,9 @@ class GameService:
                 if viewer_summary is not None
                 else None
             )
+        summary["recent_xp"] = self._recent_xp_payload(
+            user_id, viewer_id, now
+        )
         return summary
 
     def follow_user(self, account: dict[str, Any], target_id: str) -> dict[str, Any]:

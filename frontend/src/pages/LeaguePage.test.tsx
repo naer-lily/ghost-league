@@ -18,6 +18,7 @@ import { formatNumber } from '../lib/home'
 import {
   makeBetOptions,
   makeGroupMarkets,
+  makeRecentXp,
   makeSnapshot,
 } from '../test/fixtures'
 import { LeaguePage } from './LeaguePage'
@@ -70,6 +71,7 @@ const PUBLIC_USER: UserSummary = {
     xp_diff: -3547,
     leader: 'them',
   },
+  recent_xp: makeRecentXp(),
 }
 
 function renderLeague() {
@@ -326,8 +328,12 @@ describe('LeaguePage tabs', () => {
       within(sheet).getByRole('heading', { name: '@kookouse' }),
     ).toBeInTheDocument()
     expect(within(sheet).getByTestId('profile-power')).toHaveTextContent('2,000')
-    expect(within(sheet).getByTestId('profile-comparison')).toHaveTextContent(
-      '我和他的本周对比',
+    expect(within(sheet).getByTestId('profile-recent-chart')).toBeVisible()
+    expect(within(sheet).getByTestId('profile-recent-target')).toHaveAttribute(
+      'points',
+    )
+    expect(within(sheet).getByTestId('profile-recent-viewer')).toHaveAttribute(
+      'points',
     )
     expect(within(sheet).getByTestId('profile-follow')).toBeVisible()
     expect(within(sheet).queryByText('@ch-kookouse')).not.toBeInTheDocument()
