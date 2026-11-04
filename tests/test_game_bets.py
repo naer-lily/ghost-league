@@ -181,6 +181,43 @@ def test_daily_target_options_use_the_fixed_odds_axis() -> None:
     assert 0 not in margins
 
 
+def test_daily_bet_stores_the_odds_of_the_selected_margin(
+    tmp_path: Path,
+) -> None:
+    store = make_store(tmp_path)
+    make_rival_pair(
+        store,
+        "preview",
+        "preview-rival",
+        left_power=800,
+        right_power=600,
+    )
+    options = store.rival_state("preview", now=MONDAY)["bet_options"]["daily"][
+        "target_options"
+    ]
+    assert [entry["odds"] for entry in options] == [2.0, 3.0, 4.0, 5.0]
+
+    for index, option in enumerate(options):
+        player = f"daily-picker-{index}"
+        make_rival_pair(
+            store,
+            player,
+            f"{player}-rival",
+            left_power=800,
+            right_power=600,
+        )
+        bet = store.place_bet(
+            player,
+            "daily",
+            paid_stake=0,
+            target_margin=option["margin"],
+            now=MONDAY,
+            request_id=f"daily-odds-{index}",
+        )
+        assert bet["target_margin"] == option["margin"]
+        assert bet["odds"] == option["odds"]
+
+
 def test_power_gap_moves_weekly_dynamic_anchor() -> None:
     strong = target_anchor(
         "weekly", 1000, my_power=10_000, rival_power=0

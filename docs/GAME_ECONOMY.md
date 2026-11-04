@@ -80,17 +80,21 @@ what XP gap that price requires:
 odds:      2.0, 3.0, 4.0, 5.0
 p       = 1 / odds
 z       = NormalDist().inv_cdf(1 - p)
+mu_me       = max(0, my_power)
+mu_rival    = max(0, rival_power)
+sigma_me    = max(120, mu_me * 1.0)
+sigma_rival = max(120, mu_rival * 1.0)
+muD     = mu_me - mu_rival
+sigmaD  = hypot(sigma_me, sigma_rival)
 margin  = max(1, ceil(muD + z * sigmaD))
 expected_xp = round_to_step(mu_rival + margin, 10)
 ```
 
-`muD` and `sigmaD` come from each player's own recent daily XP, not from a
-shared band average. The same power band is only a prior: a player with at
-least 3 completed check-in days in the last 28 days has their own mean and
-sample variance shrunk toward that prior with 2 pseudo-days. A shorter history
-falls back to the band prior unchanged, so the screen still has four prices on
-day one. Both players are computed independently and may have different means
-and spreads.
+`DAILY_POWER_SIGMA_RATIO = 1.0` and `DAILY_POWER_SIGMA_FLOOR = 120` live in
+`ghost_league/game/rival.py`. Daily pricing reads no check-in history and no
+same-power-band distribution: two players' lines depend only on the powers
+shown on screen. The four prices are fixed, so the same powers always produce
+the same four margins on that day.
 
 Daily paid stake is capped at 100 diamonds. Weekly and group bets keep the
 existing 500-diamond cap. The cap is enforced in the bet transaction, not only

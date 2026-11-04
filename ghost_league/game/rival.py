@@ -9,7 +9,7 @@ shared by the persistence layer.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from datetime import date, datetime, time, timedelta
 from statistics import NormalDist
 from typing import Final
@@ -56,23 +56,14 @@ GROUP_BET_SETTLE_OFFSET: Final = timedelta(minutes=5)
 WEEKLY_TARGET_FLOOR: Final = 100
 WEEKLY_TARGET_STEP: Final = 50
 
-# Daily targets come from the normal difference of the two players' daily XP
-# distributions.  Each player's own recent check-in days are the main sample;
-# the power band only supplies a prior.  Personal samples with at least
-# ``DAILY_MIN_HISTORY_DAYS`` days are shrunk toward the band prior with
-# ``DAILY_PRIOR_STRENGTH_DAYS`` pseudo-days.
-POWER_BAND_WIDTH: Final = 250
-DAILY_HISTORY_DAYS: Final = 28
-DAILY_MIN_HISTORY_DAYS: Final = 3
-DAILY_BAND_MIN_SAMPLES: Final = 20
-DAILY_PRIOR_STRENGTH_DAYS: Final = 2
-# Neutral prior only when the whole history is empty.  A positive sigma keeps
-# the first day's screen playable instead of hiding every daily tier.
-DAILY_PRIOR_MEAN_XP: Final = 0.0
-DAILY_PRIOR_SD_XP: Final = 150.0
+# Daily targets are priced from pure power, not from check-in history and not
+# from a same-power-band prior.  Power is the expected daily XP; the spread is
+# proportional to it with a floor so weak players still get a usable line.
+DAILY_POWER_SIGMA_RATIO: Final = 1.0
+DAILY_POWER_SIGMA_FLOOR: Final = 120.0
 # The daily screen displays a fixed odds axis; the server inverts each price to
 # the XP margin needed for that payout.  ``expected_xp`` previews the total XP
-# at the rival's daily mean plus the margin.
+# at the rival's power plus the margin.
 DAILY_ODDS_AXIS: Final[tuple[float, ...]] = (2.0, 3.0, 4.0, 5.0)
 DAILY_EXPECTED_XP_STEP: Final = 10
 # Daily bets are the small, frequent loop; weekly and group bets keep the
@@ -436,76 +427,31 @@ def target_step(kind: str) -> int:
     raise ValueError(f"unsupported bet kind: {kind}")
 
 
-def power_band(power: int, *, width: int = POWER_BAND_WIDTH) -> int:
-    """Return the integer band index for a power value."""
+def daily_power_sigma(mu: float) -> float:
+    """Return the daily XP spread for one player's power-based mean."""
 
-    if width <= 0:
-        raise ValueError("width must be positive")
-    return max(0, int(power)) // width
+    return max(
+        DAILY_POWER_SIGMA_FLOOR,
+        max(0.0, float(mu)) * DAILY_POWER_SIGMA_RATIO,
+    )
 
 
-def sample_mean_sd(values: Iterable[float]) -> tuple[float, float] | None:
-    """Return ``(mean, sample_sd)`` for a non-empty sample.
+def daily_power_distribution(
+    my_power: int,
+    rival_power: int,
+) -> tuple[float, float, float, float]:
+    """Return ``(mu_me, sigma_me, mu_rival, sigma_rival)`` from pure power.
 
-    A single observation has no spread, so its sample standard deviation is
-    reported as ``0.0``.  An empty sample has no distribution at all.
+    Power is both the expected daily XP and the scale for its spread.  This
+    path reads no check-in history and no power-band distribution, so two
+    players' daily lines depend only on the powers shown on screen.
     """
 
-    data = [float(value) for value in values]
-    if not data:
-        return None
-    mean = sum(data) / len(data)
-    if len(data) == 1:
-        return mean, 0.0
-    variance = sum((value - mean) ** 2 for value in data) / (len(data) - 1)
-    return mean, math.sqrt(max(0.0, variance))
-
-
-def band_distribution(
-    samples: Sequence[tuple[int, float]],
-    power: int,
-    *,
-    width: int = POWER_BAND_WIDTH,
-    min_samples: int = DAILY_BAND_MIN_SAMPLES,
-) -> tuple[float, float]:
-    """Return the daily-XP distribution for ``power`` from player samples.
-
-    ``samples`` holds ``(player_power, player_mean_xp)`` rows.  The exact power
-    band is preferred; if it has fewer than ``min_samples`` rows, its immediate
-    neighbouring bands are added; if that is still too small, the whole sample
-    set is used.  When there is no history at all, a neutral prior is returned
-    so the first day still has a playable distribution.
-    """
-
-    if min_samples <= 0:
-        raise ValueError("min_samples must be positive")
-    rows = [(int(row_power), float(mean_xp)) for row_power, mean_xp in samples]
-    if not rows:
-        return DAILY_PRIOR_MEAN_XP, DAILY_PRIOR_SD_XP
-
-    target_band = power_band(power, width=width)
-    exact = [
-        mean_xp
-        for row_power, mean_xp in rows
-        if power_band(row_power, width=width) == target_band
-    ]
-    if len(exact) >= min_samples:
-        return _distribution_or_prior(exact)
-    adjacent = [
-        mean_xp
-        for row_power, mean_xp in rows
-        if abs(power_band(row_power, width=width) - target_band) <= 1
-    ]
-    if len(adjacent) >= min_samples:
-        return _distribution_or_prior(adjacent)
-    return _distribution_or_prior([mean_xp for _, mean_xp in rows])
-
-
-def _distribution_or_prior(values: Sequence[float]) -> tuple[float, float]:
-    stats = sample_mean_sd(values)
-    if stats is None:
-        return DAILY_PRIOR_MEAN_XP, DAILY_PRIOR_SD_XP
-    return stats
+    mu_me = max(0.0, float(my_power))
+    mu_rival = max(0.0, float(rival_power))
+    sigma_me = daily_power_sigma(mu_me)
+    sigma_rival = daily_power_sigma(mu_rival)
+    return mu_me, sigma_me, mu_rival, sigma_rival
 
 
 def daily_distribution_parameters(
@@ -521,37 +467,6 @@ def daily_distribution_parameters(
         max(0.0, float(sd_me)) ** 2 + max(0.0, float(sd_rival)) ** 2
     )
     return mu_diff, sigma_diff
-
-
-def personal_daily_distribution(
-    personal_xp: Sequence[float],
-    prior: tuple[float, float],
-) -> tuple[float, float]:
-    """Shrink a player's own daily history toward the power-band prior.
-
-    The personal sample needs at least ``DAILY_MIN_HISTORY_DAYS`` recorded
-    days.  With ``n`` days and ``k = DAILY_PRIOR_STRENGTH_DAYS`` pseudo-days,
-    the mean and variance are pooled as
-
-    ``x = (n * x_personal + k * x_prior) / (n + k)``.
-
-    Both players are computed independently, so two players in the same power
-    band can receive different means and spreads.  A short history falls back
-    to the band prior unchanged.
-    """
-
-    history = [float(value) for value in personal_xp]
-    prior_mu, prior_sd = prior
-    stats = sample_mean_sd(history)
-    if stats is None or len(history) < DAILY_MIN_HISTORY_DAYS:
-        return float(prior_mu), float(prior_sd)
-    personal_mu, personal_sd = stats
-    weight = len(history) / (len(history) + DAILY_PRIOR_STRENGTH_DAYS)
-    mean = weight * personal_mu + (1.0 - weight) * float(prior_mu)
-    variance = (
-        weight * personal_sd**2 + (1.0 - weight) * float(prior_sd) ** 2
-    )
-    return mean, math.sqrt(max(0.0, variance))
 
 
 def daily_margin_for_odds(
@@ -851,17 +766,13 @@ __all__ = [
     "BetError",
     "BetRejected",
     "BetWindowClosed",
-    "DAILY_BAND_MIN_SAMPLES",
     "DAILY_BET_LOCK_TIME",
     "DAILY_BET_SETTLE_TIME",
-    "DAILY_HISTORY_DAYS",
     "DAILY_EXPECTED_XP_STEP",
     "DAILY_MAX_PAID_STAKE",
-    "DAILY_MIN_HISTORY_DAYS",
     "DAILY_ODDS_AXIS",
-    "DAILY_PRIOR_MEAN_XP",
-    "DAILY_PRIOR_SD_XP",
-    "DAILY_PRIOR_STRENGTH_DAYS",
+    "DAILY_POWER_SIGMA_FLOOR",
+    "DAILY_POWER_SIGMA_RATIO",
     "FREE_BET_STAKE",
     "GROUP_BET_SETTLE_OFFSET",
     "GROUP_MARKETS",
@@ -881,7 +792,6 @@ __all__ = [
     "OUTCOME_WIN",
     "POWER_ANCHOR_MAX",
     "POWER_ANCHOR_MIN",
-    "POWER_BAND_WIDTH",
     "POWER_GAP_SCALE",
     "POWER_RATIO_MAX",
     "POWER_RATIO_MIN",
@@ -901,13 +811,14 @@ __all__ = [
     "WEEKLY_TARGET_STEP",
     "WEEK_SELECT_OPEN_OFFSET",
     "auto_select_at",
-    "band_distribution",
     "bet_odds",
     "daily_bet_locks_at",
     "daily_bet_settles_at",
     "daily_distribution_parameters",
     "daily_expected_xp",
     "daily_margin_for_odds",
+    "daily_power_distribution",
+    "daily_power_sigma",
     "daily_target_margins",
     "daily_target_options",
     "group_bet_settles_at",
@@ -919,15 +830,12 @@ __all__ = [
     "odds_reference",
     "payout_for_win",
     "percentile_value",
-    "personal_daily_distribution",
     "power_anchor_factor",
-    "power_band",
     "power_ratio",
     "projected_week_xp",
     "rival_outcome",
     "rival_reward",
     "round_to_step",
-    "sample_mean_sd",
     "selection_window_open",
     "target_anchor",
     "target_in_range",

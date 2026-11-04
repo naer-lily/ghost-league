@@ -9,16 +9,14 @@ result, and any diamond rewards.
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 
 from .. import calendar as cal
 from ..rival import (
     AUTO_POWER_BAND_MAX,
     AUTO_POWER_BAND_MIN,
-    DAILY_HISTORY_DAYS,
     DAILY_MAX_PAID_STAKE,
-    DAILY_MIN_HISTORY_DAYS,
     FREE_BET_STAKE,
     GROUP_TARGET_RANK,
     MAX_PAID_STAKE,
@@ -27,12 +25,11 @@ from ..rival import (
     RivalSelectionRejected,
     RivalWindowClosed,
     auto_select_at,
-    band_distribution,
     daily_bet_locks_at,
     daily_bet_settles_at,
     daily_distribution_parameters,
+    daily_power_distribution,
     daily_target_options,
-    personal_daily_distribution,
     odds_reference,
     projected_week_xp,
     rival_outcome,
@@ -232,82 +229,19 @@ class RivalMixin:
         }
 
     @staticmethod
-    def _daily_distribution_samples_with(
-        conn: sqlite3.Connection,
-        day_iso: str,
-    ) -> list[tuple[int, float]]:
-        """Return ``(power, mean_daily_xp)`` samples from completed days only.
-
-        Only check-ins strictly before ``day_iso`` inside the 28-day window are
-        read, so today's live XP can never move the daily tiers.  A player needs
-        at least three recorded days to become one sample.
-        """
-
-        day = date.fromisoformat(day_iso)
-        start_iso = (day - timedelta(days=DAILY_HISTORY_DAYS)).isoformat()
-        rows = conn.execute(
-            "SELECT COALESCE(p.power, 0) AS power, AVG(c.xp) AS mean_xp "
-            "FROM players p JOIN checkins c ON c.player_id = p.id "
-            "WHERE c.date >= ? AND c.date < ? "
-            "GROUP BY p.id, p.power "
-            "HAVING COUNT(*) >= ? "
-            "ORDER BY p.id",
-            (start_iso, day_iso, DAILY_MIN_HISTORY_DAYS),
-        ).fetchall()
-        return [
-            (int(row["power"]), float(row["mean_xp"])) for row in rows
-        ]
-
-    @staticmethod
-    def _daily_player_history_with(
-        conn: sqlite3.Connection,
-        player_id: str,
-        day_iso: str,
-    ) -> list[float]:
-        """Return one player's daily XP over the completed 28-day window."""
-
-        day = date.fromisoformat(day_iso)
-        start_iso = (day - timedelta(days=DAILY_HISTORY_DAYS)).isoformat()
-        rows = conn.execute(
-            "SELECT xp FROM checkins WHERE player_id = ? "
-            "AND date >= ? AND date < ? ORDER BY date",
-            (player_id, start_iso, day_iso),
-        ).fetchall()
-        return [float(row["xp"]) for row in rows]
-
-    @staticmethod
-    def _daily_player_distribution_with(
-        conn: sqlite3.Connection,
-        player_id: str,
-        power: int,
-        day_iso: str,
-        samples: list[tuple[int, float]],
-    ) -> tuple[float, float]:
-        """Combine a player's own history with the same-band prior."""
-
-        prior = band_distribution(samples, power)
-        history = RivalMixin._daily_player_history_with(
-            conn, player_id, day_iso
-        )
-        return personal_daily_distribution(history, prior)
-
-    @staticmethod
     def _daily_distribution_with(
-        conn: sqlite3.Connection,
-        day_iso: str,
-        my_player_id: str,
         my_power: int,
-        rival_player_id: str,
         rival_power: int,
     ) -> dict[str, Any]:
-        """Return the day's fixed daily distribution, parameters, and tiers."""
+        """Return the day's power-priced distribution, parameters, and tiers.
 
-        samples = RivalMixin._daily_distribution_samples_with(conn, day_iso)
-        mu_me, sd_me = RivalMixin._daily_player_distribution_with(
-            conn, my_player_id, my_power, day_iso, samples
-        )
-        mu_rival, sd_rival = RivalMixin._daily_player_distribution_with(
-            conn, rival_player_id, rival_power, day_iso, samples
+        Daily pricing is deliberately stateless: both means are the players'
+        powers and both spreads scale from those powers.  No check-in history
+        and no power-band prior is read.
+        """
+
+        mu_me, sd_me, mu_rival, sd_rival = daily_power_distribution(
+            my_power, rival_power
         )
         mu_me = round(mu_me, 2)
         sd_me = round(sd_me, 2)
@@ -341,10 +275,9 @@ class RivalMixin:
         """Estimate the lines shown on the betting screen.
 
         The weekly line still uses the settled-week percentile.  The daily line
-        is each player's own recent check-in distribution shrunk toward the
-        power-band prior, using only completed check-in days; its inverted
-        odds-axis margins are returned as ``daily_target_margins``.  Settlement
-        keeps using the actual final XP, never this projection.
+        is pure power: each player's expected daily XP equals their power and
+        the spread is proportional to it, with a floor.  Settlement keeps using
+        the actual final XP, never this projection.
         """
 
         if rival is None:
@@ -369,11 +302,7 @@ class RivalMixin:
             int(rival["week_xp"]),
         )
         daily = self._daily_distribution_with(
-            conn,
-            day_iso,
-            str(me.get("user_id") or me["id"]),
             int(me.get("power") or 0),
-            str(rival["user_id"]),
             int(rival["power"]),
         )
         return {

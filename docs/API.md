@@ -1174,37 +1174,25 @@ anchor = clamp(0, upper_bound, round_to_step(upper_bound * 0.5 * power_factor))
 ```text
 p = 1 / odds
 z = NormalDist().inv_cdf(1 - p)
+mu_me       = max(0, my_power)
+mu_rival    = max(0, rival_power)
+sigma_me    = max(DAILY_POWER_SIGMA_FLOOR, mu_me * DAILY_POWER_SIGMA_RATIO)
+sigma_rival = max(DAILY_POWER_SIGMA_FLOOR, mu_rival * DAILY_POWER_SIGMA_RATIO)
+muD = mu_me - mu_rival
+sigmaD = hypot(sigma_me, sigma_rival)
 margin = max(1, ceil(muD + z * sigmaD))
 expected_xp = round_to_step(mu_rival + margin, 10)
 ```
 
-  `muD` / `sigmaD` 是双方个人日均分布之差。若退化分布让两个赔率得到同一个
-  margin，后一档顺延 `1 XP`，保证四档仍严格递增且每个赔率都能被选中。
-
-- 双方分布以个人历史为主、同战力带为仅先验。双方各自独立计算：
-
-```text
-个人历史：只读今天之前的 checkins，窗口 28 天；
-         每个玩家算自己的日均 μ_p 和样本标准差 σ_p（n-1），至少 3 天
-战力先验：宽度 250；本段样本不足 20 时加入相邻段；仍不足 20 时使用全部
-         样本；都没有时使用中性先验 (0, 150)
-先验强度：k = 2 天
-收缩权重：w = n / (n + k)
-收缩均值：μ = w * μ_p + (1 - w) * μ_prior
-收缩方差：σ² = w * σ_p² + (1 - w) * σ_prior²
-不足 3 天：直接使用同带先验 (μ_prior, σ_prior)
-μD = μ我 - μ他
-σD = sqrt(σ我² + σ他²)
-```
-
-  因此两个同战力带的玩家不再强制使用同一条分布，`projection.daily_mu_me` 和
-  `daily_mu_rival` 可以不同。今天的 checkins 不参与计算；同一份历史、同一天内
-  档位、margin、expected_xp 和赔率固定。
+  `DAILY_POWER_SIGMA_RATIO = 1.0`、`DAILY_POWER_SIGMA_FLOOR = 120`，常量在
+  `ghost_league/game/rival.py`。日注只读双方战力：不读 check-in 历史，也不读
+  同战力带分布；同样的战力对当天永远得到同样的四档。若退化分布让两个赔率得到
+  同一个 margin，后一档顺延 `1 XP`，保证四档仍严格递增且每个赔率都能被选中。
 
 - 每个选项同时返回赔率、反算出的 margin 和预计总 XP：
 
 ```json
-{"odds": 3.0, "margin": 212, "expected_xp": 720}
+{"odds": 3.0, "margin": 631, "expected_xp": 1230}
 ```
 
   日注下单仍然只传 `target_margin`。后端在当天 `target_options` 中按 margin
@@ -1317,7 +1305,7 @@ odds = clamp(1.2, 15.0, 1.2 + 0.8 * ratio ** 1.4)
   `max_target_margin` 是当天四档里最小/最大的 margin，`reference` 是 `μD` 的整数
   近似（赔率不再使用它），`max_paid_stake` 为 `100`；周注和组注的
   `max_paid_stake` 仍是 `500`。日注的 `expected_xp` 是
-  `round_to_10(daily_mu_rival + margin)`，即“预计宿敌日均 + 目标差值”，不是
+  `round_to_10(daily_mu_rival + margin)`，即“预计宿敌战力 + 目标差值”，不是
   我的当前 XP 或实时估算；周注不返回该字段。组注对象保留旧的 `target_rank: 3`、
   `target_margin: 0` 和
   `odds`（前三盘口），并新增 `markets`；`markets` 与 `bets.groups` 是同结构、
@@ -1329,13 +1317,13 @@ odds = clamp(1.2, 15.0, 1.2 + 0.8 * ratio ** 1.4)
 {
   "rival_week_estimate": 3400,
   "weekly_target_max": 6800,
-  "daily_mu_me": 620.5,
-  "daily_sd_me": 180.2,
-  "daily_mu_rival": 510.0,
-  "daily_sd_rival": 150.0,
-  "daily_mu_diff": 110.5,
-  "daily_sigma_diff": 234.5,
-  "daily_target_margins": [111, 212, 269, 308]
+  "daily_mu_me": 800.0,
+  "daily_sd_me": 800.0,
+  "daily_mu_rival": 600.0,
+  "daily_sd_rival": 600.0,
+  "daily_mu_diff": 200.0,
+  "daily_sigma_diff": 1000.0,
+  "daily_target_margins": [200, 631, 875, 1042]
 }
 ```
 
@@ -1343,14 +1331,12 @@ odds = clamp(1.2, 15.0, 1.2 + 0.8 * ratio ** 1.4)
 `weekly_scores.xp` 分位值，四舍五入到百位；没有已结算周时退化到宿敌本周 XP。
 `weekly_target_max` 是周注上界。
 
-日估计：`daily_mu_*` / `daily_sd_*` 是每个玩家自己的近 28 天日均与样本标准差，
-再按上面“目标差值与赔率”的公式向同战力带先验收缩后的结果；双方各自计算，可以
-不同。`daily_mu_diff` / `daily_sigma_diff` 是差值的 μD/σD；`daily_target_margins`
-是当天四档赔率反算出的 margin，顺序与 `target_options` 的 `2/3/4/5` 一致。
-每个档位的 `expected_xp` 由 `daily_mu_rival + margin` 四舍五入到 10 得到，表示
-达到该档位预计需要的总 XP。只读今天之前的 checkins，且不读当天实时 XP，因此同一天
-`09:00` 与 `21:00` 的 `projection`、`target_options`（含 `expected_xp`）和赔率
-完全一致（前提是同一份历史）。
+日估计：`daily_mu_me` / `daily_mu_rival` 直接取双方战力（负数按 0 处理），
+`daily_sd_*` 为 `max(120, mu * 1.0)`；`daily_mu_diff` / `daily_sigma_diff` 是
+差值的 μD/σD，其中 `σD = hypot(σ我, σ他)`。`daily_target_margins` 是当天四档
+赔率反算出的 margin，顺序与 `target_options` 的 `2/3/4/5` 一致。不读 check-in
+历史，也不读同战力带分布；只要双方战力不变，同一天的 `projection`、
+`target_options`（含 `expected_xp`）和赔率就完全一致。
 
 ### `GET /v1/me/rival/candidates`
 
