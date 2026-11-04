@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import random
 import sqlite3
 import stat
@@ -19,9 +20,11 @@ from ghost_league.game.tasks import (
     TaskNotFound,
     TaskStateRejected,
     chest_amount_range,
+    checkin_condition,
     evaluate_condition,
     repair_condition,
     roll_chest_amount,
+    roll_chest_reward,
     weekend_condition,
 )
 from ghost_league.schedule import TZ
@@ -32,6 +35,26 @@ TOKEN = "test-token-only"
 
 def ts(value: datetime) -> str:
     return value.isoformat(timespec="seconds")
+
+
+def visible_tasks(store, user_id: str, now: datetime) -> list[dict]:
+    """Task-list helpers from before check-in existed ignore that daily row."""
+
+    return [
+        task
+        for task in store.list_visible_tasks(user_id, now)
+        if task["source"] != "checkin"
+    ]
+
+
+def api_tasks(client, token: str = TOKEN) -> list[dict]:
+    return [
+        task
+        for task in client.get(
+            "/v1/me/tasks", headers=auth(token)
+        ).json()["tasks"]
+        if task["source"] != "checkin"
+    ]
 
 
 def heic_bytes(size: tuple[int, int] = (320, 180)) -> bytes:
@@ -105,7 +128,7 @@ class DailyTaskTests(TaskStoreBase):
         self.assertEqual(definition["difficulty"], 3)
         self.assertEqual(self.store.ensure_user_tasks("u", self.now), 1)
         self.assertEqual(self.store.ensure_user_tasks("u", self.now), 0)
-        tasks = self.store.list_visible_tasks("u", self.now)
+        tasks = visible_tasks(self.store, "u", self.now)
         self.assertEqual(len(tasks), 1)
         task = tasks[0]
         self.assertEqual(task["source"], "daily_manual")
@@ -126,7 +149,7 @@ class DailyTaskTests(TaskStoreBase):
             now=self.now,
         )
         self.store.ensure_user_tasks("u", self.now)
-        before = self.store.list_visible_tasks("u", self.now)[0]
+        before = visible_tasks(self.store, "u", self.now)[0]
 
         self.store.update_task_definition(
             "u",
@@ -137,7 +160,7 @@ class DailyTaskTests(TaskStoreBase):
             now=self.now,
         )
         self.assertEqual(self.store.ensure_user_tasks("u", self.now), 0)
-        after = self.store.list_visible_tasks("u", self.now)[0]
+        after = visible_tasks(self.store, "u", self.now)[0]
 
         self.assertEqual(after["id"], before["id"])
         self.assertEqual(after["title"], "5 个 ghosting shape")
@@ -156,7 +179,7 @@ class DailyTaskTests(TaskStoreBase):
             now=self.now,
         )
         self.store.ensure_user_tasks("u", self.now)
-        task = self.store.list_visible_tasks("u", self.now)[0]
+        task = visible_tasks(self.store, "u", self.now)[0]
         completed = self.store.complete_manual_task(
             "u",
             task["id"],
@@ -174,7 +197,7 @@ class DailyTaskTests(TaskStoreBase):
             now=self.now,
         )
         self.store.ensure_user_tasks("u", self.now)
-        after = self.store.list_visible_tasks("u", self.now)[0]
+        after = visible_tasks(self.store, "u", self.now)[0]
 
         self.assertEqual(after["id"], completed["id"])
         self.assertEqual(after["status"], "completed")
@@ -195,7 +218,7 @@ class DailyTaskTests(TaskStoreBase):
         self.store.ensure_user_tasks("u", self.now)
         tiers = {
             task["difficulty"]: task["chest_tier"]
-            for task in self.store.list_visible_tasks("u", self.now)
+            for task in visible_tasks(self.store, "u", self.now)
         }
         self.assertEqual(tiers, {1: 1, 2: 2, 3: 3})
 
@@ -210,7 +233,7 @@ class DailyTaskTests(TaskStoreBase):
         self.assertEqual(second["sort_order"], 20)
         self.store.ensure_user_tasks("u", self.now)
         self.assertEqual(
-            [task["title"] for task in self.store.list_visible_tasks("u", self.now)],
+            [task["title"] for task in visible_tasks(self.store, "u", self.now)],
             ["A", "B"],
         )
 
@@ -220,14 +243,14 @@ class DailyTaskTests(TaskStoreBase):
         self.assertEqual([row["title"] for row in reordered], ["B", "A"])
         self.assertEqual([row["sort_order"] for row in reordered], [10, 20])
         self.assertEqual(
-            [row["title"] for row in self.store.list_visible_tasks("u", self.now)],
+            [row["title"] for row in visible_tasks(self.store, "u", self.now)],
             ["B", "A"],
         )
 
         self.add_activity("2026-10-29", 444)
         self.store.ensure_repair_tasks("u", self.now.date(), now=self.now)
         self.assertEqual(self.store.ensure_user_tasks("u", self.now), 0)
-        tasks = self.store.list_visible_tasks("u", self.now)
+        tasks = visible_tasks(self.store, "u", self.now)
         self.assertEqual(
             [(task["title"], task["ends_at"]) for task in tasks],
             [
@@ -243,7 +266,7 @@ class DailyTaskTests(TaskStoreBase):
             ["B", "A"],
         )
         self.assertEqual(
-            [task["title"] for task in reopened.list_visible_tasks("u", self.now)],
+            [task["title"] for task in visible_tasks(reopened, "u", self.now)],
             ["B", "A", "补断联 · 10/29"],
         )
 
@@ -255,7 +278,7 @@ class DailyTaskTests(TaskStoreBase):
         self.store.ensure_user_tasks("u", self.now)
         tasks = {
             task["title"]: task
-            for task in self.store.list_visible_tasks("u", self.now)
+            for task in visible_tasks(self.store, "u", self.now)
         }
 
         self.store.complete_manual_task(
@@ -274,7 +297,7 @@ class DailyTaskTests(TaskStoreBase):
             now=self.now,
         )
 
-        visible = self.store.list_visible_tasks("u", self.now)
+        visible = visible_tasks(self.store, "u", self.now)
         self.assertEqual(
             [
                 (
@@ -295,7 +318,7 @@ class DailyTaskTests(TaskStoreBase):
 
         self.add_activity("2026-10-29", 444)
         self.store.ensure_repair_tasks("u", self.now.date(), now=self.now)
-        visible = self.store.list_visible_tasks("u", self.now)
+        visible = visible_tasks(self.store, "u", self.now)
         self.assertEqual(
             [(task["title"], task["ends_at"], task["sort_order"]) for task in visible],
             [
@@ -319,7 +342,7 @@ class DailyTaskTests(TaskStoreBase):
             "u",
             next(
                 task["id"]
-                for task in self.store.list_visible_tasks("u", self.now)
+                for task in visible_tasks(self.store, "u", self.now)
                 if task["title"] == "A"
             ),
         )
@@ -356,7 +379,7 @@ class DailyTaskTests(TaskStoreBase):
         self.store.ensure_user_tasks("u", self.now)
         tomorrow = self.now + timedelta(days=1)
         self.assertEqual(self.store.ensure_user_tasks("u", tomorrow), 1)
-        tasks = self.store.list_visible_tasks("u", tomorrow)
+        tasks = visible_tasks(self.store, "u", tomorrow)
         self.assertEqual(len(tasks), 1)
         self.assertEqual(tasks[0]["starts_at"], "2026-11-05T00:00:00+08:00")
         self.assertEqual(tasks[0]["ends_at"], "2026-11-06T00:00:00+08:00")
@@ -366,7 +389,7 @@ class DailyTaskTests(TaskStoreBase):
             "u", title="画一张", difficulty=2, now=self.now
         )
         self.store.ensure_user_tasks("u", self.now)
-        task = self.store.list_visible_tasks("u", self.now)[0]
+        task = visible_tasks(self.store, "u", self.now)[0]
         self.store.complete_manual_task(
             "u",
             task["id"],
@@ -375,7 +398,7 @@ class DailyTaskTests(TaskStoreBase):
             now=self.now,
         )
         later = self.now + timedelta(days=1)
-        self.assertEqual(self.store.list_visible_tasks("u", later), [])
+        self.assertEqual(visible_tasks(self.store, "u", later), [])
         stored = self.store.get_task("u", task["id"])
         self.assertEqual(stored["status"], "expired")
         self.assertEqual(stored["chest_status"], "forfeited")
@@ -387,17 +410,88 @@ class DailyTaskTests(TaskStoreBase):
         self.store.ensure_user_tasks("u", self.now)
         self.store.deactivate_task_definition("u", definition["id"], now=self.now)
         self.assertEqual(self.store.list_task_definitions("u"), [])
-        self.assertEqual(len(self.store.list_visible_tasks("u", self.now)), 1)
+        self.assertEqual(len(visible_tasks(self.store, "u", self.now)), 1)
         tomorrow = self.now + timedelta(days=1)
         self.store.ensure_user_tasks("u", tomorrow)
-        self.assertEqual(len(self.store.list_visible_tasks("u", tomorrow)), 0)
+        self.assertEqual(len(visible_tasks(self.store, "u", tomorrow)), 0)
+
+
+class CheckinTaskTests(TaskStoreBase):
+    def test_checkin_task_is_created_before_manual_and_auto_completes(self) -> None:
+        self.store.create_task_definition(
+            "u", title="画一张", difficulty=1, now=self.now
+        )
+        self.assertEqual(self.store.ensure_user_tasks("u", self.now), 1)
+        tasks = self.store.list_visible_tasks("u", self.now)
+        self.assertEqual([task["title"] for task in tasks], ["每日打卡", "画一张"])
+        checkin = tasks[0]
+        self.assertEqual(checkin["source"], "checkin")
+        self.assertEqual(checkin["description"], "画满 10 分钟，开个小宝箱。")
+        self.assertEqual(checkin["difficulty"], 1)
+        self.assertEqual(checkin["chest_tier"], 1)
+        self.assertEqual(checkin["sort_order"], 0)
+        self.assertEqual(checkin["starts_at"], "2026-11-04T00:00:00+08:00")
+        self.assertEqual(checkin["ends_at"], "2026-11-05T00:00:00+08:00")
+        self.assertEqual(checkin["status"], "active")
+        self.assertEqual(checkin["chest_status"], "none")
+        self.assertEqual(checkin["progress"], {"current": 0, "target": 1})
+
+        stored = self.store.get_task("u", checkin["id"])
+        self.assertIsNone(stored["definition_id"])
+        self.assertEqual(stored["system_key"], "checkin:2026-11-04")
+        self.assertEqual(stored["completion_mode"], "dsl")
+        self.assertEqual(
+            json.loads(stored["condition_json"]), checkin_condition()
+        )
+
+        self.add_activity("2026-11-04", 600)
+        completed = self.store.list_visible_tasks("u", self.now)[0]
+        self.assertEqual(completed["id"], checkin["id"])
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(completed["chest_status"], "available")
+        self.assertEqual(completed["progress"], {"current": 1, "target": 1})
+
+    def test_already_checked_in_user_sees_completed_after_deploy(self) -> None:
+        self.add_activity("2026-11-04", 600)
+        self.store.ensure_user_tasks("u", self.now)
+        tasks = self.store.list_visible_tasks("u", self.now)
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["source"], "checkin")
+        self.assertEqual(tasks[0]["status"], "completed")
+        self.assertEqual(tasks[0]["chest_status"], "available")
+
+    def test_checkin_generation_is_idempotent_per_day(self) -> None:
+        self.assertEqual(self.store.ensure_user_tasks("u", self.now), 0)
+        self.assertEqual(self.store.ensure_user_tasks("u", self.now), 0)
+        tomorrow = self.now + timedelta(days=1)
+        self.assertEqual(self.store.ensure_user_tasks("u", tomorrow), 0)
+        with self.store._reader() as conn:
+            keys = [
+                row["system_key"]
+                for row in conn.execute(
+                    "SELECT system_key FROM task_instances "
+                    "WHERE source = 'checkin' ORDER BY system_key"
+                )
+            ]
+        self.assertEqual(keys, ["checkin:2026-11-04", "checkin:2026-11-05"])
+
+    def test_checkin_requires_verified_not_repaired(self) -> None:
+        self.add_activity("2026-11-03", 444)
+        self.grant_embers()
+        self.store.repair_checkin(
+            "u", "2026-11-03", idempotency_key="repair-1", now=self.now
+        )
+        self.store.ensure_user_tasks("u", self.now)
+        checkin = self.store.list_visible_tasks("u", self.now)[0]
+        self.assertEqual(checkin["source"], "checkin")
+        self.assertEqual(checkin["status"], "active")
 
 
 class ManualChestTests(TaskStoreBase):
     def _completed_task(self) -> dict:
         self.store.create_task_definition("u", title="画一张", difficulty=2, now=self.now)
         self.store.ensure_user_tasks("u", self.now)
-        task = self.store.list_visible_tasks("u", self.now)[0]
+        task = visible_tasks(self.store, "u", self.now)[0]
         self.store.complete_manual_task(
             "u",
             task["id"],
@@ -405,7 +499,7 @@ class ManualChestTests(TaskStoreBase):
             proof_mime="image/png",
             now=self.now,
         )
-        return self.store.list_visible_tasks("u", self.now)[0]
+        return visible_tasks(self.store, "u", self.now)[0]
 
     def test_completion_makes_chest_available(self) -> None:
         task = self._completed_task()
@@ -415,6 +509,7 @@ class ManualChestTests(TaskStoreBase):
         self.assertEqual(task["proof_url"], f"/v1/me/tasks/{task['id']}/proof")
 
     def test_chest_credits_diamonds_and_is_idempotent(self) -> None:
+        self.store.set_game_config("task_chest_boost_chance", "0", now=self.now)
         task = self._completed_task()
         first = self.store.claim_task_chest("u", task["id"], now=self.now)
         low, high = chest_amount_range(2)
@@ -424,7 +519,7 @@ class ManualChestTests(TaskStoreBase):
         duplicate = self.store.claim_task_chest("u", task["id"], now=self.now)
         self.assertTrue(duplicate["duplicate"])
         self.assertEqual(duplicate["amount"], first["amount"])
-        visible = self.store.list_visible_tasks("u", self.now)
+        visible = visible_tasks(self.store, "u", self.now)
         self.assertEqual(len(visible), 1)
         self.assertEqual(visible[0]["chest_status"], "claimed")
         self.assertEqual(visible[0]["chest_amount"], first["amount"])
@@ -438,7 +533,7 @@ class ManualChestTests(TaskStoreBase):
     def test_claim_requires_completion(self) -> None:
         self.store.create_task_definition("u", title="画一张", difficulty=1, now=self.now)
         self.store.ensure_user_tasks("u", self.now)
-        task = self.store.list_visible_tasks("u", self.now)[0]
+        task = visible_tasks(self.store, "u", self.now)[0]
         with self.assertRaises(TaskStateRejected):
             self.store.claim_task_chest("u", task["id"], now=self.now)
 
@@ -452,7 +547,7 @@ class ManualChestTests(TaskStoreBase):
     def test_other_owner_is_not_found(self) -> None:
         self.store.create_task_definition("u", title="画一张", difficulty=1, now=self.now)
         self.store.ensure_user_tasks("u", self.now)
-        task = self.store.list_visible_tasks("u", self.now)[0]
+        task = visible_tasks(self.store, "u", self.now)[0]
         with self.assertRaises(TaskNotFound):
             self.store.complete_manual_task(
                 "other",
@@ -472,11 +567,134 @@ class ManualChestTests(TaskStoreBase):
         self.assertEqual(roll_chest_amount(5, rng=lambda span: span - 1), 48)
 
 
+class ChestRewardTests(TaskStoreBase):
+    def _complete(self, title: str, *, now: datetime | None = None) -> str:
+        stamp = now or self.now
+        self.store.create_task_definition(
+            "u", title=title, difficulty=2, now=stamp
+        )
+        self.store.ensure_user_tasks("u", stamp)
+        task = next(
+            row
+            for row in visible_tasks(self.store, "u", stamp)
+            if row["title"] == title
+        )
+        self.store.complete_manual_task(
+            "u",
+            task["id"],
+            proof_path=f"task-proofs/u/{task['id']}.png",
+            proof_mime="image/png",
+            now=stamp,
+        )
+        return task["id"]
+
+    def test_roll_chest_reward_has_fixed_diamond_and_boost_branches(self) -> None:
+        diamond = roll_chest_reward(
+            1,
+            boost_chance=20,
+            boost_minutes=25,
+            rng=lambda span: span - 1,
+        )
+        self.assertEqual(
+            diamond,
+            {"reward_type": "diamonds", "amount": 6, "boost_minutes": None},
+        )
+        boost = roll_chest_reward(
+            1,
+            boost_chance=100,
+            boost_minutes=25,
+            rng=lambda span: 0,
+        )
+        self.assertEqual(
+            boost,
+            {"reward_type": "boost", "amount": 0, "boost_minutes": 25},
+        )
+        self.assertEqual(
+            roll_chest_reward(
+                1, boost_chance=0, boost_minutes=25, rng=lambda span: 0
+            )["reward_type"],
+            "diamonds",
+        )
+
+    def test_boost_chest_extends_buff_and_never_writes_diamond_ledger(
+        self,
+    ) -> None:
+        self.store.set_game_config("task_chest_boost_chance", "100", now=self.now)
+        self.store.set_game_config("task_chest_boost_minutes", "25", now=self.now)
+        first_id = self._complete("A")
+        first = self.store.claim_task_chest(
+            "u", first_id, now=self.now, rng=lambda span: 0
+        )
+        self.assertEqual(first["reward_type"], "boost")
+        self.assertEqual(first["amount"], 0)
+        self.assertEqual(first["boost_minutes"], 25)
+        self.assertFalse(first["duplicate"])
+        self.assertEqual(
+            first["diamond_boost"]["expires_at"], "2026-11-04T12:25:00+08:00"
+        )
+        self.assertEqual(self.store.diamond_ledger("u"), [])
+
+        later = self.now + timedelta(minutes=10)
+        duplicate = self.store.claim_task_chest(
+            "u", first_id, now=later, rng=lambda span: 0
+        )
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(duplicate["reward_type"], "boost")
+        self.assertEqual(duplicate["amount"], 0)
+        self.assertEqual(duplicate["boost_minutes"], 25)
+        self.assertEqual(
+            duplicate["diamond_boost"]["expires_at"],
+            "2026-11-04T12:25:00+08:00",
+        )
+
+        second_id = self._complete("B", now=later)
+        second = self.store.claim_task_chest(
+            "u", second_id, now=later, rng=lambda span: 0
+        )
+        self.assertEqual(second["reward_type"], "boost")
+        self.assertEqual(
+            second["diamond_boost"]["expires_at"],
+            "2026-11-04T12:50:00+08:00",
+        )
+        self.assertEqual(self.store.diamond_ledger("u"), [])
+
+        stored = next(
+            task
+            for task in self.store.list_visible_tasks("u", later)
+            if task["id"] == first_id
+        )
+        self.assertEqual(stored["chest_reward_type"], "boost")
+        self.assertEqual(stored["chest_boost_minutes"], 25)
+        self.assertIsNone(stored["chest_amount"])
+
+    def test_boost_chest_fails_closed_when_config_is_invalid(self) -> None:
+        self.store.set_game_config("task_chest_boost_chance", "bogus", now=self.now)
+        task_id = self._complete("A")
+        result = self.store.claim_task_chest("u", task_id, now=self.now)
+        self.assertEqual(result["reward_type"], "diamonds")
+        self.assertIsNone(result["boost_minutes"])
+        self.assertIn(result["amount"], range(6, 11))
+        self.assertEqual(len(self.store.diamond_ledger("u")), 1)
+
+    def test_boost_chest_missing_config_fails_closed_to_diamonds(self) -> None:
+        with self.store.transaction() as conn:
+            conn.execute(
+                "DELETE FROM game_config "
+                "WHERE key IN ('task_chest_boost_chance', "
+                "'task_chest_boost_minutes')"
+            )
+        task_id = self._complete("A")
+        result = self.store.claim_task_chest("u", task_id, now=self.now)
+        self.assertEqual(result["reward_type"], "diamonds")
+        self.assertIsNone(result["boost_minutes"])
+        self.assertEqual(len(self.store.diamond_ledger("u")), 1)
+
+
 class RepairTaskTests(TaskStoreBase):
     def test_today_is_not_a_repair_day(self) -> None:
         self.add_activity("2026-11-04", 444)
         self.assertEqual(self.store.ensure_repair_tasks("u", self.now.date(), now=self.now), 0)
-        self.assertEqual(self.store.list_visible_tasks("u", self.now), [])
+        self.assertEqual(visible_tasks(self.store, "u", self.now), [])
 
     def test_yesterday_and_seven_days_ago_qualify_but_eight_days_does_not(self) -> None:
         # 2026-10-27 is eight days before 2026-11-04 and must not qualify.
@@ -489,7 +707,7 @@ class RepairTaskTests(TaskStoreBase):
         self.assertEqual(
             self.store.ensure_repair_tasks("u", self.now.date(), now=self.now), 1
         )
-        tasks = self.store.list_visible_tasks("u", self.now)
+        tasks = visible_tasks(self.store, "u", self.now)
         self.assertEqual(
             {task["title"] for task in tasks},
             {"补断联 · 10/28", "补断联 · 11/03"},
@@ -506,7 +724,7 @@ class RepairTaskTests(TaskStoreBase):
     def test_repair_task_fields_and_deadline(self) -> None:
         self.add_activity("2026-10-29", 444)
         self.assertEqual(self.store.ensure_repair_tasks("u", self.now.date(), now=self.now), 1)
-        task = self.store.list_visible_tasks("u", self.now)[0]
+        task = visible_tasks(self.store, "u", self.now)[0]
         self.assertEqual(task["source"], "repair")
         self.assertEqual(task["difficulty"], 1)
         self.assertEqual(task["chest_tier"], 1)
@@ -520,10 +738,10 @@ class RepairTaskTests(TaskStoreBase):
     def test_repaired_checkin_auto_completes(self) -> None:
         self.add_activity("2026-10-29", 444)
         self.store.ensure_repair_tasks("u", self.now.date(), now=self.now)
-        task = self.store.list_visible_tasks("u", self.now)[0]
+        task = visible_tasks(self.store, "u", self.now)[0]
         self.grant_embers()
         self.store.repair_checkin("u", "2026-10-29", idempotency_key="repair-1", now=self.now)
-        completed = self.store.list_visible_tasks("u", self.now)[0]
+        completed = visible_tasks(self.store, "u", self.now)[0]
         self.assertEqual(completed["id"], task["id"])
         self.assertEqual(completed["status"], "completed")
         self.assertEqual(completed["chest_status"], "available")
@@ -532,13 +750,13 @@ class RepairTaskTests(TaskStoreBase):
     def test_repair_task_expires_unclaimed(self) -> None:
         self.add_activity("2026-10-29", 444)
         self.store.ensure_repair_tasks("u", self.now.date(), now=self.now)
-        task = self.store.list_visible_tasks("u", self.now)[0]
+        task = visible_tasks(self.store, "u", self.now)[0]
         self.grant_embers()
         self.store.repair_checkin("u", "2026-10-29", idempotency_key="repair-1", now=self.now)
-        completed = self.store.list_visible_tasks("u", self.now)[0]
+        completed = visible_tasks(self.store, "u", self.now)[0]
         self.assertEqual(completed["chest_status"], "available")
         later = datetime(2026, 11, 6, 0, 0, 0, tzinfo=TZ)
-        self.assertEqual(self.store.list_visible_tasks("u", later), [])
+        self.assertEqual(visible_tasks(self.store, "u", later), [])
         stored = self.store.get_task("u", task["id"])
         self.assertEqual(stored["status"], "expired")
         self.assertEqual(stored["chest_status"], "forfeited")
@@ -551,7 +769,7 @@ class WeekendTaskTests(TaskStoreBase):
         saturday = datetime(2026, 10, 31, 12, 0, 0, tzinfo=TZ)
         self.assertEqual(self.store.ensure_weekend_tasks("u", saturday.date(), now=saturday), 1)
         self.assertEqual(self.store.ensure_weekend_tasks("u", saturday.date(), now=saturday), 0)
-        task = self.store.list_visible_tasks("u", saturday)[0]
+        task = visible_tasks(self.store, "u", saturday)[0]
         self.assertEqual(task["source"], "weekend")
         self.assertEqual(task["difficulty"], 5)
         self.assertEqual(task["chest_tier"], 5)
@@ -567,7 +785,7 @@ class WeekendTaskTests(TaskStoreBase):
         self.assertEqual(
             self.store.ensure_weekend_tasks("u", sunday.date(), now=sunday), 1
         )
-        task = self.store.list_visible_tasks("u", sunday)[0]
+        task = visible_tasks(self.store, "u", sunday)[0]
         self.assertEqual(task["starts_at"], "2026-10-31T00:00:00+08:00")
         self.assertEqual(task["ends_at"], "2026-11-02T00:00:00+08:00")
         self.assertEqual(
@@ -579,15 +797,15 @@ class WeekendTaskTests(TaskStoreBase):
         sunday = datetime(2026, 11, 1, 12, 0, 0, tzinfo=TZ)
         self.store.ensure_weekend_tasks("u", saturday.date(), now=saturday)
         self.add_activity("2026-10-31", 3000, event_id="sat")
-        task = self.store.list_visible_tasks("u", sunday)[0]
+        task = visible_tasks(self.store, "u", sunday)[0]
         self.assertEqual(task["status"], "active")
         self.assertEqual(task["progress"], {"current": 500, "target": 1000})
         self.add_activity("2026-11-01", 3000, event_id="sun")
-        task = self.store.list_visible_tasks("u", sunday)[0]
+        task = visible_tasks(self.store, "u", sunday)[0]
         self.assertEqual(task["status"], "completed")
         self.assertEqual(task["progress"], {"current": 1000, "target": 1000})
         monday = datetime(2026, 11, 2, 0, 0, 0, tzinfo=TZ)
-        self.assertEqual(self.store.list_visible_tasks("u", monday), [])
+        self.assertEqual(visible_tasks(self.store, "u", monday), [])
         stored = self.store.get_task("u", task["id"])
         self.assertEqual(stored["status"], "expired")
         self.assertEqual(stored["chest_status"], "forfeited")
@@ -702,7 +920,7 @@ class TaskApiTests(APITestBase):
         with self.client() as client:
             empty = client.get("/v1/me/tasks", headers=auth(TOKEN))
             self.assertEqual(empty.status_code, 200)
-            self.assertEqual(empty.json()["tasks"], [])
+            self.assertEqual(api_tasks(client), [])
             created = client.post(
                 "/v1/me/task-definitions",
                 headers=auth(TOKEN),
@@ -720,7 +938,7 @@ class TaskApiTests(APITestBase):
             )
             self.assertEqual(patched.status_code, 200, patched.text)
             self.assertEqual(patched.json()["title"], "新标题")
-            tasks = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]
+            tasks = api_tasks(client)
             self.assertEqual(len(tasks), 1)
             self.assertEqual(tasks[0]["title"], "新标题")
             self.assertEqual(tasks[0]["chest_tier"], 3)
@@ -735,7 +953,7 @@ class TaskApiTests(APITestBase):
                 [],
             )
             self.assertEqual(
-                len(client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]),
+                len(api_tasks(client)),
                 1,
             )
 
@@ -784,7 +1002,7 @@ class TaskApiTests(APITestBase):
                 ).status_code,
                 200,
             )
-            before = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]
+            before = api_tasks(client)
             self.assertEqual(
                 [
                     (task["title"], task["ends_at"], task["sort_order"])
@@ -807,7 +1025,7 @@ class TaskApiTests(APITestBase):
                 [(row["title"], row["sort_order"]) for row in reordered.json()],
                 [("B", 10), ("A", 20)],
             )
-            tasks = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]
+            tasks = api_tasks(client)
             self.assertEqual(
                 [
                     (task["title"], task["ends_at"], task["sort_order"])
@@ -841,7 +1059,7 @@ class TaskApiTests(APITestBase):
                 [(row["title"], row["sort_order"]) for row in definitions],
                 [("B", 10), ("A", 20)],
             )
-            tasks = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]
+            tasks = api_tasks(client)
             self.assertEqual(
                 [task["title"] for task in tasks],
                 ["B", "A", "补断联 · 10/29"],
@@ -861,9 +1079,7 @@ class TaskApiTests(APITestBase):
                 )
             by_title = {
                 task["title"]: task
-                for task in client.get(
-                    "/v1/me/tasks", headers=auth(TOKEN)
-                ).json()["tasks"]
+                for task in api_tasks(client)
             }
             completed = client.post(
                 f"/v1/me/tasks/{by_title['B']['id']}/complete",
@@ -877,7 +1093,7 @@ class TaskApiTests(APITestBase):
             )
             self.assertEqual(claimed.status_code, 200, claimed.text)
 
-            visible = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]
+            visible = api_tasks(client)
             self.assertEqual(
                 [
                     (
@@ -902,7 +1118,7 @@ class TaskApiTests(APITestBase):
                 headers=auth(TOKEN),
                 json={"title": "画一张", "difficulty": 1},
             )
-            task_id = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"][0]["id"]
+            task_id = api_tasks(client)[0]["id"]
             missing = client.post(
                 f"/v1/me/tasks/{task_id}/complete", headers=auth(TOKEN)
             )
@@ -964,7 +1180,7 @@ class TaskApiTests(APITestBase):
                 json={"title": "拍一张", "difficulty": 1},
             )
             self.assertEqual(created.status_code, 200, created.text)
-            task_id = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"][0]["id"]
+            task_id = api_tasks(client)[0]["id"]
             source = heic_bytes()
             done = client.post(
                 f"/v1/me/tasks/{task_id}/complete",
@@ -1009,9 +1225,7 @@ class TaskApiTests(APITestBase):
                         json={"title": title, "difficulty": 1},
                     )
                     self.assertEqual(created.status_code, 200, created.text)
-                    tasks = client.get(
-                        "/v1/me/tasks", headers=auth(TOKEN)
-                    ).json()["tasks"]
+                    tasks = api_tasks(client)
                     task = next(row for row in tasks if row["title"] == title)
                     done = client.post(
                         f"/v1/me/tasks/{task['id']}/complete",
@@ -1044,7 +1258,7 @@ class TaskApiTests(APITestBase):
                 headers=auth(TOKEN),
                 json={"title": "拍一张", "difficulty": 1},
             )
-            task_id = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"][0]["id"]
+            task_id = api_tasks(client)[0]["id"]
             source = image_bytes("JPEG")
             done = client.post(
                 f"/v1/me/tasks/{task_id}/complete",
@@ -1061,12 +1275,17 @@ class TaskApiTests(APITestBase):
     def test_chest_claim_and_permissions(self) -> None:
         self.add_account("friend", "Friend", "friend-token-only")
         with self.client() as client:
+            with sqlite3.connect(self.game_db_path) as conn:
+                conn.execute(
+                    "UPDATE game_config SET value = '0' "
+                    "WHERE key = 'task_chest_boost_chance'"
+                )
             definition = client.post(
                 "/v1/me/task-definitions",
                 headers=auth(TOKEN),
                 json={"title": "画一张", "difficulty": 2},
             ).json()
-            task_id = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"][0]["id"]
+            task_id = api_tasks(client)[0]["id"]
             done = client.post(
                 f"/v1/me/tasks/{task_id}/complete",
                 headers=auth(TOKEN),
@@ -1078,7 +1297,19 @@ class TaskApiTests(APITestBase):
             )
             self.assertEqual(claimed.status_code, 200, claimed.text)
             body = claimed.json()
-            self.assertEqual(set(body), {"amount", "balance", "duplicate"})
+            self.assertEqual(
+                set(body),
+                {
+                    "amount",
+                    "balance",
+                    "duplicate",
+                    "reward_type",
+                    "boost_minutes",
+                    "diamond_boost",
+                },
+            )
+            self.assertEqual(body["reward_type"], "diamonds")
+            self.assertIsNone(body["boost_minutes"])
             self.assertFalse(body["duplicate"])
             again = client.post(f"/v1/me/tasks/{task_id}/chest", headers=auth(TOKEN))
             self.assertTrue(again.json()["duplicate"])
@@ -1162,7 +1393,7 @@ class TaskApiTests(APITestBase):
                 },
             )
             self.assertEqual(response.status_code, 200, response.text)
-            tasks = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"]
+            tasks = api_tasks(client)
             repair = [task for task in tasks if task["source"] == "repair"]
             self.assertEqual(len(repair), 1)
             self.assertEqual(repair[0]["title"], "补断联 · 10/25")

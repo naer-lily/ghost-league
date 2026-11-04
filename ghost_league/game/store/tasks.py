@@ -7,28 +7,38 @@ import logging
 import sqlite3
 import uuid
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Callable
 
 from .. import calendar as cal
 from ..tasks import (
+    CHECKIN_CHEST_TIER,
+    CHECKIN_TASK_DESCRIPTION,
+    CHECKIN_TASK_SOURCE,
+    CHECKIN_TASK_TITLE,
+    CHEST_REWARD_BOOST,
+    CHEST_REWARD_DIAMONDS,
     MANUAL_CHEST_TIER,
     MAX_ACTIVE_TASK_DEFINITIONS,
     REPAIR_CHEST_TIER,
     REPAIR_LOOKBACK_DAYS,
     REPAIR_XP_THRESHOLD,
+    TASK_CHEST_BOOST_CHANCE_KEY,
+    TASK_CHEST_BOOST_MINUTES_KEY,
     WEEKEND_CHEST_TIER,
     TaskLimitReached,
     TaskNotFound,
     TaskStateRejected,
+    checkin_condition,
     condition_progress,
     evaluate_condition,
     missed_date_from_system_key,
     repair_condition,
     repair_task_description,
     repair_task_title,
-    roll_chest_amount,
+    roll_chest_reward,
     weekend_condition,
 )
+from .boosts import DIAMOND_BOOST_MULTIPLIER_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -277,6 +287,34 @@ class TasksMixin:
         stamp = cal.iso_ts(local_now)
         inserted = 0
         with self.transaction() as conn:  # type: ignore[attr-defined]
+            condition_json = json.dumps(
+                checkin_condition(), ensure_ascii=False, separators=(",", ":")
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO task_instances "
+                "(id, user_id, definition_id, source, system_key, title, "
+                "description, difficulty, chest_tier, starts_at, ends_at, "
+                "completion_mode, condition_json, status, completed_at, "
+                "proof_path, proof_mime, chest_status, claimed_at, "
+                "chest_amount, sort_order, created_at, updated_at) "
+                "VALUES (?, ?, NULL, ?, ?, ?, ?, 1, ?, ?, ?, "
+                "'dsl', ?, 'active', NULL, NULL, NULL, 'none', NULL, NULL, "
+                "0, ?, ?)",
+                (
+                    _new_id("ti"),
+                    user_id,
+                    CHECKIN_TASK_SOURCE,
+                    f"checkin:{today.isoformat()}",
+                    CHECKIN_TASK_TITLE,
+                    CHECKIN_TASK_DESCRIPTION,
+                    CHECKIN_CHEST_TIER,
+                    starts_at,
+                    ends_at,
+                    condition_json,
+                    stamp,
+                    stamp,
+                ),
+            )
             definitions = conn.execute(
                 "SELECT * FROM task_definitions WHERE user_id = ? AND active = 1 "
                 "ORDER BY sort_order, created_at, id",
@@ -565,6 +603,14 @@ class TasksMixin:
             "chest_amount": (
                 None if task["chest_amount"] is None else int(task["chest_amount"])
             ),
+            "chest_reward_type": str(
+                task.get("chest_reward_type") or CHEST_REWARD_DIAMONDS
+            ),
+            "chest_boost_minutes": (
+                None
+                if task.get("chest_boost_minutes") is None
+                else int(task["chest_boost_minutes"])
+            ),
             "proof_url": (
                 f"/v1/me/tasks/{task_id}/proof" if task["proof_path"] else None
             ),
@@ -659,12 +705,40 @@ class TasksMixin:
             ).fetchone()
             return self._task_payload(updated, user_id=user_id, now=local_now)
 
+    def _chest_boost_config_with(
+        self, conn: sqlite3.Connection
+    ) -> tuple[int, int, int]:
+        """Return (chance %, minutes, multiplier), failing closed to diamonds."""
+
+        try:
+            chance = self._config_int_with(  # type: ignore[attr-defined]
+                conn, TASK_CHEST_BOOST_CHANCE_KEY, minimum=0
+            )
+            minutes = self._config_int_with(  # type: ignore[attr-defined]
+                conn, TASK_CHEST_BOOST_MINUTES_KEY, minimum=1
+            )
+            multiplier = self._config_int_with(  # type: ignore[attr-defined]
+                conn, DIAMOND_BOOST_MULTIPLIER_KEY, minimum=1
+            )
+        except ValueError:
+            logger.warning(
+                "task chest boost config is missing or invalid; paying diamonds"
+            )
+            return 0, 0, 1
+        if chance > 100:
+            logger.warning(
+                "task_chest_boost_chance is out of range; paying diamonds"
+            )
+            return 0, 0, 1
+        return chance, minutes, multiplier
+
     def claim_task_chest(
         self,
         user_id: str,
         task_id: str,
         *,
         now: datetime | str | None = None,
+        rng: Callable[[int], int] | None = None,
     ) -> dict[str, Any]:
         local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
         now_iso = cal.iso_ts(local_now)
@@ -676,6 +750,10 @@ class TasksMixin:
             ).fetchone()
             if row is None:
                 raise TaskNotFound("task not found")
+            reward_type = str(
+                row["chest_reward_type"] or CHEST_REWARD_DIAMONDS
+            )
+            stored_minutes = row["chest_boost_minutes"]
             if str(row["chest_status"]) == "claimed":
                 ledger = self._ledger_by_key_with(conn, key)  # type: ignore[attr-defined]
                 amount = (
@@ -683,6 +761,8 @@ class TasksMixin:
                     if row["chest_amount"] is not None
                     else (abs(int(ledger["delta"])) if ledger is not None else 0)
                 )
+                if reward_type == CHEST_REWARD_BOOST:
+                    amount = 0
                 wallet = self._sync_diamond_decay_with(  # type: ignore[attr-defined]
                     conn, user_id, local_now, create_for_unknown=False
                 )
@@ -690,6 +770,15 @@ class TasksMixin:
                     "amount": amount,
                     "balance": 0 if wallet is None else int(wallet["balance"]),
                     "duplicate": True,
+                    "reward_type": reward_type,
+                    "boost_minutes": (
+                        None
+                        if stored_minutes is None
+                        else int(stored_minutes)
+                    ),
+                    "diamond_boost": self._boost_state_with(  # type: ignore[attr-defined]
+                        conn, user_id, local_now
+                    ),
                 }
             if str(row["chest_status"]) != "available":
                 raise TaskStateRejected("chest is not available")
@@ -697,28 +786,73 @@ class TasksMixin:
                 raise TaskStateRejected("task is not completed")
             if now_iso >= str(row["ends_at"]):
                 raise TaskStateRejected("task has ended")
-            amount = roll_chest_amount(int(row["chest_tier"]))
-            credit = self._credit_diamonds_with(  # type: ignore[attr-defined]
-                conn,
-                player_id=user_id,
-                amount=amount,
-                reason="task_chest",
-                ref_type="task",
-                ref_id=task_id,
-                idempotency_key=key,
-                now=local_now,
-                boost=False,
+
+            chance, minutes, multiplier = self._chest_boost_config_with(conn)
+            reward = roll_chest_reward(
+                int(row["chest_tier"]),
+                boost_chance=chance,
+                boost_minutes=minutes,
+                rng=rng,
             )
+            if reward["reward_type"] == CHEST_REWARD_BOOST:
+                reward_type = CHEST_REWARD_BOOST
+                boost_minutes: int | None = int(reward["boost_minutes"])
+                amount = 0
+                stored_amount: int | None = None
+                self._extend_diamond_boost_with(  # type: ignore[attr-defined]
+                    conn,
+                    player_id=user_id,
+                    minutes=boost_minutes,
+                    multiplier=multiplier,
+                    now=local_now,
+                    updated_at=now_iso,
+                )
+                wallet = self._sync_diamond_decay_with(  # type: ignore[attr-defined]
+                    conn, user_id, local_now, create_for_unknown=False
+                )
+                balance = 0 if wallet is None else int(wallet["balance"])
+            else:
+                reward_type = CHEST_REWARD_DIAMONDS
+                boost_minutes = None
+                amount = int(reward["amount"])
+                stored_amount = amount
+                credit = self._credit_diamonds_with(  # type: ignore[attr-defined]
+                    conn,
+                    player_id=user_id,
+                    amount=amount,
+                    reason="task_chest",
+                    ref_type="task",
+                    ref_id=task_id,
+                    idempotency_key=key,
+                    now=local_now,
+                    boost=False,
+                )
+                balance = int(credit["balance"])
+
             conn.execute(
                 "UPDATE task_instances SET chest_status = 'claimed', "
-                "claimed_at = ?, chest_amount = ?, updated_at = ? "
+                "claimed_at = ?, chest_amount = ?, chest_reward_type = ?, "
+                "chest_boost_minutes = ?, updated_at = ? "
                 "WHERE id = ? AND user_id = ?",
-                (now_iso, amount, now_iso, task_id, user_id),
+                (
+                    now_iso,
+                    stored_amount,
+                    reward_type,
+                    boost_minutes,
+                    now_iso,
+                    task_id,
+                    user_id,
+                ),
             )
             return {
                 "amount": amount,
-                "balance": int(credit["balance"]),
+                "balance": balance,
                 "duplicate": False,
+                "reward_type": reward_type,
+                "boost_minutes": boost_minutes,
+                "diamond_boost": self._boost_state_with(  # type: ignore[attr-defined]
+                    conn, user_id, local_now
+                ),
             }
 
 

@@ -34,13 +34,22 @@ CHEST_BY_TIER: dict[int, dict[str, Any]] = {
 MANUAL_CHEST_TIER: dict[int, int] = {1: 1, 2: 2, 3: 3}
 REPAIR_CHEST_TIER = 1
 WEEKEND_CHEST_TIER = 5
+CHECKIN_CHEST_TIER = 1
+
+CHECKIN_TASK_SOURCE = "checkin"
+CHECKIN_TASK_TITLE = "每日打卡"
+CHECKIN_TASK_DESCRIPTION = "画满 10 分钟，开个小宝箱。"
+TASK_CHEST_BOOST_CHANCE_KEY = "task_chest_boost_chance"
+TASK_CHEST_BOOST_MINUTES_KEY = "task_chest_boost_minutes"
+CHEST_REWARD_DIAMONDS = "diamonds"
+CHEST_REWARD_BOOST = "boost"
 
 REPAIR_XP_THRESHOLD = 100
 REPAIR_LOOKBACK_DAYS = 7
 WEEKEND_XP_TARGET = 1000
 MAX_ACTIVE_TASK_DEFINITIONS = 20
 
-TASK_SOURCES = ("daily_manual", "repair", "weekend")
+TASK_SOURCES = ("checkin", "daily_manual", "repair", "weekend")
 TASK_COMPLETION_MODES = ("manual", "dsl")
 
 MAX_DSL_DEPTH = 64
@@ -85,6 +94,56 @@ def roll_chest_amount(
     span = high - low + 1
     draw = rng or secrets.randbelow
     return low + int(draw(span))
+
+
+def checkin_condition() -> dict[str, Any]:
+    """The daily check-in succeeds once today's check-in is verified."""
+
+    return {
+        "op": "eq",
+        "left": {"fn": "checkin_source", "args": [{"var": "task.start"}]},
+        "right": "verified",
+    }
+
+
+def roll_chest_reward(
+    tier: int,
+    *,
+    boost_chance: int = 0,
+    boost_minutes: int = 0,
+    rng: Callable[[int], int] | None = None,
+) -> dict[str, Any]:
+    """Roll one chest reward.
+
+    ``boost_chance`` is an integer percentage.  Invalid or missing config is
+    normalised to zero by the caller, so the chest still pays diamonds.  The
+    returned mapping always has ``reward_type`` and ``boost_minutes``; boost
+    rewards keep ``amount`` at zero so the API field stays an integer.
+    """
+
+    chest_amount_range(tier)
+    try:
+        chance = int(boost_chance)
+        minutes = int(boost_minutes)
+    except (TypeError, ValueError):
+        chance, minutes = 0, 0
+    if isinstance(boost_chance, bool) or isinstance(boost_minutes, bool):
+        chance, minutes = 0, 0
+    if not 0 <= chance <= 100 or minutes < 1:
+        chance, minutes = 0, 0
+
+    draw = rng or secrets.randbelow
+    if chance and int(draw(100)) < chance:
+        return {
+            "reward_type": CHEST_REWARD_BOOST,
+            "amount": 0,
+            "boost_minutes": minutes,
+        }
+    return {
+        "reward_type": CHEST_REWARD_DIAMONDS,
+        "amount": roll_chest_amount(tier, rng=draw),
+        "boost_minutes": None,
+    }
 
 
 def repair_condition() -> dict[str, Any]:
@@ -404,7 +463,13 @@ def condition_progress(
 
 __all__ = [
     "CHEST_BY_TIER",
+    "CHEST_REWARD_BOOST",
+    "CHEST_REWARD_DIAMONDS",
     "CHEST_TIERS",
+    "CHECKIN_CHEST_TIER",
+    "CHECKIN_TASK_DESCRIPTION",
+    "CHECKIN_TASK_SOURCE",
+    "CHECKIN_TASK_TITLE",
     "ConditionError",
     "MANUAL_CHEST_TIER",
     "MAX_ACTIVE_TASK_DEFINITIONS",
@@ -413,6 +478,8 @@ __all__ = [
     "REPAIR_CHEST_TIER",
     "REPAIR_LOOKBACK_DAYS",
     "REPAIR_XP_THRESHOLD",
+    "TASK_CHEST_BOOST_CHANCE_KEY",
+    "TASK_CHEST_BOOST_MINUTES_KEY",
     "TASK_COMPLETION_MODES",
     "TASK_SOURCES",
     "TaskLimitReached",
@@ -420,6 +487,7 @@ __all__ = [
     "TaskStateRejected",
     "WEEKEND_CHEST_TIER",
     "WEEKEND_XP_TARGET",
+    "checkin_condition",
     "chest_amount_range",
     "condition_progress",
     "evaluate_condition",
@@ -428,5 +496,6 @@ __all__ = [
     "repair_task_description",
     "repair_task_title",
     "roll_chest_amount",
+    "roll_chest_reward",
     "weekend_condition",
 ]

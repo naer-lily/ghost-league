@@ -53,7 +53,7 @@ def test_schema_meta_and_epoch(tmp_path) -> None:
         "diamond_boosts",
     } <= tables
     meta = store.meta_snapshot()
-    assert meta["schema_version"] == "11"
+    assert meta["schema_version"] == "12"
     assert meta["algorithm_version"] == "phase1-v1"
     assert meta["epoch_id"]
     assert store.active_epoch()["status"] == "active"
@@ -401,9 +401,43 @@ def test_task_order_migration_backfills_definitions_and_instances(tmp_path) -> N
     ] == [("B", 10), ("A", 20)]
     with store.transaction() as conn:
         rows = conn.execute(
-            "SELECT id, sort_order FROM task_instances ORDER BY id"
+            "SELECT id, sort_order, chest_reward_type, chest_boost_minutes "
+            "FROM task_instances ORDER BY id"
         ).fetchall()
-    assert [(row["id"], row["sort_order"]) for row in rows] == [
-        ("ti_a", 20),
-        ("ti_done", 10),
+    assert [
+        (
+            row["id"],
+            row["sort_order"],
+            row["chest_reward_type"],
+            row["chest_boost_minutes"],
+        )
+        for row in rows
+    ] == [
+        ("ti_a", 20, "diamonds", None),
+        ("ti_done", 10, "diamonds", None),
     ]
+    with sqlite3.connect(path) as conn:
+        sql = conn.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'task_instances'"
+        ).fetchone()[0]
+        assert "'checkin'" in sql
+        # The rebuilt CHECK accepts the new source and keeps old rows valid.
+        conn.execute(
+            "INSERT INTO task_instances "
+            "(id, user_id, definition_id, source, system_key, title, "
+            "description, difficulty, chest_tier, starts_at, ends_at, "
+            "completion_mode, condition_json, status, completed_at, "
+            "proof_path, proof_mime, chest_status, claimed_at, chest_amount, "
+            "chest_reward_type, chest_boost_minutes, sort_order, created_at, "
+            "updated_at) "
+            "VALUES ('ti_checkin', 'u', NULL, 'checkin', "
+            "'checkin:2026-11-04', '每日打卡', '', 1, 1, "
+            "'2026-11-04T00:00:00+08:00', '2026-11-05T00:00:00+08:00', "
+            "'dsl', NULL, 'active', NULL, NULL, NULL, 'none', NULL, NULL, "
+            "'diamonds', NULL, 0, '2026-11-04T01:00:00+08:00', "
+            "'2026-11-04T01:00:00+08:00')"
+        )
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_instances WHERE source = 'checkin'"
+        ).fetchone()[0] == 1

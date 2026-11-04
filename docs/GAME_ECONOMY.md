@@ -126,26 +126,37 @@ Current and intended sinks:
 
 ### Task chests
 
-The task system adds one bounded diamond source. A task chest only ever pays
-diamonds; it never pays XP, never applies a diamond boost multiplier, and never
-writes `weekly_scores`.
+The task system adds one bounded reward source. A task chest pays either
+diamonds or a time-boxed XP-to-diamond boost; it never pays XP and never writes
+`weekly_scores`.
 
 | tier | name | diamonds (inclusive) | source |
 | --- | --- | --- | --- |
-| 1 | 木箱 | 3–6 | daily difficulty 1, repair |
+| 1 | 木箱 | 3–6 | daily check-in, daily difficulty 1, repair |
 | 2 | 铜箱 | 6–10 | daily difficulty 2 |
 | 3 | 银箱 | 10–16 | daily difficulty 3 |
 | 4 | 金箱 | 18–28 | reserved |
 | 5 | 星箱 | 30–48 | weekend |
 
-- The server picks the amount uniformly inside the tier range; the client never
-  submits an amount.
-- Claims write `diamond_ledger` with `reason='task_chest'`, `ref_type='task'`,
-  `ref_id=<task_id>`, and the idempotency key `task-chest:<task_id>`.
+- Each claim first rolls `game_config.task_chest_boost_chance` (integer percent,
+  default 20). On a miss the server picks the diamond amount uniformly inside
+  the tier range; the client never submits an amount.
+- Diamond claims write `diamond_ledger` with `reason='task_chest'`,
+  `ref_type='task'`, `ref_id=<task_id>`, and the idempotency key
+  `task-chest:<task_id>`.
+- Boost claims read `game_config.task_chest_boost_minutes` (default 25), write
+  `chest_reward_type='boost'` / `chest_boost_minutes`, and do **not** write a
+  diamond ledger row. The boost reuses `diamond_boosts`: it extends an active
+  expiry or starts from now, and its multiplier still comes from
+  `diamond_boost_multiplier`. It only multiplies XP-to-diamond conversion, not
+  XP, rival payouts, or bet payouts.
+- Missing or invalid reward config fails closed to the diamond payout, so a
+  chest claim never fails because of config.
 - A chest must be claimed before `ends_at`; an unclaimed chest is forfeited and
-  hidden with the task.
-- Manual task photo completion can pay a chest without adding XP. That diamond
-  is tied to a completed task, not to an XP conversion.
+  hidden with the task. Repeated claims return the same reward and never grant
+  the boost twice.
+- Manual task photo completion can pay a chest without adding XP. The reward is
+  tied to a completed task, not to an XP conversion.
 
 A diamond payout should always be traceable to real activity, a rank result, or
 a completed task. If a payout can be won without any drawing output or task

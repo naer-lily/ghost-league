@@ -49,6 +49,8 @@ class BoostMixin:
             ("diamond_boost_60_daily_limit", "2"),
             ("diamond_boost_25_active", "1"),
             ("diamond_boost_60_active", "1"),
+            ("task_chest_boost_chance", "20"),
+            ("task_chest_boost_minutes", "25"),
         )
         for key, value in seeds:
             conn.execute(
@@ -282,6 +284,47 @@ class BoostMixin:
         state = self._boost_state_with(conn, player_id, now)
         return int(state["multiplier"])
 
+    def _extend_diamond_boost_with(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        player_id: str,
+        minutes: int,
+        multiplier: int,
+        now: datetime,
+        updated_at: str,
+    ) -> datetime:
+        """Extend the active boost, or start one now when there is none."""
+
+        base = now
+        existing = conn.execute(
+            "SELECT expires_at FROM diamond_boosts WHERE player_id = ?",
+            (player_id,),
+        ).fetchone()
+        if existing is not None:
+            try:
+                stored = cal.parse_datetime(str(existing["expires_at"]))
+            except (TypeError, ValueError):
+                stored = None
+            if stored is not None and stored > base:
+                base = stored
+        expires_at = base + timedelta(minutes=int(minutes))
+        conn.execute(
+            "INSERT INTO diamond_boosts "
+            "(player_id, multiplier, expires_at, updated_at) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(player_id) DO UPDATE SET "
+            "multiplier = excluded.multiplier, "
+            "expires_at = excluded.expires_at, "
+            "updated_at = excluded.updated_at",
+            (
+                player_id,
+                int(multiplier),
+                cal.iso_ts(expires_at),
+                updated_at,
+            ),
+        )
+        return expires_at
+
     def _purchase_diamond_boost_with(
         self,
         conn: sqlite3.Connection,
@@ -322,20 +365,6 @@ class BoostMixin:
                 remaining_today=0,
             )
 
-        base = now
-        existing = conn.execute(
-            "SELECT expires_at FROM diamond_boosts WHERE player_id = ?",
-            (player_id,),
-        ).fetchone()
-        if existing is not None:
-            try:
-                stored = cal.parse_datetime(str(existing["expires_at"]))
-            except (TypeError, ValueError):
-                stored = None
-            if stored is not None and stored > base:
-                base = stored
-        expires_at = base + timedelta(minutes=int(config["minutes"]))
-
         self._debit_diamonds_with(  # type: ignore[attr-defined]
             conn,
             player_id=player_id,
@@ -347,19 +376,13 @@ class BoostMixin:
             now=now,
             create_for_unknown=True,
         )
-        conn.execute(
-            "INSERT INTO diamond_boosts "
-            "(player_id, multiplier, expires_at, updated_at) "
-            "VALUES (?, ?, ?, ?) ON CONFLICT(player_id) DO UPDATE SET "
-            "multiplier = excluded.multiplier, "
-            "expires_at = excluded.expires_at, "
-            "updated_at = excluded.updated_at",
-            (
-                player_id,
-                int(config["multiplier"]),
-                cal.iso_ts(expires_at),
-                created_at,
-            ),
+        self._extend_diamond_boost_with(
+            conn,
+            player_id=player_id,
+            minutes=int(config["minutes"]),
+            multiplier=int(config["multiplier"]),
+            now=now,
+            updated_at=created_at,
         )
 
         wallet = self._wallet_summary(  # type: ignore[attr-defined]

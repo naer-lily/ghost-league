@@ -1,4 +1,10 @@
-import { ChevronDown, ChevronUp, RotateCcw, Swords } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronUp,
+  RotateCcw,
+  Sparkles,
+  Swords,
+} from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { CSSProperties } from 'react'
 import { useState } from 'react'
@@ -27,6 +33,7 @@ import {
   tierStyleVars,
 } from '../lib/home'
 import { describeRivalError, type RivalBetTab } from '../lib/rival'
+import { formatRemaining } from '../lib/shop'
 import { useServerNow } from '../lib/useServerNow'
 import { useUiStore } from '../store/useUiStore'
 import styles from './HomePage.module.css'
@@ -84,6 +91,9 @@ export function HomePage() {
 
   const view = buildHomeView(home.data)
   const style = tierStyleVars(view.tier) as CSSProperties
+  const boostRemaining = view.diamondBoost.expires_at
+    ? formatRemaining(view.diamondBoost.expires_at, now)
+    : ''
 
   function handleSelect(candidate: RivalPlayer) {
     selectMutation.mutate(
@@ -113,6 +123,12 @@ export function HomePage() {
             updatedAt={view.todayUpdatedAt}
             tier={view.tier}
           />
+          {boostRemaining ? (
+            <p className={styles.boost} data-testid="home-boost">
+              <Sparkles size={14} aria-hidden="true" />
+              <span>经验宝 {boostRemaining}</span>
+            </p>
+          ) : null}
         </div>
 
         <TaskList

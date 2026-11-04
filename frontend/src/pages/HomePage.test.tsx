@@ -499,6 +499,8 @@ describe('HomePage rework', () => {
             completed_at: null,
             chest_status: 'none',
             chest_amount: null,
+            chest_reward_type: 'diamonds',
+            chest_boost_minutes: null,
             proof_url: null,
             progress: null,
           },
@@ -538,6 +540,8 @@ describe('HomePage rework', () => {
       completed_at: null,
       chest_status: 'none',
       chest_amount: null,
+      chest_reward_type: 'diamonds',
+      chest_boost_minutes: null,
       proof_url: null,
       progress: null,
       ...overrides,
@@ -597,6 +601,8 @@ describe('HomePage rework', () => {
       completed_at: null,
       chest_status: 'none',
       chest_amount: null,
+      chest_reward_type: 'diamonds',
+      chest_boost_minutes: null,
       proof_url: null,
       progress: null,
     })
@@ -691,5 +697,29 @@ describe('HomePage rework', () => {
 
     await waitFor(() => expect(homeTitles()).toEqual(['B', 'A']))
     rectSpy.mockRestore()
+  })
+
+  it('shows the active diamond boost remaining time', async () => {
+    const expiresAt = new Date(Date.now() + 25 * 60 * 1000).toISOString()
+    vi.stubGlobal(
+      'fetch',
+      mockApi({
+        snapshot: makeSnapshot({
+          status: {
+            diamond_boost: {
+              expires_at: expiresAt,
+              remaining_seconds: 1500,
+              multiplier: 2,
+            },
+          },
+        }),
+      }),
+    )
+
+    renderHome()
+
+    const boost = await screen.findByTestId('home-boost')
+    expect(boost).toHaveTextContent('经验宝')
+    expect(boost).toHaveTextContent(/\d+ 分钟/)
   })
 })

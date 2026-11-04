@@ -5,18 +5,34 @@ import {
   useCompleteTask,
   useRepairTask,
 } from '../api/queries'
-import type { TaskItem } from '../api/types'
+import type { ChestRewardType, TaskItem } from '../api/types'
 import { describeApiError } from '../lib/home'
 import { compressTaskProof } from '../lib/image'
 import { formatTaskCountdown } from '../lib/time'
 import { useUiStore } from '../store/useUiStore'
 import styles from './TaskCard.module.css'
 
+export interface ClaimedTaskChest {
+  rewardType: ChestRewardType
+  amount: number
+  boostMinutes: number | null
+}
+
 interface TaskCardProps {
   task: TaskItem
   embersBalance: number
   now: Date
-  onClaimed: (amount: number, title: string) => void
+  onClaimed: (reward: ClaimedTaskChest, title: string) => void
+}
+
+function chestRewardLabel(task: TaskItem): string {
+  if (task.chest_reward_type === 'boost') {
+    return task.chest_boost_minutes
+      ? `经验宝 ${task.chest_boost_minutes} 分钟`
+      : '经验宝'
+  }
+  if (task.chest_amount) return `${task.chest_amount} 钻`
+  return '已领取'
 }
 
 export function TaskCard({
@@ -73,7 +89,16 @@ export function TaskCard({
 
   function onClaim() {
     claimChest.mutate(task.id, {
-      onSuccess: (result) => onClaimed(result.amount, task.title),
+      onSuccess: (result) =>
+        onClaimed(
+          {
+            rewardType:
+              result.reward_type === 'boost' ? 'boost' : 'diamonds',
+            amount: result.amount,
+            boostMinutes: result.boost_minutes,
+          },
+          task.title,
+        ),
       onError: (error) => notify(describeApiError(error), 'error'),
     })
   }
@@ -94,7 +119,8 @@ export function TaskCard({
       <div className={styles.body}>
         <div className={styles.copy}>
           <h3 className={styles.title}>{task.title}</h3>
-          {task.description && task.source === 'daily_manual' ? (
+          {task.description &&
+          (task.source === 'daily_manual' || task.source === 'checkin') ? (
             <p className={styles.description}>{task.description}</p>
           ) : null}
           <p className={styles.deadline}>{remaining}</p>
@@ -159,7 +185,7 @@ export function TaskCard({
         ) : chestClaimed ? (
           <span className={styles.claimed} data-testid="task-claimed">
             <Check size={15} aria-hidden="true" />
-            已领取{task.chest_amount ? ` ${task.chest_amount} 钻` : ''}
+            {chestRewardLabel(task)}
           </span>
         ) : null}
       </div>

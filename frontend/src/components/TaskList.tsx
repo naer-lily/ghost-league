@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { useTasks } from '../api/queries'
 import type { TaskItem } from '../api/types'
 import { useServerNow } from '../lib/useServerNow'
-import { TaskCard } from './TaskCard'
+import { TaskCard, type ClaimedTaskChest } from './TaskCard'
 import styles from './TaskList.module.css'
 
 interface TaskListProps {
@@ -12,9 +12,18 @@ interface TaskListProps {
   onOpenSettings: () => void
 }
 
-interface ClaimedChest {
-  amount: number
+interface ClaimedChest extends ClaimedTaskChest {
   title: string
+}
+
+function claimedRewardText(claimed: ClaimedChest | null): string {
+  if (!claimed) return ''
+  if (claimed.rewardType === 'boost') {
+    return claimed.boostMinutes
+      ? `经验宝 ${claimed.boostMinutes} 分钟`
+      : '经验宝'
+  }
+  return `+${claimed.amount} 钻石`
 }
 
 function displayBucket(task: TaskItem): number {
@@ -81,7 +90,9 @@ export function TaskList({ embersBalance, onOpenSettings }: TaskListProps) {
               task={task}
               embersBalance={embersBalance}
               now={now}
-              onClaimed={(amount, title) => setClaimed({ amount, title })}
+              onClaimed={(reward, title) =>
+                setClaimed({ ...reward, title })
+              }
             />
           ))}
         </div>
@@ -104,7 +115,7 @@ export function TaskList({ embersBalance, onOpenSettings }: TaskListProps) {
               <Gift size={30} />
             </span>
             <p className={styles.dialogAmount} data-testid="task-chest-amount">
-              +{claimed?.amount ?? 0} 钻石
+              {claimedRewardText(claimed)}
             </p>
             <Dialog.Close asChild>
               <button type="button" className="button button--primary button--full">

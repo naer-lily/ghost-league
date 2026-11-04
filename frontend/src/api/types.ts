@@ -524,11 +524,13 @@ export interface LeagueFeed {
   items: FeedItem[]
 }
 
-export type TaskSource = 'daily_manual' | 'repair' | 'weekend'
+export type TaskSource = 'checkin' | 'daily_manual' | 'repair' | 'weekend'
 
 export type TaskStatus = 'active' | 'completed' | 'expired'
 
 export type ChestStatus = 'none' | 'available' | 'claimed' | 'forfeited'
+
+export type ChestRewardType = 'diamonds' | 'boost'
 
 export interface TaskProgress {
   current: number
@@ -550,6 +552,8 @@ export interface TaskItem {
   completed_at: string | null
   chest_status: ChestStatus
   chest_amount: number | null
+  chest_reward_type: ChestRewardType
+  chest_boost_minutes: number | null
   proof_url: string | null
   progress: TaskProgress | null
 }
@@ -581,6 +585,9 @@ export interface TaskChestResult {
   amount: number
   balance: number
   duplicate: boolean
+  reward_type: ChestRewardType
+  boost_minutes: number | null
+  diamond_boost: DiamondBoost
 }
 
 export interface TaskCompleteResult {

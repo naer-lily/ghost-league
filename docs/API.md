@@ -433,9 +433,9 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
 
 ## 任务
 
-任务按当前登录用户归属。每日手动任务由用户配置；补断联和周末任务由 Ghost
-内部生成，不能通过 API 配置条件。读取列表时服务端会幂等生成当天任务，并刷新
-完成、过期和宝箱作废状态；前端不自行判断过期。
+任务按当前登录用户归属。每日打卡、补断联和周末任务由 Ghost 内部生成，不能
+通过 API 配置条件；每日手动任务由用户配置。读取列表时服务端会幂等生成当天
+任务，并刷新完成、过期和宝箱作废状态；前端不自行判断过期。
 
 ### `GET /v1/me/tasks`
 
@@ -458,6 +458,8 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
       "completed_at": null,
       "chest_status": "none",
       "chest_amount": null,
+      "chest_reward_type": "diamonds",
+      "chest_boost_minutes": null,
       "proof_url": null,
       "progress": null
     }
@@ -472,13 +474,19 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
   无宝箱的 completed 沉底）由前端在排序副本上完成，SQL 不写 UI 规则。
 - `sort_order` 是该任务实例当前的排序值；每日手动任务随设置里的拖拽/重排更新，
   系统任务使用生成时的值。
-- `source`：`daily_manual` / `repair` / `weekend`。
+- `source`：`checkin` / `daily_manual` / `repair` / `weekend`。
+- 每日打卡实例每天幂等生成，`title='每日打卡'`、`difficulty=1`、
+  `chest_tier=1`、`sort_order=0`，条件为当天 `checkin_source == 'verified'`；
+  当天达到 600 秒后读取列表即自动 `completed`，不显示拍照按钮。
 - `status`：`active` / `completed` / `expired`。
 - `chest_status`：`none` / `available` / `claimed` / `forfeited`。
+- `chest_reward_type`：`diamonds` / `boost`；领取后固定为实际奖励类型。
+- `chest_boost_minutes`：经验宝时长；钻石奖励或未领取为 `null`。
 - `progress` 只对系统 DSL 任务返回 `{"current": int, "target": int}`；手动任务为
-  `null`。周六周日任务统计两天累计 XP，补断联任务为 `0/1` 或 `1/1`。
+  `null`。周六周日任务统计两天累计 XP；每日打卡和补断联任务为 `0/1` 或 `1/1`。
 - `missed_date` 只有 `source=repair` 返回 `YYYY-MM-DD`（来自
-  `system_key=repair:<date>`）；`daily_manual` 和 `weekend` 恒为 `null`。
+  `system_key=repair:<date>`）；`checkin`、`daily_manual` 和 `weekend` 恒为
+  `null`。
   前端用它调用既有的 `POST /v1/me/repair`。
 - `server_now` 是任务卡倒计时的权威当前时间；前端不读手机时钟判断剩余时间。
 - 截止后任务整条隐藏；已完成但未领取的宝箱在截止时作废。
@@ -513,14 +521,34 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
 只允许 `completed`、`chest_status='available'`、`now < ends_at` 的本人任务。
 
 ```json
-{"amount": 7, "balance": 1007, "duplicate": false}
+{
+  "amount": 7,
+  "balance": 1007,
+  "duplicate": false,
+  "reward_type": "diamonds",
+  "boost_minutes": null,
+  "diamond_boost": {
+    "expires_at": null,
+    "remaining_seconds": 0,
+    "multiplier": 1
+  }
+}
 ```
 
-- 金额由服务端在宝箱档位的闭区间内均匀抽取；客户端不能传金额。
-- 写 `diamond_ledger`：`reason='task_chest'`、`ref_type='task'`、
+- 服务端先按 `game_config.task_chest_boost_chance`（整数百分比，默认 20）
+  判断是否出经验宝；否则在宝箱档位闭区间内均匀抽取钻石，客户端不能传金额。
+- 钻石奖励写 `diamond_ledger`：`reason='task_chest'`、`ref_type='task'`、
   `ref_id=<task_id>`、幂等键 `task-chest:<task_id>`；不产生 XP，不写
-  `weekly_scores`。
-- 重复请求返回原金额，`duplicate=true`；未完成或宝箱不可用返回 `409`。
+  `weekly_scores`。响应 `reward_type='diamonds'`，`amount` 仍是钻石数。
+- 经验宝奖励读 `game_config.task_chest_boost_minutes`（默认 25），返回
+  `reward_type='boost'`、`boost_minutes`，`amount=0`，不写钻石流水。它复用
+  `diamond_boosts`：当前 buff 未过期就从原 `expires_at` 顺延，否则从现在起算；
+  `diamond_boost` 返回发放后的状态。倍率继续读
+  `diamond_boost_multiplier`，只作用于 XP→钻石。
+- 配置缺失或非法（概率不在 0–100、时长 ≤0、非整数）时 fail closed：不出
+  经验宝，仍按钻石档发，领取不返回错误。
+- 重复请求返回同一 `reward_type` / `amount` / `boost_minutes`，`duplicate=true`，
+  不重复发 buff；未完成或宝箱不可用返回 `409`。
 
 ### `GET /v1/me/task-definitions`
 
@@ -571,6 +599,7 @@ Body：
 - `title` 1–80 字，`description` ≤ 500 字，`difficulty` 1–3。
 - 同一用户最多 20 条 active 定义，超出返回 `422`。
 - 保存后读取任务列表会生成当天实例；宝箱档位由难度映射，不接受客户端指定。
+- 每日打卡实例由服务端生成，不出现在任务定义接口中。
 
 ### `PATCH /v1/me/task-definitions/{id}`
 

@@ -73,6 +73,8 @@ def test_game_config_and_boost_tables_are_seeded_once(tmp_path) -> None:
         "diamond_boost_60_minutes": "60",
         "diamond_boost_60_price": "40",
         "diamond_boost_multiplier": "2",
+        "task_chest_boost_chance": "20",
+        "task_chest_boost_minutes": "25",
     }
     with sqlite3.connect(tmp_path / "league.db") as connection:
         config_columns = {

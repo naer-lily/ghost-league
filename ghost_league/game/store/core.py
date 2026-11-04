@@ -23,13 +23,54 @@ from ..stars import (
     is_valid_palette,
 )
 
-SCHEMA_VERSION = "11"
+SCHEMA_VERSION = "12"
 ALGORITHM_VERSION = "phase1-v1"
 SHOP_ECONOMY_UPDATE_KEY = "shop_economy_update_2026_11"
 DEFAULT_DB_PATH = Path("data/league/league.db")
 SOURCE_AI = "wakatime_public_leaderboard"
 SOURCE_HUMAN = "local_increment"
 SOURCE_CHANNEL = "channel_ingest"
+
+_TASK_INSTANCES_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS task_instances (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    definition_id TEXT,
+    source TEXT NOT NULL CHECK(source IN ('checkin', 'daily_manual', 'repair', 'weekend')),
+    system_key TEXT,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    difficulty INTEGER NOT NULL CHECK(difficulty BETWEEN 1 AND 5),
+    chest_tier INTEGER NOT NULL CHECK(chest_tier BETWEEN 1 AND 5),
+    starts_at TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    completion_mode TEXT NOT NULL CHECK(completion_mode IN ('manual', 'dsl')),
+    condition_json TEXT,
+    status TEXT NOT NULL CHECK(status IN ('active', 'completed', 'expired')),
+    completed_at TEXT,
+    proof_path TEXT,
+    proof_mime TEXT,
+    chest_status TEXT NOT NULL DEFAULT 'none'
+        CHECK(chest_status IN ('none', 'available', 'claimed', 'forfeited')),
+    claimed_at TEXT,
+    chest_amount INTEGER,
+    chest_reward_type TEXT NOT NULL DEFAULT 'diamonds' CHECK(chest_reward_type IN ('diamonds', 'boost')),
+    chest_boost_minutes INTEGER,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+_TASK_INSTANCES_INDEX_DDL = """
+CREATE INDEX IF NOT EXISTS idx_task_instances_user_status_ends
+    ON task_instances (user_id, status, ends_at);
+CREATE INDEX IF NOT EXISTS idx_task_instances_user_source_starts
+    ON task_instances (user_id, source, starts_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_task_instances_user_system
+    ON task_instances (user_id, system_key)
+    WHERE system_key IS NOT NULL;
+"""
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -550,39 +591,7 @@ CREATE TABLE IF NOT EXISTS task_definitions (
 CREATE INDEX IF NOT EXISTS idx_task_definitions_user_active
     ON task_definitions (user_id, active);
 
-CREATE TABLE IF NOT EXISTS task_instances (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    definition_id TEXT,
-    source TEXT NOT NULL CHECK(source IN ('daily_manual', 'repair', 'weekend')),
-    system_key TEXT,
-    title TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    difficulty INTEGER NOT NULL CHECK(difficulty BETWEEN 1 AND 5),
-    chest_tier INTEGER NOT NULL CHECK(chest_tier BETWEEN 1 AND 5),
-    starts_at TEXT NOT NULL,
-    ends_at TEXT NOT NULL,
-    completion_mode TEXT NOT NULL CHECK(completion_mode IN ('manual', 'dsl')),
-    condition_json TEXT,
-    status TEXT NOT NULL CHECK(status IN ('active', 'completed', 'expired')),
-    completed_at TEXT,
-    proof_path TEXT,
-    proof_mime TEXT,
-    chest_status TEXT NOT NULL DEFAULT 'none'
-        CHECK(chest_status IN ('none', 'available', 'claimed', 'forfeited')),
-    claimed_at TEXT,
-    chest_amount INTEGER,
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_task_instances_user_status_ends
-    ON task_instances (user_id, status, ends_at);
-CREATE INDEX IF NOT EXISTS idx_task_instances_user_source_starts
-    ON task_instances (user_id, source, starts_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_task_instances_user_system
-    ON task_instances (user_id, system_key)
-    WHERE system_key IS NOT NULL;
+""" + _TASK_INSTANCES_TABLE_DDL + _TASK_INSTANCES_INDEX_DDL + """
 """
 
 _TABLE_NAMES = (
@@ -1078,14 +1087,14 @@ class CoreMixin:
 
     @staticmethod
     def _migrate_tasks(conn: sqlite3.Connection) -> None:
-        """Add task ordering columns and keep the lifecycle indexes current.
+        """Add task columns, widen the source check, and rebuild old tables.
 
-        New databases get the columns from ``_SCHEMA``.  Older databases get
-        ``sort_order`` added in place; existing active definitions keep their
-        previous ``created_at, id`` order as 10, 20, 30…, and existing daily
-        instances are aligned once so completed rows keep the old visible
-        order.  Later reorders only sync active instances; completed/expired
-        instances keep that historical value.  Re-running is idempotent.
+        New databases get the final schema from ``_SCHEMA``.  Older databases
+        get ``sort_order`` and the chest reward columns added in place; the
+        source CHECK cannot be widened with ``ALTER TABLE``, so a table that
+        predates ``checkin`` is copied into the final table definition and
+        renamed.  Existing rows keep their ids and data.  Re-running is
+        idempotent.
         """
 
         definition_columns = {
@@ -1130,6 +1139,52 @@ class CoreMixin:
                 "WHERE task_definitions.id = task_instances.definition_id), "
                 "sort_order) "
                 "WHERE source = 'daily_manual' AND definition_id IS NOT NULL"
+            )
+        if "chest_reward_type" not in instance_columns:
+            conn.execute(
+                "ALTER TABLE task_instances ADD COLUMN chest_reward_type "
+                "TEXT NOT NULL DEFAULT 'diamonds' "
+                "CHECK(chest_reward_type IN ('diamonds', 'boost'))"
+            )
+        if "chest_boost_minutes" not in instance_columns:
+            conn.execute(
+                "ALTER TABLE task_instances ADD COLUMN chest_boost_minutes "
+                "INTEGER"
+            )
+
+        table = conn.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'task_instances'"
+        ).fetchone()
+        if table is None or "'checkin'" not in str(table["sql"] or ""):
+            conn.execute("DROP TABLE IF EXISTS task_instances_new")
+            conn.execute(
+                _TASK_INSTANCES_TABLE_DDL.replace(
+                    "CREATE TABLE IF NOT EXISTS task_instances",
+                    "CREATE TABLE task_instances_new",
+                    1,
+                )
+            )
+            old_columns = [
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(task_instances)")
+            ]
+            new_columns = {
+                str(row["name"])
+                for row in conn.execute(
+                    "PRAGMA table_info(task_instances_new)"
+                )
+            }
+            shared = ", ".join(
+                name for name in old_columns if name in new_columns
+            )
+            conn.execute(
+                f"INSERT INTO task_instances_new ({shared}) "
+                f"SELECT {shared} FROM task_instances"
+            )
+            conn.execute("DROP TABLE task_instances")
+            conn.execute(
+                "ALTER TABLE task_instances_new RENAME TO task_instances"
             )
 
         conn.execute(

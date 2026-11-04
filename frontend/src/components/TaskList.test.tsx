@@ -44,6 +44,8 @@ function makeTask(overrides: Partial<TaskItem> = {}): TaskItem {
     completed_at: null,
     chest_status: 'none',
     chest_amount: null,
+    chest_reward_type: 'diamonds',
+    chest_boost_minutes: null,
     proof_url: null,
     progress: null,
     ...overrides,
@@ -87,7 +89,24 @@ describe('TaskList', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/chest')) {
-        return response({ amount: 7, balance: 1007, duplicate: false })
+        task = {
+          ...task,
+          chest_status: 'claimed',
+          chest_amount: 7,
+          chest_reward_type: 'diamonds',
+        }
+        return response({
+          amount: 7,
+          balance: 1007,
+          duplicate: false,
+          reward_type: 'diamonds',
+          boost_minutes: null,
+          diamond_boost: {
+            expires_at: null,
+            remaining_seconds: 0,
+            multiplier: 1,
+          },
+        })
       }
       if (url.includes('/complete')) {
         task = makeTask({
@@ -132,7 +151,78 @@ describe('TaskList', () => {
     expect(within(dialog).getByTestId('task-chest-amount')).toHaveTextContent(
       '+7 钻石',
     )
+    expect(await screen.findByTestId('task-claimed')).toHaveTextContent('7 钻')
     expect(screen.queryByText(/概率|机制|DSL/)).not.toBeInTheDocument()
+  })
+
+  it('claims a boost chest and shows the boost duration without a photo action', async () => {
+    let task = makeTask({
+      id: 'ti_checkin',
+      source: 'checkin',
+      title: '每日打卡',
+      description: '画满 10 分钟，开个小宝箱。',
+      difficulty: 1,
+      chest_tier: 1,
+      sort_order: 0,
+      status: 'completed',
+      completed_at: '2026-11-04T12:10:00+08:00',
+      chest_status: 'available',
+      progress: { current: 1, target: 1 },
+    })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/chest')) {
+        task = {
+          ...task,
+          chest_status: 'claimed',
+          chest_amount: null,
+          chest_reward_type: 'boost',
+          chest_boost_minutes: 25,
+        }
+        return response({
+          amount: 0,
+          balance: 1000,
+          duplicate: false,
+          reward_type: 'boost',
+          boost_minutes: 25,
+          diamond_boost: {
+            expires_at: '2026-11-04T12:35:00+08:00',
+            remaining_seconds: 1500,
+            multiplier: 2,
+          },
+        })
+      }
+      if (url.endsWith('/v1/me/tasks')) {
+        return response({
+          server_now: '2026-11-04T12:10:00+08:00',
+          tasks: [task],
+        })
+      }
+      return response({ detail: 'not found' }, 404)
+    })
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container } = renderList()
+    expect(await screen.findByText('每日打卡')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /拍照完成/ }),
+    ).not.toBeInTheDocument()
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '领取每日打卡的宝箱' }),
+    )
+    const dialog = await screen.findByTestId('task-chest-dialog')
+    expect(within(dialog).getByTestId('task-chest-amount')).toHaveTextContent(
+      '经验宝 25 分钟',
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('task-claimed')).toHaveTextContent(
+        '经验宝 25 分钟',
+      ),
+    )
+    expect(screen.queryByText('0 钻')).not.toBeInTheDocument()
+    expect(container.querySelector('input[type="file"]')).toBeNull()
   })
 
   it('shows 处理中… while compressing and uploads the compressed file', async () => {
