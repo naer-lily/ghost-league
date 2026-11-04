@@ -141,17 +141,26 @@ never pays XP and never writes `weekly_scores`.
 
 Pools live in `game_config.task_chest_pool_<pool>` as integer-percentage JSON
 weights over tiers 1–5 that must sum to 100. Missing or invalid pools fail
-closed to the source's most conservative pool (wood, or copper for the weekend
-pool), so completion and claiming never block. Default pools:
+closed to the source's most conservative pool (wood; copper for the weekend
+pool; the star pool for the final weekly-chain stage), so completion and
+claiming never block. Default pools:
 
 ```text
-checkin   : 70 / 25 / 5 / 0 / 0
-daily_1   : 55 / 35 / 10 / 0 / 0
-daily_2   : 35 / 35 / 25 / 5 / 0
-daily_3   : 20 / 30 / 35 / 13 / 2
-repair    : 60 / 30 / 9 / 1 / 0
-weekend   : 0 / 15 / 45 / 30 / 10
+checkin        : 70 / 25 / 5 / 0 / 0
+daily_1        : 55 / 35 / 10 / 0 / 0
+daily_2        : 35 / 35 / 25 / 5 / 0
+daily_3        : 20 / 30 / 35 / 13 / 2
+repair         : 60 / 30 / 9 / 1 / 0
+weekend        : 0 / 15 / 45 / 30 / 10
+weekly_chain_1 : 60 / 30 / 10 / 0 / 0
+weekly_chain_2 : 30 / 40 / 25 / 5 / 0
+weekly_chain_3 : 10 / 30 / 45 / 15 / 0
+weekly_chain_4 : 0 / 0 / 0 / 0 / 100
 ```
+
+The weekly chain's stage targets and stage-to-pool mapping live in
+`game_config.task_chain_weekly`; the default is four stages at 1000 / 2000 /
+3000 / 5000 weekly XP, ending in the fixed star pool.
 
 - Active instances carry the pool and a placeholder tier; the real tier is
   written at completion and never changes afterwards. Old completed instances

@@ -1442,6 +1442,7 @@ class GameService:
         self.store.ensure_user_tasks(user_id, now)
         self.store.ensure_repair_tasks(user_id, now.date(), now=now)
         self.store.ensure_weekend_tasks(user_id, now.date(), now=now)
+        self.store.ensure_weekly_chain_tasks(user_id, now)
         return {
             "server_now": _iso(now),
             "tasks": self.store.list_visible_tasks(user_id, now),

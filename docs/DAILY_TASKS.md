@@ -4,7 +4,7 @@ Status: implemented, 2026-11-04.
 
 ## 范围
 
-Ghost 自有任务系统有四类任务：
+Ghost 自有任务系统有五类任务：
 
 | 来源 | 谁创建 | 完成方式 | 宝箱池 |
 | --- | --- | --- | --- |
@@ -12,6 +12,7 @@ Ghost 自有任务系统有四类任务：
 | `daily_manual` | 当前用户在 Ghost 内配置 | 上传一张照片 | 难度 1/2/3 → `daily_1/2/3` |
 | `repair` | Ghost 自动生成 | 系统条件（补签） | `repair` |
 | `weekend` | Ghost 自动生成 | 系统条件（周末 XP） | `weekend` |
+| `weekly_chain` | Ghost 每周自动生成 | 系统条件（本周累计 XP） | `weekly_chain_1/2/3/4` |
 
 用户只能配置每日手动任务的标题、描述和 1–3 难度；系统任务没有 DSL
 编辑器，也不在设置里出现。所有任务按 `user_id` 归属，当前只有登录用户本人。
@@ -93,6 +94,27 @@ Ghost 自有任务系统有四类任务：
 - 条件为周六、周日两天经 daily resolver 累计 XP ≥ 1000；自动完成。
 - 标题 `周末 · 1000 XP`，描述 `周六周日累计 1000 XP。`。
 
+## 周连续任务
+
+- `ensure_weekly_chain_tasks()` 每次读取任务时调用；窗口固定为当前周一
+  `00:00` 到下周一 `00:00`。`system_key` 为
+  `weekly_chain:<week_start>:<step>`，每个阶段一条独立实例。
+- 阶段表只在 `game_config.task_chain_weekly`，默认四段
+  `1000 / 2000 / 3000 / 5000 XP`，每段指定一个 `chest_pool`。代码只保留
+  默认值；阶段数、目标 XP 和阶段→池子映射都从配置读取，配置缺失或非法时
+  回退到默认阶段表，不能 500。
+- 同一周只物化一个当前段：已有 active 段时不重复生成；已有
+  `completed + chest_status='available'` 段时挡住下一段；只有前面所有段都已
+  `claimed` 时才生成下一段；全部段领取后不再生成第五段。
+- 新段标题 `本周 <target> XP`，`completion_mode='dsl'`，条件为
+  `xp_between(task.start, task.end) >= target`，`chest_pool` 取阶段配置。
+  本周 XP 已超过目标时，生成后由 `refresh_task_states()` 立即完成，宝箱可领。
+- 领取仍复用 `claim_task_chest()`，没有另一套奖励逻辑。已领取段不删除，
+  留在同周的任务列表里；前端把它们沉到已完成区。跨周后旧段过期，新周从第
+  1 段重新开始。
+- `progress` 返回本周累计 XP / 当前段目标；前端对 `weekly_chain` 显示
+  `1200 / 2000 XP`。任务设置页不提供连续任务编辑。
+
 ## 宝箱
 
 权威常量在 `ghost_league/game/tasks.py`。实例生成时只写占位的
@@ -117,11 +139,16 @@ daily_2   : 木35 铜35 银25 金5  星0
 daily_3   : 木20 铜30 银35 金13 星2
 repair    : 木60 铜30 银9  金1  星0
 weekend   : 木0  铜15 银45 金30 星10
+weekly_chain_1 : 木60 铜30 银10 金0  星0
+weekly_chain_2 : 木30 铜40 银25 金5  星0
+weekly_chain_3 : 木10 铜30 银45 金15 星0
+weekly_chain_4 : 木0  铜0  银0  金0  星100
 ```
 
 - 缺失、非 JSON、含未知档位、负值或总和不等于 100 时 fail closed：回退到该
-  来源最保守的池子（`checkin` / `daily_1/2/3` / `repair` → 木箱 100%，
-  `weekend` → 铜箱 100%），领取本身不会失败。
+  来源最保守的池子（`checkin` / `daily_1/2/3` / `repair` /
+  `weekly_chain_1/2/3` → 木箱 100%，`weekend` → 铜箱 100%，
+  `weekly_chain_4` → 星箱 100%），领取本身不会失败。
 - 手动任务在 `complete_manual_task()` 抽档；自动任务在
   `refresh_task_states()` 变成 `completed` 时抽档。领取前再次刷新不会重抽。
 - 领取时按档位决定内容：
@@ -160,12 +187,13 @@ weekend   : 木0  铜15 银45 金30 星10
 - 未知变量/函数/操作、非法结构、超过递归深度或节点上限都 fail closed
   （返回 `False` 并记 warning）。
 
-每日打卡、补断联和周末任务的条件都保存在 `task_instances.condition_json`，
-读取列表时评估。
+每日打卡、补断联、周末和周连续任务的条件都保存在
+`task_instances.condition_json`，读取列表时评估。
 
 ## API 摘要
 
-- `GET /v1/me/tasks`：生成并刷新当天任务，返回可见的 active/completed 任务。
+- `GET /v1/me/tasks`：生成并刷新当天任务与本周连续任务当前段，返回可见的
+  active/completed 任务。
 - `POST /v1/me/tasks/{id}/complete`：手动任务拍照完成。
 - `GET /v1/me/tasks/{id}/proof`：本人读取完成照片。
 - `POST /v1/me/tasks/{id}/chest`：领取宝箱，返回 `reward_type`、
@@ -183,7 +211,7 @@ weekend   : 木0  铜15 银45 金30 星10
   先按 bucket 排，active 或 `completed + chest_status='available'` 为 bucket 0，
   其余 completed（宝箱已领取/作废/无宝箱）为 bucket 1 沉底；bucket 内按
   `ends_at`、`sort_order`、`id` 升序。未领取宝箱的 completed 任务留在原位，
-  补断联、周末任务按各自截止时间参与排序。
+  补断联、周末和周连续任务按各自截止时间参与排序。
 - 设置里拖拽仍写 `sort_order`；重排后首页按新的 `sort_order` 生效，刷新保持。
 - 没有任务时只留极简空态。
 - 任务卡显示相对剩余时间，由 `/v1/me/tasks` 的 `server_now` 驱动；任务查询每
@@ -192,6 +220,9 @@ weekend   : 木0  铜15 银45 金30 星10
   调用 `compressTaskProof()` 压到 ≤1MB（HEIC 解不了则原样交给服务端），
   压缩期间按钮显示“处理中…”，随后上传并显示“上传中…”，避免重复点击。
 - 系统任务：显示进度，例如 `420 / 1000 XP`；每日打卡自动完成，不显示拍照按钮。
+  周连续任务同样显示 `current / target XP`，标题为 `本周 1000 XP` 这类，
+  不加“连续任务”解释；完成后下一段出现时仍按同一排序键占住原列表位置，
+  已领取段按现有规则沉到已完成区并保留奖励标签。
 - active 的补断联任务显示“用余烬补”，点击调用既有的
   `POST /v1/me/repair`（`{date: missed_date, idempotency_key: ...}`）；成功后
   刷新任务和首页，提示“补上了。”，任务在下一次刷新时变为 `completed`，

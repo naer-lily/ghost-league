@@ -115,7 +115,7 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
 - [`docs/CHANNEL_BOUNDARY.md`](docs/CHANNEL_BOUNDARY.md)：Source → Channel → Ghost
   契约、身份规则和分组规则。
 - [`docs/GAME_ECONOMY.md`](docs/GAME_ECONOMY.md)：XP、钻石、星星的经济分工，游戏化边界，以及平衡调整口径。
-- [`docs/DAILY_TASKS.md`](docs/DAILY_TASKS.md)：每日手动、补断联与周末任务，以及宝箱和 API 契约。
+- [`docs/DAILY_TASKS.md`](docs/DAILY_TASKS.md)：每日手动、补断联、周末与周连续任务，以及宝箱和 API 契约。
 - [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md)：webhook 事件、签名、重试和 CLI。
 - PWA：`web/` 是旧的移动优先静态应用，`ghost_league/pwa.py` 先注册 API 路由，再挂载
   静态根；`/v1/...`、`/avatars/...` 始终走 API。当前生产通过

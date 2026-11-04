@@ -1,4 +1,4 @@
-"""Persistence and lifecycle for Ghost-owned daily, repair, and weekend tasks."""
+"""Persistence and lifecycle for Ghost-owned daily, repair, weekend, and chain tasks."""
 
 from __future__ import annotations
 
@@ -29,6 +29,8 @@ from ..tasks import (
     TASK_CHEST_BOOST_MINUTES_KEY,
     TASK_CHEST_STAR_CHANCE_KEY,
     WEEKEND_CHEST_TIER,
+    WEEKLY_CHAIN_CONFIG_KEY,
+    WEEKLY_CHAIN_TASK_SOURCE,
     TaskLimitReached,
     TaskNotFound,
     TaskStateRejected,
@@ -40,12 +42,16 @@ from ..tasks import (
     evaluate_condition,
     missed_date_from_system_key,
     parse_chest_pool,
+    parse_weekly_chain_config,
     repair_condition,
     repair_task_description,
     repair_task_title,
     roll_chest_reward,
     roll_chest_tier,
     weekend_condition,
+    weekly_chain_condition,
+    weekly_chain_step_from_system_key,
+    weekly_chain_title,
 )
 from .boosts import DIAMOND_BOOST_MULTIPLIER_KEY
 
@@ -507,6 +513,95 @@ class TasksMixin:
                 ),
             )
             return max(0, cursor.rowcount)
+
+    def ensure_weekly_chain_tasks(
+        self,
+        user_id: str,
+        now: datetime | str | None = None,
+    ) -> int:
+        """Materialise exactly one current stage of this week's XP chain.
+
+        Every stage keeps its own row (``weekly_chain:<week>:<step>``) so
+        claimed stages remain visible for the rest of the week.  A completed
+        stage whose chest is still available blocks the next stage; an active
+        stage is already current; a missing stage is created only after every
+        earlier stage has been claimed.  The stage table and pool mapping come
+        from ``game_config.task_chain_weekly`` and never from hard-coded
+        targets.  At most one row is inserted per call.
+        """
+
+        local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
+        week_start = cal.week_start(local_now)
+        week_start_at = cal.week_start_at(week_start)
+        starts_at = cal.iso_ts(week_start_at)
+        ends_at = cal.iso_ts(week_start_at + timedelta(days=7))
+        stamp = cal.iso_ts(local_now)
+        with self.transaction() as conn:  # type: ignore[attr-defined]
+            stages = parse_weekly_chain_config(
+                self._config_value_with(  # type: ignore[attr-defined]
+                    conn, WEEKLY_CHAIN_CONFIG_KEY
+                )
+            )
+            rows = conn.execute(
+                "SELECT system_key, status, chest_status FROM task_instances "
+                "WHERE user_id = ? AND source = ? AND starts_at = ?",
+                (user_id, WEEKLY_CHAIN_TASK_SOURCE, starts_at),
+            ).fetchall()
+            by_step: dict[int, sqlite3.Row] = {}
+            for row in rows:
+                step = weekly_chain_step_from_system_key(
+                    row["system_key"], week_start
+                )
+                if step is not None:
+                    by_step[step] = row
+            # A completed-but-unclaimed stage stays in place and blocks the
+            # next one; an active stage is already the current stage.
+            for row in by_step.values():
+                if (
+                    str(row["status"]) == "active"
+                    or str(row["chest_status"]) == "available"
+                ):
+                    return 0
+            for step, stage in enumerate(stages, start=1):
+                row = by_step.get(step)
+                if row is not None:
+                    if str(row["chest_status"]) == "claimed":
+                        continue
+                    # Expired/forfeited/unknown state never unblocks a later
+                    # stage by accident.
+                    return 0
+                target = int(stage["target_xp"])
+                condition_json = json.dumps(
+                    weekly_chain_condition(target),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                cursor = conn.execute(
+                    "INSERT OR IGNORE INTO task_instances "
+                    "(id, user_id, definition_id, source, system_key, title, "
+                    "description, difficulty, chest_tier, chest_pool, starts_at, "
+                    "ends_at, completion_mode, condition_json, status, "
+                    "completed_at, proof_path, proof_mime, chest_status, "
+                    "claimed_at, chest_amount, sort_order, created_at, updated_at) "
+                    "VALUES (?, ?, NULL, 'weekly_chain', ?, ?, '', 1, 1, ?, ?, ?, "
+                    "'dsl', ?, 'active', NULL, NULL, NULL, 'none', NULL, NULL, "
+                    "?, ?, ?)",
+                    (
+                        _new_id("ti"),
+                        user_id,
+                        f"weekly_chain:{week_start.isoformat()}:{step}",
+                        weekly_chain_title(target),
+                        str(stage["chest_pool"]),
+                        starts_at,
+                        ends_at,
+                        condition_json,
+                        step * 10,
+                        stamp,
+                        stamp,
+                    ),
+                )
+                return max(0, cursor.rowcount)
+            return 0
 
     # ------------------------------------------------------------------
     # Lifecycle

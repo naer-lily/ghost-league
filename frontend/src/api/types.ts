@@ -524,7 +524,12 @@ export interface LeagueFeed {
   items: FeedItem[]
 }
 
-export type TaskSource = 'checkin' | 'daily_manual' | 'repair' | 'weekend'
+export type TaskSource =
+  | 'checkin'
+  | 'daily_manual'
+  | 'repair'
+  | 'weekend'
+  | 'weekly_chain'
 
 export type TaskStatus = 'active' | 'completed' | 'expired'
 

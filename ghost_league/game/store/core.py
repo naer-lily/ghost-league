@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS task_instances (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     definition_id TEXT,
-    source TEXT NOT NULL CHECK(source IN ('checkin', 'daily_manual', 'repair', 'weekend')),
+    source TEXT NOT NULL CHECK(source IN ('checkin', 'daily_manual', 'repair', 'weekend', 'weekly_chain')),
     system_key TEXT,
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
@@ -1214,6 +1214,7 @@ class CoreMixin:
             table is None
             or "'checkin'" not in str(table["sql"] or "")
             or "'star'" not in str(table["sql"] or "")
+            or "'weekly_chain'" not in str(table["sql"] or "")
         ):
             conn.execute("DROP TABLE IF EXISTS task_instances_new")
             conn.execute(

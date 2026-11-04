@@ -554,6 +554,193 @@ describe('TaskList', () => {
     expect(screen.queryByText('周六周日累计 1000 XP。')).not.toBeInTheDocument()
   })
 
+  it('shows weekly chain progress in XP without extra copy', async () => {
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-04T12:00:00+08:00',
+            tasks: [
+              makeTask({
+                id: 'ti_chain_2',
+                source: 'weekly_chain',
+                title: '本周 2000 XP',
+                chest_pool: 'weekly_chain_2',
+                sort_order: 20,
+                starts_at: '2026-11-02T00:00:00+08:00',
+                ends_at: '2026-11-09T00:00:00+08:00',
+                progress: { current: 1200, target: 2000 },
+              }),
+            ],
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      }),
+    )
+
+    renderList()
+    expect(await screen.findByText('本周 2000 XP')).toBeInTheDocument()
+    expect(screen.getByTestId('task-progress')).toHaveTextContent(
+      '1200 / 2000 XP',
+    )
+    expect(screen.queryByText(/连续任务/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /拍照完成/ }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('sinks claimed weekly stages and keeps unclaimed stages in place', async () => {
+    const tasks = [
+      makeTask({
+        id: 'ti_chain_3',
+        source: 'weekly_chain',
+        title: '本周 3000 XP',
+        chest_pool: 'weekly_chain_3',
+        sort_order: 30,
+        starts_at: '2026-11-02T00:00:00+08:00',
+        ends_at: '2026-11-09T00:00:00+08:00',
+        progress: { current: 2400, target: 3000 },
+      }),
+      makeTask({
+        id: 'ti_chain_1',
+        source: 'weekly_chain',
+        title: '本周 1000 XP',
+        chest_pool: 'weekly_chain_1',
+        sort_order: 10,
+        starts_at: '2026-11-02T00:00:00+08:00',
+        ends_at: '2026-11-09T00:00:00+08:00',
+        status: 'completed',
+        completed_at: '2026-11-04T10:00:00+08:00',
+        chest_status: 'claimed',
+        chest_amount: 7,
+        progress: { current: 1000, target: 1000 },
+      }),
+      makeTask({
+        id: 'ti_chain_2',
+        source: 'weekly_chain',
+        title: '本周 2000 XP',
+        chest_pool: 'weekly_chain_2',
+        sort_order: 20,
+        starts_at: '2026-11-02T00:00:00+08:00',
+        ends_at: '2026-11-09T00:00:00+08:00',
+        status: 'completed',
+        completed_at: '2026-11-04T11:00:00+08:00',
+        chest_status: 'available',
+        progress: { current: 1000, target: 2000 },
+      }),
+    ]
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/v1/me/tasks')) {
+          return response({
+            server_now: '2026-11-04T12:00:00+08:00',
+            tasks,
+          })
+        }
+        return response({ detail: 'not found' }, 404)
+      }),
+    )
+
+    const { container } = renderList()
+    await screen.findByText('本周 2000 XP')
+    expect(taskTitles(container)).toEqual([
+      '本周 2000 XP',
+      '本周 3000 XP',
+      '本周 1000 XP',
+    ])
+    expect(screen.getByRole('button', { name: '开宝箱' })).toBeInTheDocument()
+    expect(screen.getByTestId('task-claimed')).toHaveTextContent('7 钻')
+  })
+
+  it('reveals the next weekly stage after claiming its chest', async () => {
+    const first = makeTask({
+      id: 'ti_chain_1',
+      source: 'weekly_chain',
+      title: '本周 1000 XP',
+      chest_pool: 'weekly_chain_1',
+      sort_order: 10,
+      starts_at: '2026-11-02T00:00:00+08:00',
+      ends_at: '2026-11-09T00:00:00+08:00',
+      status: 'completed',
+      completed_at: '2026-11-04T10:00:00+08:00',
+      chest_status: 'available',
+      progress: { current: 1200, target: 1000 },
+    })
+    const next = makeTask({
+      id: 'ti_chain_2',
+      source: 'weekly_chain',
+      title: '本周 2000 XP',
+      chest_pool: 'weekly_chain_2',
+      sort_order: 20,
+      starts_at: '2026-11-02T00:00:00+08:00',
+      ends_at: '2026-11-09T00:00:00+08:00',
+      progress: { current: 1200, target: 2000 },
+    })
+    let tasks = [first]
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/chest')) {
+        tasks = [
+          {
+            ...first,
+            chest_status: 'claimed',
+            chest_amount: 7,
+          },
+          next,
+        ]
+        return response({
+          amount: 7,
+          balance: 1007,
+          duplicate: false,
+          reward_type: 'diamonds',
+          boost_minutes: null,
+          star: null,
+          diamond_boost: {
+            expires_at: null,
+            remaining_seconds: 0,
+            multiplier: 1,
+          },
+        })
+      }
+      if (url.endsWith('/v1/me/tasks')) {
+        return response({
+          server_now: '2026-11-04T12:00:00+08:00',
+          tasks,
+        })
+      }
+      return response({ detail: 'not found' }, 404)
+    })
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container } = renderList()
+    await userEvent.click(
+      await screen.findByRole('button', { name: '开宝箱' }),
+    )
+    const dialog = await screen.findByTestId('chest-open-dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: '开启' }))
+    expect(await within(dialog).findByTestId('chest-reward')).toHaveTextContent(
+      '7 钻',
+    )
+    await userEvent.click(within(dialog).getByRole('button', { name: '收下' }))
+
+    await waitFor(() =>
+      expect(taskTitles(container)).toEqual([
+        '本周 2000 XP',
+        '本周 1000 XP',
+      ]),
+    )
+    expect(screen.getByTestId('task-progress')).toHaveTextContent(
+      '1200 / 2000 XP',
+    )
+    expect(screen.getByTestId('task-claimed')).toHaveTextContent('7 钻')
+  })
+
   it('repairs a missed day from the task card and then shows completed', async () => {
     let task = makeTask({
       id: 'ti_repair',

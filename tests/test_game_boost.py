@@ -82,6 +82,18 @@ def test_game_config_and_boost_tables_are_seeded_once(tmp_path) -> None:
         "task_chest_pool_daily_3": '{"1":20,"2":30,"3":35,"4":13,"5":2}',
         "task_chest_pool_repair": '{"1":60,"2":30,"3":9,"4":1,"5":0}',
         "task_chest_pool_weekend": '{"1":0,"2":15,"3":45,"4":30,"5":10}',
+        "task_chest_pool_weekly_chain_1": '{"1":60,"2":30,"3":10,"4":0,"5":0}',
+        "task_chest_pool_weekly_chain_2": '{"1":30,"2":40,"3":25,"4":5,"5":0}',
+        "task_chest_pool_weekly_chain_3": '{"1":10,"2":30,"3":45,"4":15,"5":0}',
+        "task_chest_pool_weekly_chain_4": '{"1":0,"2":0,"3":0,"4":0,"5":100}',
+        "task_chain_weekly": (
+            '{"stages":['
+            '{"target_xp":1000,"chest_pool":"weekly_chain_1"},'
+            '{"target_xp":2000,"chest_pool":"weekly_chain_2"},'
+            '{"target_xp":3000,"chest_pool":"weekly_chain_3"},'
+            '{"target_xp":5000,"chest_pool":"weekly_chain_4"}'
+            "]}"
+        ),
         "task_chest_star_chance": "10",
     }
     with sqlite3.connect(tmp_path / "league.db") as connection:

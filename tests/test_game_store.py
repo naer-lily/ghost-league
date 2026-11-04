@@ -426,7 +426,8 @@ def test_task_order_migration_backfills_definitions_and_instances(tmp_path) -> N
             "WHERE type = 'table' AND name = 'task_instances'"
         ).fetchone()[0]
         assert "'checkin'" in sql
-        # The rebuilt CHECK accepts the new source and keeps old rows valid.
+        assert "'weekly_chain'" in sql
+        # The rebuilt CHECK accepts the new sources and keeps old rows valid.
         conn.execute(
             "INSERT INTO task_instances "
             "(id, user_id, definition_id, source, system_key, title, "
@@ -444,4 +445,23 @@ def test_task_order_migration_backfills_definitions_and_instances(tmp_path) -> N
         )
         assert conn.execute(
             "SELECT COUNT(*) FROM task_instances WHERE source = 'checkin'"
+        ).fetchone()[0] == 1
+        conn.execute(
+            "INSERT INTO task_instances "
+            "(id, user_id, definition_id, source, system_key, title, "
+            "description, difficulty, chest_tier, chest_pool, starts_at, "
+            "ends_at, completion_mode, condition_json, status, completed_at, "
+            "proof_path, proof_mime, chest_status, claimed_at, chest_amount, "
+            "chest_reward_type, chest_boost_minutes, sort_order, created_at, "
+            "updated_at) "
+            "VALUES ('ti_weekly', 'u', NULL, 'weekly_chain', "
+            "'weekly_chain:2026-11-02:1', '本周 1000 XP', '', 1, 1, "
+            "'weekly_chain_1', '2026-11-02T00:00:00+08:00', "
+            "'2026-11-09T00:00:00+08:00', 'dsl', NULL, 'active', NULL, "
+            "NULL, NULL, 'none', NULL, NULL, 'diamonds', NULL, 10, "
+            "'2026-11-04T01:00:00+08:00', '2026-11-04T01:00:00+08:00')"
+        )
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_instances "
+            "WHERE source = 'weekly_chain'"
         ).fetchone()[0] == 1

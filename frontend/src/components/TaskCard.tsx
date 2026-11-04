@@ -145,7 +145,9 @@ export function TaskCard({
         ) : dslActive && task.progress ? (
           <p className={styles.progress} data-testid="task-progress">
             {task.progress.current} / {task.progress.target}
-            {task.source === 'weekend' ? ' XP' : ''}
+            {task.source === 'weekend' || task.source === 'weekly_chain'
+              ? ' XP'
+              : ''}
           </p>
         ) : chestAvailable ? (
           <button

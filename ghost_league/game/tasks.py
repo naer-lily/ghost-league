@@ -43,6 +43,7 @@ CHEST_POOL_CHECKIN = "checkin"
 CHEST_POOL_DAILY_PREFIX = "daily_"
 CHEST_POOL_REPAIR = "repair"
 CHEST_POOL_WEEKEND = "weekend"
+CHEST_POOL_WEEKLY_CHAIN_PREFIX = "weekly_chain_"
 CHEST_POOL_NAMES = (
     CHEST_POOL_CHECKIN,
     "daily_1",
@@ -50,6 +51,10 @@ CHEST_POOL_NAMES = (
     "daily_3",
     CHEST_POOL_REPAIR,
     CHEST_POOL_WEEKEND,
+    "weekly_chain_1",
+    "weekly_chain_2",
+    "weekly_chain_3",
+    "weekly_chain_4",
 )
 MANUAL_CHEST_POOL: dict[int, str] = {
     1: "daily_1",
@@ -65,11 +70,30 @@ CHEST_POOL_FALLBACKS: dict[str, dict[int, int]] = {
     "daily_3": {1: 100},
     "repair": {1: 100},
     "weekend": {2: 100},
+    "weekly_chain_1": {1: 100},
+    "weekly_chain_2": {1: 100},
+    "weekly_chain_3": {1: 100},
+    # The final default stage is a star stage; a missing pool row must not
+    # silently downgrade it below the configured intent when it can be named.
+    "weekly_chain_4": {5: 100},
 }
 
 CHECKIN_TASK_SOURCE = "checkin"
 CHECKIN_TASK_TITLE = "每日打卡"
 CHECKIN_TASK_DESCRIPTION = "画满 10 分钟，开个小宝箱。"
+WEEKLY_CHAIN_TASK_SOURCE = "weekly_chain"
+WEEKLY_CHAIN_CONFIG_KEY = "task_chain_weekly"
+WEEKLY_CHAIN_SYSTEM_KEY_PREFIX = "weekly_chain"
+WEEKLY_CHAIN_TITLE = "本周 {target} XP"
+WEEKLY_CHAIN_MAX_STAGES = 20
+# Code keeps only the default table.  Every live stage target and the
+# stage -> pool mapping is read from ``game_config.task_chain_weekly``.
+DEFAULT_WEEKLY_CHAIN_STAGES: tuple[dict[str, Any], ...] = (
+    {"target_xp": 1000, "chest_pool": "weekly_chain_1"},
+    {"target_xp": 2000, "chest_pool": "weekly_chain_2"},
+    {"target_xp": 3000, "chest_pool": "weekly_chain_3"},
+    {"target_xp": 5000, "chest_pool": "weekly_chain_4"},
+)
 TASK_CHEST_BOOST_CHANCE_KEY = "task_chest_boost_chance"
 TASK_CHEST_BOOST_MINUTES_KEY = "task_chest_boost_minutes"
 TASK_CHEST_BOOST_CUTOFF_HOUR_KEY = "task_chest_boost_cutoff_hour"
@@ -84,7 +108,7 @@ REPAIR_LOOKBACK_DAYS = 7
 WEEKEND_XP_TARGET = 1000
 MAX_ACTIVE_TASK_DEFINITIONS = 20
 
-TASK_SOURCES = ("checkin", "daily_manual", "repair", "weekend")
+TASK_SOURCES = ("checkin", "daily_manual", "repair", "weekend", "weekly_chain")
 TASK_COMPLETION_MODES = ("manual", "dsl")
 
 MAX_DSL_DEPTH = 64
@@ -207,6 +231,10 @@ def chest_pool_for_task(source: str, difficulty: int) -> str:
 
     if source == "daily_manual":
         return MANUAL_CHEST_POOL.get(int(difficulty), "daily_1")
+    if source == WEEKLY_CHAIN_TASK_SOURCE:
+        # Weekly chain instances always store their configured pool; this
+        # derives one only for legacy rows that predate the pool column.
+        return f"{CHEST_POOL_WEEKLY_CHAIN_PREFIX}1"
     if source in {CHEST_POOL_CHECKIN, CHEST_POOL_REPAIR, CHEST_POOL_WEEKEND}:
         return source
     return "daily_1"
@@ -311,6 +339,101 @@ def weekend_condition() -> dict[str, Any]:
         },
         "right": WEEKEND_XP_TARGET,
     }
+
+
+def weekly_chain_condition(target_xp: int) -> dict[str, Any]:
+    """The stage succeeds once the whole Monday-to-Monday week reaches it."""
+
+    if isinstance(target_xp, bool) or not isinstance(target_xp, int) or target_xp < 1:
+        raise ValueError("weekly chain target must be a positive integer")
+    return {
+        "op": "gte",
+        "left": {
+            "fn": "xp_between",
+            "args": [
+                {"var": "task.start"},
+                {"var": "task.end"},
+            ],
+        },
+        "right": target_xp,
+    }
+
+
+def weekly_chain_title(target_xp: int) -> str:
+    return WEEKLY_CHAIN_TITLE.format(target=target_xp)
+
+
+def default_weekly_chain_stages() -> list[dict[str, Any]]:
+    return [
+        {
+            "target_xp": int(stage["target_xp"]),
+            "chest_pool": str(stage["chest_pool"]),
+        }
+        for stage in DEFAULT_WEEKLY_CHAIN_STAGES
+    ]
+
+
+def parse_weekly_chain_config(raw: str | None) -> list[dict[str, Any]]:
+    """Parse ``task_chain_weekly``, falling back to the default stage table.
+
+    A stage table is valid only when it is a non-empty list of at most
+    ``WEEKLY_CHAIN_MAX_STAGES`` objects, each with a positive integer
+    ``target_xp`` and a non-empty string ``chest_pool``, and the targets are
+    strictly increasing.  Missing, malformed, or inconsistent config always
+    yields the conservative default table so task generation cannot 500.
+    """
+
+    fallback = default_weekly_chain_stages()
+    if not isinstance(raw, str) or not raw.strip():
+        return fallback
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return fallback
+    if not isinstance(payload, dict):
+        return fallback
+    stages = payload.get("stages")
+    if (
+        not isinstance(stages, list)
+        or not stages
+        or len(stages) > WEEKLY_CHAIN_MAX_STAGES
+    ):
+        return fallback
+    normalized: list[dict[str, Any]] = []
+    previous = 0
+    for stage in stages:
+        if not isinstance(stage, dict):
+            return fallback
+        target = stage.get("target_xp")
+        pool = stage.get("chest_pool")
+        if isinstance(target, bool) or not isinstance(target, int) or target < 1:
+            return fallback
+        if target <= previous:
+            return fallback
+        if not isinstance(pool, str) or not pool.strip():
+            return fallback
+        normalized.append({"target_xp": target, "chest_pool": pool.strip()})
+        previous = target
+    return normalized
+
+
+def weekly_chain_step_from_system_key(
+    system_key: str | None,
+    week_start: date,
+) -> int | None:
+    """Return the stage number encoded in ``weekly_chain:<week>:<step>``."""
+
+    if not system_key:
+        return None
+    prefix = f"{WEEKLY_CHAIN_SYSTEM_KEY_PREFIX}:{week_start.isoformat()}:"
+    key = str(system_key)
+    if not key.startswith(prefix):
+        return None
+    raw = key[len(prefix) :]
+    if not raw.isdigit():
+        return None
+    step = int(raw)
+    return step if step >= 1 else None
 
 
 def repair_task_description(xp: int) -> str:
@@ -619,6 +742,7 @@ __all__ = [
     "CHECKIN_TASK_SOURCE",
     "CHECKIN_TASK_TITLE",
     "ConditionError",
+    "DEFAULT_WEEKLY_CHAIN_STAGES",
     "MANUAL_CHEST_POOL",
     "MANUAL_CHEST_TIER",
     "MAX_ACTIVE_TASK_DEFINITIONS",
@@ -639,15 +763,22 @@ __all__ = [
     "TaskStateRejected",
     "WEEKEND_CHEST_TIER",
     "WEEKEND_XP_TARGET",
+    "WEEKLY_CHAIN_CONFIG_KEY",
+    "WEEKLY_CHAIN_MAX_STAGES",
+    "WEEKLY_CHAIN_SYSTEM_KEY_PREFIX",
+    "WEEKLY_CHAIN_TASK_SOURCE",
+    "WEEKLY_CHAIN_TITLE",
     "checkin_condition",
     "chest_amount_range",
     "chest_pool_config_key",
     "chest_pool_fallback",
     "chest_pool_for_task",
     "condition_progress",
+    "default_weekly_chain_stages",
     "evaluate_condition",
     "missed_date_from_system_key",
     "parse_chest_pool",
+    "parse_weekly_chain_config",
     "repair_condition",
     "repair_task_description",
     "repair_task_title",
@@ -655,4 +786,7 @@ __all__ = [
     "roll_chest_reward",
     "roll_chest_tier",
     "weekend_condition",
+    "weekly_chain_condition",
+    "weekly_chain_step_from_system_key",
+    "weekly_chain_title",
 ]

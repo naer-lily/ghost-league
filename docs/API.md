@@ -433,9 +433,9 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
 
 ## 任务
 
-任务按当前登录用户归属。每日打卡、补断联和周末任务由 Ghost 内部生成，不能
-通过 API 配置条件；每日手动任务由用户配置。读取列表时服务端会幂等生成当天
-任务，并刷新完成、过期和宝箱作废状态；前端不自行判断过期。
+任务按当前登录用户归属。每日打卡、补断联、周末和周连续任务由 Ghost 内部生成，
+不能通过 API 配置条件；每日手动任务由用户配置。读取列表时服务端会幂等生成当天
+任务与本周连续任务当前段，并刷新完成、过期和宝箱作废状态；前端不自行判断过期。
 
 ### `GET /v1/me/tasks`
 
@@ -476,24 +476,29 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
   无宝箱的 completed 沉底）由前端在排序副本上完成，SQL 不写 UI 规则。
 - `sort_order` 是该任务实例当前的排序值；每日手动任务随设置里的拖拽/重排更新，
   系统任务使用生成时的值。
-- `source`：`checkin` / `daily_manual` / `repair` / `weekend`。
+- `source`：`checkin` / `daily_manual` / `repair` / `weekend` /
+  `weekly_chain`。
 - 每日打卡实例每天幂等生成，`title='每日打卡'`、`difficulty=1`、
   `chest_tier=1`、`sort_order=0`，条件为当天 `checkin_source == 'verified'`；
   当天达到 600 秒后读取列表即自动 `completed`，不显示拍照按钮。
+- 周连续任务每周幂等生成，`system_key=weekly_chain:<week_start>:<step>`，
+  标题 `本周 <target> XP`；同周只物化一个当前段，已完成未领取的段挡住下一段，
+  全部领取后不再生成。
 - `status`：`active` / `completed` / `expired`。
 - `chest_status`：`none` / `available` / `claimed` / `forfeited`。
 - `chest_pool`：实例生成时写入的宝箱池（`checkin` / `daily_1/2/3` /
-  `repair` / `weekend`）。任务卡不展示池子名。
+  `repair` / `weekend` / `weekly_chain_1/2/3/4`）。任务卡不展示池子名。
 - `chest_reward_type`：`diamonds` / `boost` / `star`；领取后固定为实际奖励类型。
 - `chest_boost_minutes`：经验宝时长；钻石/星奖励或未领取为 `null`。
 - `chest_star`：已领取星箱时为星的完整展示资料，其他情况为 `null`。
 - 完成时按 `chest_pool` 抽一次 `chest_tier` 并写回；active 实例的
   `chest_tier` 只是占位。抽出的档位在领取前刷新不会改变，旧实例不追溯重抽。
 - `progress` 只对系统 DSL 任务返回 `{"current": int, "target": int}`；手动任务为
-  `null`。周六周日任务统计两天累计 XP；每日打卡和补断联任务为 `0/1` 或 `1/1`。
+  `null`。周六周日任务统计两天累计 XP，周连续任务统计本周累计 XP 与当前段目标；
+  每日打卡和补断联任务为 `0/1` 或 `1/1`。
 - `missed_date` 只有 `source=repair` 返回 `YYYY-MM-DD`（来自
-  `system_key=repair:<date>`）；`checkin`、`daily_manual` 和 `weekend` 恒为
-  `null`。
+  `system_key=repair:<date>`）；`checkin`、`daily_manual`、`weekend` 和
+  `weekly_chain` 恒为 `null`。
   前端用它调用既有的 `POST /v1/me/repair`。
 - `server_now` 是任务卡倒计时的权威当前时间；前端不读手机时钟判断剩余时间。
 - 截止后任务整条隐藏；已完成但未领取的宝箱在截止时作废。
@@ -1056,7 +1061,7 @@ python3 -m ghost_league.game.jobs grant-diamonds --player <id> --amount 3000 --r
 | `diamond_boost_25_active` | `1` | 25 档是否上架 |
 | `diamond_boost_60_active` | `1` | 60 档是否上架 |
 
-任务宝箱的池子与奖励概率同样是 `game_config` 只读种子：
+任务宝箱的池子、奖励概率和周连续阶段表同样是 `game_config` 只读种子：
 
 | key | 种子值 | 含义 |
 | --- | --- | --- |
@@ -1070,10 +1075,17 @@ python3 -m ghost_league.game.jobs grant-diamonds --player <id> --amount 3000 --r
 | `task_chest_pool_daily_3` | `{"1":20,"2":30,"3":35,"4":13,"5":2}` | 难度 3 池 |
 | `task_chest_pool_repair` | `{"1":60,"2":30,"3":9,"4":1,"5":0}` | 补断联池 |
 | `task_chest_pool_weekend` | `{"1":0,"2":15,"3":45,"4":30,"5":10}` | 周末池 |
+| `task_chest_pool_weekly_chain_1` | `{"1":60,"2":30,"3":10,"4":0,"5":0}` | 连续第 1 段池 |
+| `task_chest_pool_weekly_chain_2` | `{"1":30,"2":40,"3":25,"4":5,"5":0}` | 连续第 2 段池 |
+| `task_chest_pool_weekly_chain_3` | `{"1":10,"2":30,"3":45,"4":15,"5":0}` | 连续第 3 段池 |
+| `task_chest_pool_weekly_chain_4` | `{"1":0,"2":0,"3":0,"4":0,"5":100}` | 连续第 4 段星箱池 |
+| `task_chain_weekly` | `{"stages":[{"target_xp":1000,"chest_pool":"weekly_chain_1"},{"target_xp":2000,"chest_pool":"weekly_chain_2"},{"target_xp":3000,"chest_pool":"weekly_chain_3"},{"target_xp":5000,"chest_pool":"weekly_chain_4"}]}` | 周连续阶段表 |
 
 池子值必须是整数百分比且总和恰为 100；缺失或非法时回退到该来源最保守的
-池子（`weekend` 回退铜箱，其余回退木箱），不会卡住完成或领取。旧库中仍是
-`20` 的 `task_chest_boost_chance` 由一次性迁移改为 `10`，运营已改过的值不动。
+池子（`weekend` 回退铜箱，`weekly_chain_4` 回退星箱，其余回退木箱），不会卡住
+完成或领取。`task_chain_weekly` 必须是正的目标 XP 严格递增的阶段数组；缺失或
+非法时回退到上面的默认四段表。旧库中仍是 `20` 的
+`task_chest_boost_chance` 由一次性迁移改为 `10`，运营已改过的值不动。
 
 种子只在缺失时插入，不覆盖运营改过的值。每日限购按 Asia/Shanghai 自然日重置，购买时
 在同一事务内统计 `shop_purchase_requests` 的当日成功记录；幂等重放不重复计数。配置

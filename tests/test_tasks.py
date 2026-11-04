@@ -23,11 +23,13 @@ from ghost_league.game.tasks import (
     checkin_condition,
     evaluate_condition,
     parse_chest_pool,
+    parse_weekly_chain_config,
     repair_condition,
     roll_chest_amount,
     roll_chest_reward,
     roll_chest_tier,
     weekend_condition,
+    weekly_chain_condition,
 )
 from ghost_league.schedule import TZ
 from tests.test_api import APITestBase, auth, image_bytes
@@ -50,13 +52,19 @@ def visible_tasks(store, user_id: str, now: datetime) -> list[dict]:
 
 
 def api_tasks(client, token: str = TOKEN) -> list[dict]:
+    """Legacy task assertions ignore the always-on Ghost system rows."""
+
     return [
         task
         for task in client.get(
             "/v1/me/tasks", headers=auth(token)
         ).json()["tasks"]
-        if task["source"] != "checkin"
+        if task["source"] not in {"checkin", "weekly_chain"}
     ]
+
+
+def api_all_tasks(client, token: str = TOKEN) -> list[dict]:
+    return client.get("/v1/me/tasks", headers=auth(token)).json()["tasks"]
 
 
 def heic_bytes(size: tuple[int, int] = (320, 180)) -> bytes:
@@ -1149,6 +1157,265 @@ class WeekendTaskTests(TaskStoreBase):
         self.assertEqual(keys, ["weekend:2026-10-31", "weekend:2026-11-07"])
 
 
+class WeeklyChainTaskTests(TaskStoreBase):
+    def chain_tasks(self, now: datetime | None = None) -> list[dict]:
+        stamp = now or self.now
+        return [
+            task
+            for task in self.store.list_visible_tasks("u", stamp)
+            if task["source"] == "weekly_chain"
+        ]
+
+    def add_weekly_xp(
+        self,
+        xp: int,
+        *,
+        day: str = "2026-11-04",
+        tag: str = "a",
+    ) -> None:
+        self.add_activity(day, xp * 6, event_id=f"weekly-{day}-{xp}-{tag}")
+
+    def current_chain_task(self, now: datetime | None = None) -> dict:
+        tasks = self.chain_tasks(now)
+        unclaimed = [
+            task
+            for task in tasks
+            if task["status"] == "active"
+            or task["chest_status"] == "available"
+        ]
+        self.assertEqual(len(unclaimed), 1, tasks)
+        return unclaimed[0]
+
+    def claim(self, task_id: str, now: datetime | None = None) -> dict:
+        return self.store.claim_task_chest(
+            "u", task_id, now=now or self.now, rng=lambda span: 0
+        )
+
+    def run_chain_to_end(self, *, week_now: datetime | None = None) -> None:
+        stamp = week_now or self.now
+        for step in range(1, 5):
+            self.assertEqual(
+                self.store.ensure_weekly_chain_tasks("u", stamp), 1, step
+            )
+            task = self.current_chain_task(stamp)
+            self.assertEqual(
+                task["title"], f"本周 {[1000, 2000, 3000, 5000][step - 1]} XP"
+            )
+            self.claim(task["id"], now=stamp)
+
+    def test_stage_one_is_created_once_with_configured_fields(self) -> None:
+        self.assertEqual(self.store.ensure_weekly_chain_tasks("u", self.now), 1)
+        self.assertEqual(self.store.ensure_weekly_chain_tasks("u", self.now), 0)
+        tasks = self.chain_tasks()
+        self.assertEqual(len(tasks), 1)
+        task = tasks[0]
+        self.assertEqual(task["source"], "weekly_chain")
+        self.assertEqual(task["title"], "本周 1000 XP")
+        self.assertEqual(task["chest_pool"], "weekly_chain_1")
+        self.assertEqual(task["status"], "active")
+        self.assertEqual(task["progress"], {"current": 0, "target": 1000})
+        self.assertEqual(task["starts_at"], "2026-11-02T00:00:00+08:00")
+        self.assertEqual(task["ends_at"], "2026-11-09T00:00:00+08:00")
+        self.assertIsNone(task["missed_date"])
+        with self.store._reader() as conn:
+            row = conn.execute(
+                "SELECT system_key, completion_mode, condition_json "
+                "FROM task_instances WHERE id = ?",
+                (task["id"],),
+            ).fetchone()
+        self.assertEqual(row["system_key"], "weekly_chain:2026-11-02:1")
+        self.assertEqual(row["completion_mode"], "dsl")
+        self.assertEqual(
+            json.loads(row["condition_json"]), weekly_chain_condition(1000)
+        )
+
+    def test_current_week_xp_backfills_and_completes_stage(self) -> None:
+        self.add_weekly_xp(1000)
+        self.assertEqual(self.store.ensure_weekly_chain_tasks("u", self.now), 1)
+        task = self.chain_tasks()[0]
+        self.assertEqual(task["status"], "completed")
+        self.assertEqual(task["chest_status"], "available")
+        self.assertEqual(task["progress"], {"current": 1000, "target": 1000})
+
+    def test_completed_unclaimed_stage_blocks_next_until_claimed(self) -> None:
+        self.add_weekly_xp(1000)
+        self.store.ensure_weekly_chain_tasks("u", self.now)
+        first = self.chain_tasks()[0]
+        self.assertEqual(first["status"], "completed")
+        self.assertEqual(first["chest_status"], "available")
+
+        self.assertEqual(self.store.ensure_weekly_chain_tasks("u", self.now), 0)
+        self.assertEqual(len(self.chain_tasks()), 1)
+
+        self.claim(first["id"])
+        self.assertEqual(self.store.ensure_weekly_chain_tasks("u", self.now), 1)
+        tasks = self.chain_tasks()
+        self.assertEqual(len(tasks), 2)
+        by_step = {task["title"]: task for task in tasks}
+        self.assertEqual(by_step["本周 1000 XP"]["chest_status"], "claimed")
+        second = by_step["本周 2000 XP"]
+        self.assertEqual(second["status"], "active")
+        self.assertEqual(second["chest_pool"], "weekly_chain_2")
+        self.assertEqual(second["progress"], {"current": 1000, "target": 2000})
+        # One active stage only, no duplicated next stage.
+        self.assertEqual(self.store.ensure_weekly_chain_tasks("u", self.now), 0)
+        self.assertEqual(len(self.chain_tasks()), 2)
+
+    def test_four_stages_end_without_a_fifth(self) -> None:
+        self.add_weekly_xp(5000)
+        self.run_chain_to_end()
+        self.assertEqual(self.store.ensure_weekly_chain_tasks("u", self.now), 0)
+        tasks = self.chain_tasks()
+        self.assertEqual(len(tasks), 4)
+        self.assertEqual(
+            [task["title"] for task in tasks],
+            ["本周 1000 XP", "本周 2000 XP", "本周 3000 XP", "本周 5000 XP"],
+        )
+        self.assertEqual({task["chest_status"] for task in tasks}, {"claimed"})
+        self.assertEqual(
+            {task["chest_pool"] for task in tasks},
+            {
+                "weekly_chain_1",
+                "weekly_chain_2",
+                "weekly_chain_3",
+                "weekly_chain_4",
+            },
+        )
+
+    def test_next_week_starts_a_fresh_chain(self) -> None:
+        self.add_weekly_xp(5000)
+        self.run_chain_to_end()
+        next_monday = datetime(2026, 11, 9, 12, 0, 0, tzinfo=TZ)
+        self.assertEqual(
+            self.store.ensure_weekly_chain_tasks("u", next_monday), 1
+        )
+        tasks = self.chain_tasks(next_monday)
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["title"], "本周 1000 XP")
+        self.assertEqual(tasks[0]["status"], "active")
+        self.assertEqual(tasks[0]["starts_at"], "2026-11-09T00:00:00+08:00")
+        self.assertEqual(tasks[0]["ends_at"], "2026-11-16T00:00:00+08:00")
+        with self.store._reader() as conn:
+            keys = [
+                row["system_key"]
+                for row in conn.execute(
+                    "SELECT system_key FROM task_instances "
+                    "WHERE source = 'weekly_chain' ORDER BY system_key"
+                )
+            ]
+        self.assertEqual(
+            keys,
+            [
+                "weekly_chain:2026-11-02:1",
+                "weekly_chain:2026-11-02:2",
+                "weekly_chain:2026-11-02:3",
+                "weekly_chain:2026-11-02:4",
+                "weekly_chain:2026-11-09:1",
+            ],
+        )
+
+    def test_config_changes_apply_to_targets_and_pools(self) -> None:
+        self.store.set_game_config(
+            "task_chain_weekly",
+            json.dumps(
+                {
+                    "stages": [
+                        {"target_xp": 100, "chest_pool": "weekly_chain_1"},
+                        {"target_xp": 250, "chest_pool": "weekly_chain_2"},
+                    ]
+                }
+            ),
+            now=self.now,
+        )
+        # Star-only first pool proves the configured pool row is used.
+        self.store.set_game_config(
+            "task_chest_pool_weekly_chain_1",
+            '{"1":0,"2":0,"3":0,"4":0,"5":100}',
+            now=self.now,
+        )
+        self.add_weekly_xp(120)
+        self.assertEqual(self.store.ensure_weekly_chain_tasks("u", self.now), 1)
+        first = self.chain_tasks()[0]
+        self.assertEqual(first["title"], "本周 100 XP")
+        self.assertEqual(first["progress"], {"current": 120, "target": 100})
+        self.assertEqual(first["chest_tier"], 5)
+        self.claim(first["id"])
+
+        # The next stage is materialised from the latest stage table.
+        self.store.set_game_config(
+            "task_chain_weekly",
+            json.dumps(
+                {
+                    "stages": [
+                        {"target_xp": 100, "chest_pool": "weekly_chain_1"},
+                        {"target_xp": 400, "chest_pool": "weekly_chain_2"},
+                    ]
+                }
+            ),
+            now=self.now,
+        )
+        self.assertEqual(self.store.ensure_weekly_chain_tasks("u", self.now), 1)
+        second = [
+            task
+            for task in self.chain_tasks()
+            if task["chest_status"] == "none"
+        ][0]
+        self.assertEqual(second["title"], "本周 400 XP")
+        self.assertEqual(second["chest_pool"], "weekly_chain_2")
+        self.assertEqual(second["progress"], {"current": 120, "target": 400})
+
+    def test_invalid_or_missing_config_falls_back_to_default_stages(self) -> None:
+        for raw in (
+            "not-json",
+            "[]",
+            '{"stages":[]}',
+            '{"stages":[{"target_xp":0,"chest_pool":"weekly_chain_1"}]}',
+            '{"stages":[{"target_xp":2000,"chest_pool":"weekly_chain_2"},'
+            '{"target_xp":1000,"chest_pool":"weekly_chain_1"}]}',
+            '{"stages":[{"target_xp":100,"chest_pool":" "}]}',
+        ):
+            stages = parse_weekly_chain_config(raw)
+            self.assertEqual(
+                [stage["target_xp"] for stage in stages],
+                [1000, 2000, 3000, 5000],
+                raw,
+            )
+
+        self.store.set_game_config(
+            "task_chain_weekly", '{"stages":[]}', now=self.now
+        )
+        self.assertEqual(self.store.ensure_weekly_chain_tasks("u", self.now), 1)
+        self.assertEqual(self.chain_tasks()[0]["title"], "本周 1000 XP")
+
+        with self.store.transaction() as conn:
+            conn.execute(
+                "DELETE FROM game_config WHERE key = 'task_chain_weekly'"
+            )
+        other = datetime(2026, 11, 10, 12, 0, 0, tzinfo=TZ)
+        self.assertEqual(self.store.ensure_weekly_chain_tasks("u", other), 1)
+        self.assertEqual(self.chain_tasks(other)[0]["title"], "本周 1000 XP")
+
+    def test_missing_or_invalid_weekly_pool_fails_closed(self) -> None:
+        self.store.set_game_config(
+            "task_chest_pool_weekly_chain_1", '{"1":50,"2":49}', now=self.now
+        )
+        self.add_weekly_xp(1000)
+        self.store.ensure_weekly_chain_tasks("u", self.now)
+        first = self.chain_tasks()[0]
+        self.assertEqual(first["chest_tier"], 1)
+        self.claim(first["id"])
+
+        with self.store.transaction() as conn:
+            conn.execute(
+                "DELETE FROM game_config "
+                "WHERE key = 'task_chest_pool_weekly_chain_1'"
+            )
+        self.add_activity("2026-11-10", 6000, event_id="weekly-next-week")
+        other = datetime(2026, 11, 10, 12, 0, 0, tzinfo=TZ)
+        self.store.ensure_weekly_chain_tasks("u", other)
+        self.assertEqual(self.chain_tasks(other)[0]["chest_tier"], 1)
+
+
 class DslTests(TaskStoreBase):
     def _condition(self, condition, task=None, now=None):
         return evaluate_condition(
@@ -1433,6 +1700,49 @@ class TaskApiTests(APITestBase):
                     ("B", "completed", "claimed", 20),
                     ("C", "active", "none", 30),
                 ],
+            )
+
+    def test_weekly_chain_is_created_by_tasks_endpoint_and_advances(self) -> None:
+        self.clock["now"] = datetime(2026, 11, 4, 12, 0, 0, tzinfo=TZ)
+        with self.client() as client:
+            increment = self.post_increment(
+                client,
+                event_id="weekly-chain-api",
+                seconds=7200,
+                occurred_at="2026-11-04T11:00:00+08:00",
+            )
+            self.assertEqual(increment.status_code, 200, increment.text)
+            chain = [
+                task for task in api_all_tasks(client)
+                if task["source"] == "weekly_chain"
+            ]
+            self.assertEqual(len(chain), 1)
+            first = chain[0]
+            self.assertEqual(first["title"], "本周 1000 XP")
+            self.assertEqual(first["status"], "completed")
+            self.assertEqual(first["chest_status"], "available")
+            self.assertEqual(
+                first["progress"], {"current": 1200, "target": 1000}
+            )
+
+            claimed = client.post(
+                f"/v1/me/tasks/{first['id']}/chest",
+                headers=auth(TOKEN),
+            )
+            self.assertEqual(claimed.status_code, 200, claimed.text)
+
+            chain = [
+                task for task in api_all_tasks(client)
+                if task["source"] == "weekly_chain"
+            ]
+            self.assertEqual(
+                [task["title"] for task in chain],
+                ["本周 1000 XP", "本周 2000 XP"],
+            )
+            self.assertEqual(chain[0]["chest_status"], "claimed")
+            self.assertEqual(chain[1]["status"], "active")
+            self.assertEqual(
+                chain[1]["progress"], {"current": 1200, "target": 2000}
             )
 
     def test_manual_complete_requires_image_and_returns_task(self) -> None:
