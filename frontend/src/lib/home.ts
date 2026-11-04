@@ -361,6 +361,8 @@ export function describeApiError(error: unknown): string {
     if (code === 'insufficient_embers') return '还差一枚余烬。'
     if (code === 'zero_xp') return '当天没有记录，补不了。'
     if (code === 'already_checked_in') return '当天已经打卡了。'
+    if (error.status === 413) return '照片太大了，换一张。'
+    if (error.status === 415) return '这张照片格式不支持，换一张。'
     if (error.status === 403) return '当前账号没有查看这些数据的权限。'
     if (error.status === 404) return '没有找到本周的联赛数据。'
     if (error.status >= 500) return '服务暂时不可用，请稍后重试。'

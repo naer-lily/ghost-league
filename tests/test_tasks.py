@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import io
 import sqlite3
 import stat
+import struct
 import tempfile
 import unittest
+import zlib
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from PIL import Image
 
 from ghost_league.game.store import SOURCE_HUMAN, GameStore
 from ghost_league.game.tasks import (
@@ -26,6 +31,22 @@ TOKEN = "test-token-only"
 
 def ts(value: datetime) -> str:
     return value.isoformat(timespec="seconds")
+
+
+def heic_bytes(size: tuple[int, int] = (320, 180)) -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", size, (40, 120, 200)).save(
+        buffer, format="HEIF", quality=90
+    )
+    return buffer.getvalue()
+
+
+def oversized_png_bytes() -> bytes:
+    data = bytearray(image_bytes())
+    struct.pack_into(">II", data, 16, 8001, 5001)
+    crc = zlib.crc32(data[12:29]) & 0xFFFFFFFF
+    struct.pack_into(">I", data, 29, crc)
+    return bytes(data)
 
 
 class TaskStoreBase(unittest.TestCase):
@@ -561,6 +582,12 @@ class TaskApiTests(APITestBase):
                 f"/v1/me/tasks/{task_id}/complete", headers=auth(TOKEN)
             )
             self.assertEqual(missing.status_code, 422)
+            empty = client.post(
+                f"/v1/me/tasks/{task_id}/complete",
+                headers=auth(TOKEN),
+                files={"file": ("proof.png", b"", "image/png")},
+            )
+            self.assertEqual(empty.status_code, 415)
             wrong = client.post(
                 f"/v1/me/tasks/{task_id}/complete",
                 headers=auth(TOKEN),
@@ -573,6 +600,14 @@ class TaskApiTests(APITestBase):
                 files={"file": ("proof.png", b"x" * (8 * 1024 * 1024 + 1), "image/png")},
             )
             self.assertEqual(huge.status_code, 413)
+            oversized = client.post(
+                f"/v1/me/tasks/{task_id}/complete",
+                headers=auth(TOKEN),
+                files={
+                    "file": ("proof.png", oversized_png_bytes(), "image/png")
+                },
+            )
+            self.assertEqual(oversized.status_code, 415)
             done = client.post(
                 f"/v1/me/tasks/{task_id}/complete",
                 headers=auth(TOKEN),
@@ -592,6 +627,60 @@ class TaskApiTests(APITestBase):
             self.assertEqual(len(stored), 1)
             mode = stat.S_IMODE(stored[0].stat().st_mode)
             self.assertEqual(mode, 0o600)
+
+    def test_manual_complete_converts_heic_to_jpeg_proof(self) -> None:
+        with self.client() as client:
+            created = client.post(
+                "/v1/me/task-definitions",
+                headers=auth(TOKEN),
+                json={"title": "拍一张", "difficulty": 1},
+            )
+            self.assertEqual(created.status_code, 200, created.text)
+            task_id = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"][0]["id"]
+            source = heic_bytes()
+            done = client.post(
+                f"/v1/me/tasks/{task_id}/complete",
+                headers=auth(TOKEN),
+                files={"file": ("proof.heic", source, "image/heic")},
+            )
+            self.assertEqual(done.status_code, 200, done.text)
+            payload = done.json()["task"]
+            self.assertEqual(payload["status"], "completed")
+            proof = client.get(payload["proof_url"], headers=auth(TOKEN))
+            self.assertEqual(proof.status_code, 200)
+            self.assertEqual(proof.headers["content-type"], "image/jpeg")
+
+            stored = list(
+                (self.api_dir / "task-proofs" / "owner").glob(f"{task_id}.*")
+            )
+            self.assertEqual([path.suffix for path in stored], [".jpg"])
+            stored_bytes = stored[0].read_bytes()
+            self.assertNotEqual(stored_bytes, source)
+            with Image.open(io.BytesIO(stored_bytes)) as image:
+                self.assertEqual(image.format, "JPEG")
+                self.assertEqual(image.mode, "RGB")
+                self.assertEqual(image.size, (320, 180))
+
+    def test_manual_complete_accepts_jpeg_proof(self) -> None:
+        with self.client() as client:
+            client.post(
+                "/v1/me/task-definitions",
+                headers=auth(TOKEN),
+                json={"title": "拍一张", "difficulty": 1},
+            )
+            task_id = client.get("/v1/me/tasks", headers=auth(TOKEN)).json()["tasks"][0]["id"]
+            source = image_bytes("JPEG")
+            done = client.post(
+                f"/v1/me/tasks/{task_id}/complete",
+                headers=auth(TOKEN),
+                files={"file": ("proof.jpeg", source, "image/jpeg")},
+            )
+            self.assertEqual(done.status_code, 200, done.text)
+            stored = list(
+                (self.api_dir / "task-proofs" / "owner").glob(f"{task_id}.*")
+            )
+            self.assertEqual([path.suffix for path in stored], [".jpg"])
+            self.assertEqual(stored[0].read_bytes(), source)
 
     def test_chest_claim_and_permissions(self) -> None:
         self.add_account("friend", "Friend", "friend-token-only")

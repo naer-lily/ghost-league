@@ -22,6 +22,7 @@ from typing import Any, Callable, Literal
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
+from pillow_heif import register_heif_opener
 from pydantic import BaseModel, ConfigDict, Field
 
 from .accounts import (
@@ -83,6 +84,11 @@ from .widget_studio import DEFAULT_WEB_ROOT as DEFAULT_WIDGET_WEB_ROOT
 from .widget_studio import DEFAULT_WIDGETS_DIR, WidgetStore
 from .widget_studio import build_router as build_widget_studio_router
 
+# Task proofs may arrive as HEIC/HEIF from phone galleries.  Registering the
+# opener here only adds decoding support; other image paths still validate
+# against their own format allowlists.
+register_heif_opener()
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE_PATH = PROJECT_ROOT / "data" / "league" / "state.json"
 DEFAULT_CACHE_PATH = PROJECT_ROOT / "data" / "cache" / "cn-978.json"
@@ -96,7 +102,10 @@ TASK_PROOF_FORMATS = {
     "JPEG": (".jpg", "image/jpeg"),
     "PNG": (".png", "image/png"),
     "WEBP": (".webp", "image/webp"),
+    # HEIC/HEIF are decoded by pillow-heif and normalized to JPEG.
+    "HEIF": (".jpg", "image/jpeg"),
 }
+TASK_PROOF_JPEG_QUALITY = 90
 MAX_TASK_PROOF_BYTES = 8 * 1024 * 1024
 SAFE_USER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
@@ -290,8 +299,12 @@ def _iso(value: datetime) -> str:
     return _local(value).isoformat(timespec="seconds")
 
 
-def _task_proof_meta(data: bytes) -> tuple[str, str]:
-    """Validate a proof image and return its storage extension and MIME type."""
+def _task_proof_payload(data: bytes) -> tuple[bytes, str, str]:
+    """Validate a proof image and return the stored bytes, extension and MIME.
+
+    HEIC/HEIF uploads are normalized to RGB JPEG so proof storage and serving
+    stay on the existing ``.jpg`` / ``image/jpeg`` path.
+    """
 
     if not data:
         raise TaskProofValidationError("empty image")
@@ -302,7 +315,7 @@ def _task_proof_meta(data: bytes) -> tuple[str, str]:
             fmt = source.format
             if fmt not in TASK_PROOF_FORMATS:
                 raise TaskProofValidationError(
-                    "only JPEG, PNG or WebP images are allowed"
+                    "only JPEG, PNG, WebP, HEIC or HEIF images are allowed"
                 )
             if source.width * source.height > 40_000_000:
                 raise TaskProofValidationError("image dimensions are too large")
@@ -316,7 +329,35 @@ def _task_proof_meta(data: bytes) -> tuple[str, str]:
         ValueError,
     ) as exc:
         raise TaskProofValidationError("invalid image file") from exc
+
+    if fmt == "HEIF":
+        try:
+            with Image.open(io.BytesIO(data)) as source:
+                source.load()
+                image = ImageOps.exif_transpose(source)
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+                converted = io.BytesIO()
+                image.save(
+                    converted, format="JPEG", quality=TASK_PROOF_JPEG_QUALITY
+                )
+        except (
+            Image.DecompressionBombError,
+            UnidentifiedImageError,
+            OSError,
+            ValueError,
+        ) as exc:
+            raise TaskProofValidationError("invalid image file") from exc
+        return converted.getvalue(), ".jpg", "image/jpeg"
+
     extension, mime = TASK_PROOF_FORMATS[str(fmt)]
+    return data, extension, mime
+
+
+def _task_proof_meta(data: bytes) -> tuple[str, str]:
+    """Validate a proof image and return its storage extension and MIME type."""
+
+    _, extension, mime = _task_proof_payload(data)
     return extension, mime
 
 
@@ -1432,11 +1473,11 @@ class GameService:
         if _iso(now) >= str(task["ends_at"]):
             raise TaskStateRejected("task has ended")
 
-        extension, mime = _task_proof_meta(data)
+        payload, extension, mime = _task_proof_payload(data)
         path, relative = self._task_proof_storage(user_id, task_id, extension)
         temporary = path.with_name(f"{path.name}.tmp")
         try:
-            temporary.write_bytes(data)
+            temporary.write_bytes(payload)
             try:
                 temporary.chmod(0o600)
             except OSError:

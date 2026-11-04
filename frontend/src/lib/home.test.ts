@@ -183,6 +183,12 @@ describe('error copy', () => {
     expect(describeApiError(new Error('boom'))).toBe(
       '数据没有加载出来，请稍后重试。',
     )
+    expect(describeApiError(new ApiError('too large', 413))).toBe(
+      '照片太大了，换一张。',
+    )
+    expect(describeApiError(new ApiError('unsupported media', 415))).toBe(
+      '这张照片格式不支持，换一张。',
+    )
     expect(
       describeApiError(
         new ApiError('limit', 409, {

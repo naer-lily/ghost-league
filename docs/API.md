@@ -484,7 +484,11 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
 `multipart/form-data`，字段 `file` 必填。只允许本人、`active` 的每日手动任务，
 且 `now < ends_at`。
 
-- 只接受 JPEG / PNG / WebP，单文件 ≤ 8 MB；其他类型 `415`，超限 `413`。
+- 只接受 JPEG / PNG / WebP / HEIC / HEIF，单文件 ≤ 8 MB、总像素 ≤ 40 MP；
+  其他类型、空文件、非图片或像素超限 `415`，超过 8 MB `413`。
+- HEIC/HEIF 解码后统一转成 RGB JPEG（质量 90），存成 `.jpg`、MIME
+  `image/jpeg`；不会把 HEIC/HEIF 原文件放进 proof。其他图片接口不因此接受
+  HEIC/HEIF。
 - 文件存到 `data/api/task-proofs/<user_id>/<task_id>.<ext>`，目录 700、文件 600。
 - 成功后任务变为 `completed`、`chest_status='available'`，返回 `{"task": {...}}`。
 - 无文件为 `422`；非本人为 `404`；状态不允许或已截止为 `409`。

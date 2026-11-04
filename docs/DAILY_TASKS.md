@@ -40,6 +40,10 @@ Ghost 自有任务系统只有三类任务：
   `status='completed'`、`chest_status='available'`。
 - 图片存到 `data/api/task-proofs/<user_id>/<task_id>.<ext>`，目录 700、
   文件 600；只允许本人按 task id 读取。
+- 支持 JPEG / PNG / WebP / HEIC / HEIF；HEIC/HEIF 用 pillow-heif 解码后统一
+  转成 RGB JPEG（质量 90），仍以 `.jpg` + `image/jpeg` 存储，不保存原文件。
+  单文件 ≤ 8 MB、总像素 ≤ 40 MP；空文件、非图片和超限都按 `415` 拒绝，
+  超过 8 MB 为 `413`。其他图片路径不因此接受 HEIC/HEIF。
 
 ## 补断联任务
 
