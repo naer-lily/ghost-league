@@ -247,6 +247,60 @@ class DailyTaskTests(TaskStoreBase):
             ["B", "A", "补断联 · 10/29"],
         )
 
+    def test_claimed_completed_task_sinks_below_active_and_available_chests(
+        self,
+    ) -> None:
+        for title in ("A", "B", "C", "D"):
+            self.store.create_task_definition(
+                "u", title=title, difficulty=1, now=self.now
+            )
+        self.store.ensure_user_tasks("u", self.now)
+        tasks = {
+            task["title"]: task
+            for task in self.store.list_visible_tasks("u", self.now)
+        }
+
+        self.store.complete_manual_task(
+            "u",
+            tasks["B"]["id"],
+            proof_path="task-proofs/u/b.png",
+            proof_mime="image/png",
+            now=self.now,
+        )
+        self.store.claim_task_chest("u", tasks["B"]["id"], now=self.now)
+        self.store.complete_manual_task(
+            "u",
+            tasks["D"]["id"],
+            proof_path="task-proofs/u/d.png",
+            proof_mime="image/png",
+            now=self.now,
+        )
+
+        visible = self.store.list_visible_tasks("u", self.now)
+        self.assertEqual(
+            [(task["title"], task["status"], task["chest_status"]) for task in visible],
+            [
+                ("A", "active", "none"),
+                ("C", "active", "none"),
+                ("D", "completed", "available"),
+                ("B", "completed", "claimed"),
+            ],
+        )
+
+        self.add_activity("2026-10-29", 444)
+        self.store.ensure_repair_tasks("u", self.now.date(), now=self.now)
+        visible = self.store.list_visible_tasks("u", self.now)
+        self.assertEqual(
+            [(task["title"], task["ends_at"]) for task in visible],
+            [
+                ("A", "2026-11-05T00:00:00+08:00"),
+                ("C", "2026-11-05T00:00:00+08:00"),
+                ("D", "2026-11-05T00:00:00+08:00"),
+                ("补断联 · 10/29", "2026-11-06T00:00:00+08:00"),
+                ("B", "2026-11-05T00:00:00+08:00"),
+            ],
+        )
+
     def test_completed_instance_keeps_title_and_sort_order(self) -> None:
         second = self.store.create_task_definition(
             "u", title="B", difficulty=1, now=self.now

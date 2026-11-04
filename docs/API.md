@@ -464,10 +464,23 @@ Asia/Shanghai 的 ISO-8601。旧打卡没有 `domain` / `content` 时 `body` 为
 }
 ```
 
-- 只返回 `status IN ('active','completed')` 且 `starts_at <= now < ends_at` 的任务，
-  按 `ends_at ASC, sort_order ASC, created_at ASC, id ASC` 排序。每日手动任务
-  截止时间都在当天 24:00，组内顺序由定义顺序决定；补断联、周末任务仍按各自
-  截止时间插入，不与每日任务混排。前端不再二次排序。
+- 只返回 `status IN ('active','completed')` 且 `starts_at <= now < ends_at` 的任务。
+  排序先分组：`completed` 且 `chest_status='available'` 与所有 active 任务同组，
+  按 `ends_at ASC, sort_order ASC, created_at ASC, id ASC` 排；`completed` 但宝箱已
+  `claimed` / `forfeited` / 无宝箱的任务沉到最底部，组内仍按同样的截止时间与
+  `sort_order` 排。等价排序键：
+
+  ```sql
+  CASE
+    WHEN status = 'completed' AND chest_status = 'available' THEN 0
+    WHEN status = 'completed' THEN 1
+    ELSE 0
+  END ASC,
+  ends_at ASC, sort_order ASC, created_at ASC, id ASC
+  ```
+
+  每日手动任务截止时间都在当天 24:00，组内顺序由定义顺序决定；补断联、周末任务
+  仍按各自截止时间参与排序，不会因为沉底规则被提前。前端不再二次排序。
 - `source`：`daily_manual` / `repair` / `weekend`。
 - `status`：`active` / `completed` / `expired`。
 - `chest_status`：`none` / `available` / `claimed` / `forfeited`。

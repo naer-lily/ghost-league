@@ -575,7 +575,14 @@ class TasksMixin:
         user_id: str,
         now: datetime | str | None = None,
     ) -> list[dict[str, Any]]:
-        """Refresh then return active/completed tasks whose deadline has not passed."""
+        """Refresh then return active/completed tasks whose deadline has not passed.
+
+        Completed tasks with an unclaimed chest stay in the normal deadline
+        order so users can find and claim them. Completed tasks whose chest is
+        claimed, forfeited, or absent sink below every active task and every
+        completed task with an available chest. Within each group the usual
+        deadline, sort order, and creation order still apply.
+        """
 
         local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
         self.refresh_task_states(user_id, local_now)
@@ -585,7 +592,12 @@ class TasksMixin:
                 "SELECT * FROM task_instances "
                 "WHERE user_id = ? AND status IN ('active', 'completed') "
                 "AND starts_at <= ? AND ends_at > ? "
-                "ORDER BY ends_at ASC, sort_order ASC, created_at ASC, id ASC",
+                "ORDER BY CASE "
+                "WHEN status = 'completed' AND chest_status = 'available' "
+                "THEN 0 "
+                "WHEN status = 'completed' THEN 1 "
+                "ELSE 0 END ASC, "
+                "ends_at ASC, sort_order ASC, created_at ASC, id ASC",
                 (user_id, now_iso, now_iso),
             ).fetchall()
             return [
