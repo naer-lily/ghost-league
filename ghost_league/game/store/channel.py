@@ -275,6 +275,29 @@ class ChannelMixin:
             )
         return profiles
 
+    def channel_seconds_between(
+        self, player_id: str, start: date | str, end_exclusive: date | str
+    ) -> list[dict[str, Any]]:
+        """Aggregate one player's Channel seconds by local day."""
+
+        start_day = cal.parse_date(start)
+        end_day = cal.parse_date(end_exclusive)
+        if end_day <= start_day:
+            return []
+        with self._reader() as conn:
+            rows = conn.execute(
+                "SELECT substr(occurred_at, 1, 10) AS date, "
+                "COALESCE(SUM(seconds), 0) AS seconds FROM channel_events "
+                "WHERE player_id = ? AND occurred_at >= ? AND occurred_at < ? "
+                "GROUP BY date ORDER BY date",
+                (
+                    player_id,
+                    cal.iso_ts(cal.day_start_at(start_day)),
+                    cal.iso_ts(cal.day_start_at(end_day)),
+                ),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def replace_channel_week_roster(
         self,
         channel_id: str,

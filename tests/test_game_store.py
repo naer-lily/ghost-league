@@ -109,6 +109,42 @@ def test_activity_event_is_idempotent_and_updates_one_score(tmp_path) -> None:
     assert len(store.checkins_between("human-1", week, "2026-11-02")) == 1
 
 
+def test_channel_seconds_between_aggregates_local_days(tmp_path) -> None:
+    store = make_store(tmp_path)
+    week = "2026-10-26"
+    store.create_player(
+        "ai-1",
+        kind="ai",
+        joined_week=week,
+        now="2026-10-26T00:00:00+08:00",
+    )
+    with store.transaction() as conn:
+        for event_id, seconds, occurred_at in (
+            ("day-1-a", 60, "2026-10-26T01:00:00+08:00"),
+            ("day-1-b", 90, "2026-10-26T23:59:59+08:00"),
+            ("day-2", 120, "2026-10-27T00:00:00+08:00"),
+            ("outside", 999, "2026-10-25T23:59:59+08:00"),
+        ):
+            conn.execute(
+                "INSERT INTO channel_events "
+                "(event_id, channel_id, player_ref, player_id, seconds, "
+                "occurred_at, week_start, created_at) "
+                "VALUES (?, 'test-channel', 'ai-1', 'ai-1', ?, ?, ?, ?)",
+                (
+                    event_id,
+                    seconds,
+                    occurred_at,
+                    week,
+                    occurred_at,
+                ),
+            )
+    assert store.channel_seconds_between("ai-1", week, "2026-10-28") == [
+        {"date": "2026-10-26", "seconds": 150},
+        {"date": "2026-10-27", "seconds": 120},
+    ]
+    assert store.channel_seconds_between("ai-1", week, week) == []
+
+
 def test_source_upsert_is_unique_and_players_cannot_duplicate(tmp_path) -> None:
     store = make_store(tmp_path)
     week = "2026-10-26"

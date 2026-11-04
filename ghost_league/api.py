@@ -1643,10 +1643,16 @@ class GameService:
         weekday_labels = ("一", "二", "三", "四", "五", "六", "日")
 
         def xp_by_day(player_id: str) -> dict[str, int]:
-            return {
+            xp = {
                 str(row["date"]): int(row.get("xp") or 0)
                 for row in self.store.checkins_between(player_id, start, end)
             }
+            for row in self.store.channel_seconds_between(player_id, start, end):
+                day = str(row["date"])
+                if day in xp:
+                    continue
+                xp[day] = xp_for_seconds(int(row.get("seconds") or 0))
+            return xp
 
         target_xp = xp_by_day(target_id)
         viewer_xp = target_xp if viewer_id == target_id else xp_by_day(viewer_id)

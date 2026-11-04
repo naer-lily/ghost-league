@@ -4,6 +4,7 @@ import sqlite3
 import unittest
 from datetime import datetime
 
+from ghost_league.game import calendar as cal
 from ghost_league.schedule import TZ
 from test_api import APITestBase, FRIEND_TOKEN, TOKEN, auth
 
@@ -25,6 +26,73 @@ class RecentXpAPITests(APITestBase):
                     int(checked_at.timestamp()),
                 ),
             )
+
+    def seed_channel_event(
+        self, player_id: str, day: str, seconds: int, event_id: str
+    ) -> None:
+        occurred_at = cal.iso_ts(
+            datetime.fromisoformat(f"{day}T12:00:00").replace(tzinfo=TZ)
+        )
+        with sqlite3.connect(self.game_db_path) as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO channel_events "
+                "(event_id, channel_id, player_ref, player_id, seconds, "
+                "occurred_at, week_start, created_at) "
+                "VALUES (?, 'test-channel', ?, ?, ?, ?, ?, ?)",
+                (
+                    event_id,
+                    player_id,
+                    player_id,
+                    seconds,
+                    occurred_at,
+                    cal.week_start(day).isoformat(),
+                    occurred_at,
+                ),
+            )
+
+    def test_recent_xp_falls_back_to_channel_events_for_missing_checkins(
+        self,
+    ) -> None:
+        self.add_account("friend-1", "Friend", FRIEND_TOKEN)
+        with self.client() as client:
+            # Create both players before writing raw Channel events.
+            client.get("/v1/users/friend-1", headers=auth(TOKEN))
+            self.seed_channel_event("friend-1", "2026-10-19", 600, "outside-before")
+            self.seed_channel_event("friend-1", "2026-10-20", 59, "boundary-start")
+            self.seed_channel_event("friend-1", "2026-10-24", 178, "target-a")
+            self.seed_channel_event("friend-1", "2026-10-24", 120, "target-b")
+            self.seed_channel_event("friend-1", "2026-10-25", 428, "target-c")
+            self.seed_channel_event("friend-1", "2026-10-26", 142, "target-d")
+            self.seed_channel_event("friend-1", "2026-10-27", 600, "outside-after")
+            self.seed_channel_event("owner", "2026-10-23", 79, "viewer-a")
+
+            response = client.get("/v1/users/friend-1", headers=auth(TOKEN))
+            self.assertEqual(response.status_code, 200, response.text)
+            recent = response.json()["recent_xp"]
+            self.assertEqual(recent["target"], [9, 0, 0, 0, 49, 71, 23])
+            self.assertEqual(recent["viewer"], [0, 0, 0, 13, 0, 0, 0])
+            self.assertEqual(recent["target_total"], 152)
+            self.assertEqual(recent["viewer_total"], 13)
+
+    def test_recent_xp_prefers_checkins_over_channel_events_for_target_and_viewer(
+        self,
+    ) -> None:
+        self.add_account("friend-1", "Friend", FRIEND_TOKEN)
+        with self.client() as client:
+            client.get("/v1/users/friend-1", headers=auth(TOKEN))
+            self.seed_checkin("friend-1", "2026-10-24", 55)
+            self.seed_channel_event("friend-1", "2026-10-24", 600, "covered-target")
+            self.seed_channel_event("friend-1", "2026-10-25", 300, "fallback-target")
+            self.seed_checkin("owner", "2026-10-23", 66)
+            self.seed_channel_event("owner", "2026-10-23", 600, "covered-viewer")
+
+            response = client.get("/v1/users/friend-1", headers=auth(TOKEN))
+            self.assertEqual(response.status_code, 200, response.text)
+            recent = response.json()["recent_xp"]
+            self.assertEqual(recent["target"], [0, 0, 0, 0, 55, 50, 0])
+            self.assertEqual(recent["viewer"], [0, 0, 0, 66, 0, 0, 0])
+            self.assertEqual(recent["target_total"], 105)
+            self.assertEqual(recent["viewer_total"], 66)
 
     def test_recent_xp_fills_missing_days_and_uses_the_seven_day_window(
         self,

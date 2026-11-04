@@ -1576,9 +1576,11 @@ paid_stake`，`free_stake = 20`，`paid_stake` 原样保存；下注只扣 `paid
 
 `recent_xp` 固定返回含今天在内的最近 7 个自然日，按日期升序；`days` 是
 `YYYY-MM-DD`，`labels` 是由服务端算好的中文单字星期（日/一/二/三/四/五/六）。
-`target` 是被查看用户的每日 `checkins.xp`，`viewer` 是登录用户自己的每日 XP；
-没有记录的日期补 `0`，两个 `*_total` 是各自 7 天总和。查看自己时 `target` 与
-`viewer` 相同。该字段只出现在单个用户详情，不改变好友榜或榜单结构：
+`target` 是被查看用户的每日 XP，`viewer` 是登录用户自己的每日 XP。每日 XP
+**优先取该日的 `checkins.xp`**；没有 check-in 行时，回退到该日 `channel_events.seconds`
+总和并按 `seconds // 6` 折算，已有 check-in 的日期不会被 Channel 事件覆盖。只查询
+最近 7 天窗口，仍没有数据的日期补 `0`；两个 `*_total` 是各自 7 天总和。查看自己时
+`target` 与 `viewer` 相同。该字段只出现在单个用户详情，不改变好友榜或榜单结构：
 
 ```json
 {
