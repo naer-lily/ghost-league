@@ -115,7 +115,10 @@ export function HomePage() {
           />
         </div>
 
-        <TaskList onOpenSettings={() => setTasksSettingsOpen(true)} />
+        <TaskList
+          embersBalance={view.embersBalance}
+          onOpenSettings={() => setTasksSettingsOpen(true)}
+        />
 
         <section
           className={styles.rival}

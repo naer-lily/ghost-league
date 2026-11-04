@@ -13,10 +13,15 @@ import styles from './TaskCard.module.css'
 
 interface TaskCardProps {
   task: TaskItem
+  embersBalance: number
   onClaimed: (amount: number, title: string) => void
 }
 
-export function TaskCard({ task, onClaimed }: TaskCardProps) {
+export function TaskCard({
+  task,
+  embersBalance,
+  onClaimed,
+}: TaskCardProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const completeTask = useCompleteTask()
   const claimChest = useClaimTaskChest()
@@ -31,6 +36,7 @@ export function TaskCard({ task, onClaimed }: TaskCardProps) {
     task.status === 'completed' && task.chest_status === 'available'
   const chestClaimed =
     task.status === 'completed' && task.chest_status === 'claimed'
+  const canRepair = embersBalance >= 1
   const deadline = formatTaskDeadline(task.ends_at)
 
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -54,7 +60,7 @@ export function TaskCard({ task, onClaimed }: TaskCardProps) {
   }
 
   function onRepair() {
-    if (!task.missed_date) return
+    if (!task.missed_date || !canRepair) return
     repairTask.mutate(
       { date: task.missed_date },
       {
@@ -101,10 +107,14 @@ export function TaskCard({ task, onClaimed }: TaskCardProps) {
             type="button"
             className={styles.action}
             onClick={onRepair}
-            disabled={repairTask.isPending}
+            disabled={repairTask.isPending || !canRepair}
           >
             <Flame size={16} aria-hidden="true" />
-            {repairTask.isPending ? '补录中…' : '用余烬补'}
+            {repairTask.isPending
+              ? '补录中…'
+              : canRepair
+                ? '用余烬补'
+                : '还差一枚余烬'}
           </button>
         ) : dslActive && task.progress ? (
           <p className={styles.progress} data-testid="task-progress">

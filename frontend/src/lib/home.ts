@@ -354,9 +354,13 @@ export function describeApiError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 0) return error.message
     if (error.status === 401) return '登录已失效，请重新输入令牌。'
-    if (apiDetailCode(error) === 'daily_limit_reached') {
+    const code = apiDetailCode(error)
+    if (code === 'daily_limit_reached') {
       return '今日购买次数已达上限。'
     }
+    if (code === 'insufficient_embers') return '还差一枚余烬。'
+    if (code === 'zero_xp') return '当天没有记录，补不了。'
+    if (code === 'already_checked_in') return '当天已经打卡了。'
     if (error.status === 403) return '当前账号没有查看这些数据的权限。'
     if (error.status === 404) return '没有找到本周的联赛数据。'
     if (error.status >= 500) return '服务暂时不可用，请稍后重试。'

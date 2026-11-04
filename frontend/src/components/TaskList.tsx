@@ -6,6 +6,7 @@ import { TaskCard } from './TaskCard'
 import styles from './TaskList.module.css'
 
 interface TaskListProps {
+  embersBalance: number
   onOpenSettings: () => void
 }
 
@@ -14,7 +15,7 @@ interface ClaimedChest {
   title: string
 }
 
-export function TaskList({ onOpenSettings }: TaskListProps) {
+export function TaskList({ embersBalance, onOpenSettings }: TaskListProps) {
   const tasks = useTasks()
   const [claimed, setClaimed] = useState<ClaimedChest | null>(null)
   const items = tasks.data?.tasks ?? []
@@ -51,6 +52,7 @@ export function TaskList({ onOpenSettings }: TaskListProps) {
             <TaskCard
               key={task.id}
               task={task}
+              embersBalance={embersBalance}
               onClaimed={(amount, title) => setClaimed({ amount, title })}
             />
           ))}

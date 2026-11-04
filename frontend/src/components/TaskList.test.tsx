@@ -36,7 +36,7 @@ function makeTask(overrides: Partial<TaskItem> = {}): TaskItem {
   }
 }
 
-function renderList(onOpenSettings = vi.fn()) {
+function renderList(embersBalance = 1, onOpenSettings = vi.fn()) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { gcTime: 0, retry: false, refetchOnWindowFocus: false },
@@ -47,7 +47,10 @@ function renderList(onOpenSettings = vi.fn()) {
     onOpenSettings,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <TaskList onOpenSettings={onOpenSettings} />
+        <TaskList
+          embersBalance={embersBalance}
+          onOpenSettings={onOpenSettings}
+        />
       </QueryClientProvider>,
     ),
   }
@@ -193,7 +196,7 @@ describe('TaskList', () => {
     window.localStorage.setItem(TOKEN_KEY, 'test-token')
     vi.stubGlobal('fetch', fetchMock)
 
-    renderList()
+    renderList(1)
     const repair = await screen.findByRole('button', { name: '用余烬补' })
     await userEvent.click(repair)
 
@@ -216,6 +219,45 @@ describe('TaskList', () => {
     await waitFor(() =>
       expect(useUiStore.getState().toast?.message).toBe('补上了。'),
     )
+  })
+
+  it('disables repair at zero embers without sending a request', async () => {
+    const repairTask = makeTask({
+      id: 'ti_repair',
+      source: 'repair',
+      title: '补断联 · 10/29',
+      description: '当天只拿到 74 XP；用余烬补上。',
+      difficulty: 1,
+      chest_tier: 1,
+      starts_at: '2026-11-04T00:00:00+08:00',
+      ends_at: '2026-11-06T00:00:00+08:00',
+      missed_date: '2026-10-29',
+      progress: { current: 0, target: 1 },
+    })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/v1/me/tasks')) {
+        return response({
+          server_now: '2026-11-04T12:00:00+08:00',
+          tasks: [repairTask],
+        })
+      }
+      return response({ detail: 'not found' }, 404)
+    })
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderList(0)
+    const repair = await screen.findByRole('button', { name: '还差一枚余烬' })
+    expect(repair).toBeDisabled()
+    await userEvent.click(repair)
+
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).endsWith('/v1/me/repair'),
+      ),
+    ).toBe(false)
+    expect(screen.queryByRole('button', { name: '用余烬补' })).not.toBeInTheDocument()
   })
 
   it('does not offer repair for completed or expired repair tasks', async () => {
@@ -280,7 +322,7 @@ describe('TaskList', () => {
     )
 
     const onOpenSettings = vi.fn()
-    renderList(onOpenSettings)
+    renderList(1, onOpenSettings)
     await userEvent.click(screen.getByRole('button', { name: '任务设置' }))
     expect(onOpenSettings).toHaveBeenCalledTimes(1)
   })

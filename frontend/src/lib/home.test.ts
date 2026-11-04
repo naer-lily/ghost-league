@@ -190,5 +190,27 @@ describe('error copy', () => {
         }),
       ),
     ).toBe('今日购买次数已达上限。')
+    expect(
+      describeApiError(
+        new ApiError('repair', 422, {
+          detail: {
+            code: 'insufficient_embers',
+            message: 'an ember is required to repair',
+          },
+        }),
+      ),
+    ).toBe('还差一枚余烬。')
+    expect(
+      describeApiError(
+        new ApiError('repair', 422, { detail: { code: 'zero_xp' } }),
+      ),
+    ).toBe('当天没有记录，补不了。')
+    expect(
+      describeApiError(
+        new ApiError('repair', 422, {
+          detail: { code: 'already_checked_in' },
+        }),
+      ),
+    ).toBe('当天已经打卡了。')
   })
 })
