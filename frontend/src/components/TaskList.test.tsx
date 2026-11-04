@@ -145,17 +145,29 @@ describe('TaskList', () => {
       ),
     )
 
-    const chest = await screen.findByRole('button', {
-      name: '领取速写一张的宝箱',
-    })
+    const chest = await screen.findByRole('button', { name: '开宝箱' })
     await userEvent.click(chest)
 
-    const dialog = await screen.findByTestId('task-chest-dialog')
-    expect(within(dialog).getByTestId('task-chest-amount')).toHaveTextContent(
+    const dialog = await screen.findByTestId('chest-open-dialog')
+    expect(dialog).toHaveTextContent('速写一张')
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes('/chest'),
+      ),
+    ).toBe(false)
+
+    await userEvent.click(within(dialog).getByRole('button', { name: '开启' }))
+    expect(await within(dialog).findByTestId('chest-reward')).toHaveTextContent(
       '7 钻',
     )
+    expect(within(dialog).queryByTestId('chest-glow')).not.toBeInTheDocument()
     expect(await screen.findByTestId('task-claimed')).toHaveTextContent('7 钻')
     expect(screen.queryByText(/概率|机制|DSL/)).not.toBeInTheDocument()
+
+    await userEvent.click(within(dialog).getByRole('button', { name: '收下' }))
+    await waitFor(() =>
+      expect(screen.queryByTestId('chest-open-dialog')).not.toBeInTheDocument(),
+    )
   })
 
   it('claims a boost chest and shows the boost duration without a photo action', async () => {
@@ -214,11 +226,10 @@ describe('TaskList', () => {
       screen.queryByRole('button', { name: /拍照完成/ }),
     ).not.toBeInTheDocument()
 
-    await userEvent.click(
-      screen.getByRole('button', { name: '领取每日打卡的宝箱' }),
-    )
-    const dialog = await screen.findByTestId('task-chest-dialog')
-    expect(within(dialog).getByTestId('task-chest-amount')).toHaveTextContent(
+    await userEvent.click(screen.getByRole('button', { name: '开宝箱' }))
+    const dialog = await screen.findByTestId('chest-open-dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: '开启' }))
+    expect(await within(dialog).findByTestId('chest-reward')).toHaveTextContent(
       '经验宝 25 分钟',
     )
     await waitFor(() =>
@@ -289,10 +300,11 @@ describe('TaskList', () => {
 
     renderList()
     await userEvent.click(
-      await screen.findByRole('button', { name: '领取速写一张的宝箱' }),
+      await screen.findByRole('button', { name: '开宝箱' }),
     )
-    const dialog = await screen.findByTestId('task-chest-dialog')
-    expect(within(dialog).getByTestId('task-chest-amount')).toHaveTextContent(
+    const dialog = await screen.findByTestId('chest-open-dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: '开启' }))
+    expect(await within(dialog).findByTestId('chest-reward')).toHaveTextContent(
       '星星：北辰',
     )
     await waitFor(() =>
@@ -301,6 +313,141 @@ describe('TaskList', () => {
       ),
     )
     expect(screen.queryByText(/概率|池子|档位/)).not.toBeInTheDocument()
+  })
+
+  it('keeps the dialog open with the API error and does not show a reward', async () => {
+    let task = makeTask({
+      status: 'completed',
+      completed_at: '2026-11-04T12:00:00+08:00',
+      chest_status: 'available',
+    })
+    let failClaim = true
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/chest')) {
+        if (failClaim) return response({ detail: 'boom' }, 500)
+        task = {
+          ...task,
+          chest_status: 'claimed',
+          chest_amount: 7,
+          chest_reward_type: 'diamonds',
+        }
+        return response({
+          amount: 7,
+          balance: 1007,
+          duplicate: false,
+          reward_type: 'diamonds',
+          boost_minutes: null,
+          star: null,
+          diamond_boost: {
+            expires_at: null,
+            remaining_seconds: 0,
+            multiplier: 1,
+          },
+        })
+      }
+      if (url.endsWith('/v1/me/tasks')) {
+        return response({
+          server_now: '2026-11-04T12:00:00+08:00',
+          tasks: [task],
+        })
+      }
+      return response({ detail: 'not found' }, 404)
+    })
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderList()
+    await userEvent.click(
+      await screen.findByRole('button', { name: '开宝箱' }),
+    )
+    const dialog = await screen.findByTestId('chest-open-dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: '开启' }))
+
+    expect(
+      await within(dialog).findByTestId('chest-open-error'),
+    ).toHaveTextContent('服务暂时不可用，请稍后重试。')
+    expect(within(dialog).queryByTestId('chest-reward')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('task-claimed')).not.toBeInTheDocument()
+    expect(dialog).toBeInTheDocument()
+
+    failClaim = false
+    await userEvent.click(within(dialog).getByRole('button', { name: '开启' }))
+    expect(await within(dialog).findByTestId('chest-reward')).toHaveTextContent(
+      '7 钻',
+    )
+    expect(within(dialog).queryByTestId('chest-open-error')).not.toBeInTheDocument()
+  })
+
+  it('disables 开启 while claiming and ignores repeated clicks', async () => {
+    let task = makeTask({
+      status: 'completed',
+      completed_at: '2026-11-04T12:00:00+08:00',
+      chest_status: 'available',
+    })
+    let chestCalls = 0
+    let resolveClaim: (() => void) | null = null
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/chest')) {
+        chestCalls += 1
+        return new Promise<Response>((resolve) => {
+          resolveClaim = () => {
+            task = {
+              ...task,
+              chest_status: 'claimed',
+              chest_amount: 9,
+              chest_reward_type: 'diamonds',
+            }
+            resolve(
+              response({
+                amount: 9,
+                balance: 1009,
+                duplicate: false,
+                reward_type: 'diamonds',
+                boost_minutes: null,
+                star: null,
+                diamond_boost: {
+                  expires_at: null,
+                  remaining_seconds: 0,
+                  multiplier: 1,
+                },
+              }),
+            )
+          }
+        })
+      }
+      if (url.endsWith('/v1/me/tasks')) {
+        return response({
+          server_now: '2026-11-04T12:00:00+08:00',
+          tasks: [task],
+        })
+      }
+      return response({ detail: 'not found' }, 404)
+    })
+    window.localStorage.setItem(TOKEN_KEY, 'test-token')
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderList()
+    await userEvent.click(
+      await screen.findByRole('button', { name: '开宝箱' }),
+    )
+    const dialog = await screen.findByTestId('chest-open-dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: '开启' }))
+
+    const pending = await within(dialog).findByRole('button', {
+      name: '开启中…',
+    })
+    expect(pending).toBeDisabled()
+    expect(chestCalls).toBe(1)
+    await userEvent.click(pending)
+    expect(chestCalls).toBe(1)
+
+    await act(async () => resolveClaim?.())
+    expect(await within(dialog).findByTestId('chest-reward')).toHaveTextContent(
+      '9 钻',
+    )
+    expect(chestCalls).toBe(1)
   })
 
   it('shows 处理中… while compressing and uploads the compressed file', async () => {
@@ -366,7 +513,7 @@ describe('TaskList', () => {
 
     await waitFor(() => expect(uploaded).toBe(compressed))
     expect(
-      await screen.findByRole('button', { name: '领取速写一张的宝箱' }),
+      await screen.findByRole('button', { name: '开宝箱' }),
     ).toBeInTheDocument()
   })
 
@@ -473,7 +620,7 @@ describe('TaskList', () => {
     expect(body.idempotency_key.length).toBeGreaterThan(0)
 
     expect(
-      await screen.findByRole('button', { name: '领取补断联 · 10/29的宝箱' }),
+      await screen.findByRole('button', { name: '开宝箱' }),
     ).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '用余烬补' })).not.toBeInTheDocument()
     await waitFor(() =>
@@ -567,7 +714,7 @@ describe('TaskList', () => {
     expect(await screen.findByText('补断联 · 10/29')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '用余烬补' })).not.toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: '领取补断联 · 10/29的宝箱' }),
+      screen.getByRole('button', { name: '开宝箱' }),
     ).toBeInTheDocument()
   })
 

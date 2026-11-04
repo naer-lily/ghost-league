@@ -1,32 +1,15 @@
-import * as Dialog from '@radix-ui/react-dialog'
-import { Gift, Settings, X } from 'lucide-react'
+import { Settings } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTasks } from '../api/queries'
 import type { TaskItem } from '../api/types'
 import { useServerNow } from '../lib/useServerNow'
-import { TaskCard, type ClaimedTaskChest } from './TaskCard'
+import { ChestOpenDialog } from './ChestOpenDialog'
+import { TaskCard } from './TaskCard'
 import styles from './TaskList.module.css'
 
 interface TaskListProps {
   embersBalance: number
   onOpenSettings: () => void
-}
-
-interface ClaimedChest extends ClaimedTaskChest {
-  title: string
-}
-
-function claimedRewardText(claimed: ClaimedChest | null): string {
-  if (!claimed) return ''
-  if (claimed.rewardType === 'star') {
-    return claimed.star ? `星星：${claimed.star.name}` : '星星'
-  }
-  if (claimed.rewardType === 'boost') {
-    return claimed.boostMinutes
-      ? `经验宝 ${claimed.boostMinutes} 分钟`
-      : '经验宝'
-  }
-  return `${claimed.amount} 钻`
 }
 
 function displayBucket(task: TaskItem): number {
@@ -55,7 +38,7 @@ export function sortTasksForDisplay(tasks: readonly TaskItem[]): TaskItem[] {
 export function TaskList({ embersBalance, onOpenSettings }: TaskListProps) {
   const tasks = useTasks()
   const now = useServerNow(tasks.data?.server_now, Boolean(tasks.data))
-  const [claimed, setClaimed] = useState<ClaimedChest | null>(null)
+  const [openedTask, setOpenedTask] = useState<TaskItem | null>(null)
   const items = useMemo(() => tasks.data?.tasks ?? [], [tasks.data])
   const ordered = useMemo(() => sortTasksForDisplay(items), [items])
 
@@ -93,46 +76,19 @@ export function TaskList({ embersBalance, onOpenSettings }: TaskListProps) {
               task={task}
               embersBalance={embersBalance}
               now={now}
-              onClaimed={(reward, title) =>
-                setClaimed({ ...reward, title })
-              }
+              onOpenChest={setOpenedTask}
             />
           ))}
         </div>
       )}
 
-      <Dialog.Root
-        open={claimed !== null}
-        onOpenChange={(open) => {
-          if (!open) setClaimed(null)
-        }}
-      >
-        <Dialog.Portal>
-          <Dialog.Overlay className={styles.overlay} />
-          <Dialog.Content className={styles.dialog} data-testid="task-chest-dialog">
-            <Dialog.Title className={styles.dialogTitle}>宝箱</Dialog.Title>
-            <Dialog.Description className="visually-hidden">
-              {claimed?.title ?? '任务'}的宝箱奖励
-            </Dialog.Description>
-            <span className={styles.dialogIcon} aria-hidden="true">
-              <Gift size={30} />
-            </span>
-            <p className={styles.dialogAmount} data-testid="task-chest-amount">
-              {claimedRewardText(claimed)}
-            </p>
-            <Dialog.Close asChild>
-              <button type="button" className="button button--primary button--full">
-                收下
-              </button>
-            </Dialog.Close>
-            <Dialog.Close asChild>
-              <button type="button" className={styles.close} aria-label="关闭宝箱">
-                <X size={18} aria-hidden="true" />
-              </button>
-            </Dialog.Close>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+      {openedTask ? (
+        <ChestOpenDialog
+          key={openedTask.id}
+          task={openedTask}
+          onClose={() => setOpenedTask(null)}
+        />
+      ) : null}
     </section>
   )
 }

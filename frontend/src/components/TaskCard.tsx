@@ -1,29 +1,18 @@
 import { Camera, Check, Flame, Gift } from 'lucide-react'
 import { useRef, useState, type ChangeEvent } from 'react'
-import {
-  useClaimTaskChest,
-  useCompleteTask,
-  useRepairTask,
-} from '../api/queries'
-import type { ChestRewardType, Star, TaskItem } from '../api/types'
+import { useCompleteTask, useRepairTask } from '../api/queries'
+import type { TaskItem } from '../api/types'
 import { describeApiError } from '../lib/home'
 import { compressTaskProof } from '../lib/image'
 import { formatTaskCountdown } from '../lib/time'
 import { useUiStore } from '../store/useUiStore'
 import styles from './TaskCard.module.css'
 
-export interface ClaimedTaskChest {
-  rewardType: ChestRewardType
-  amount: number
-  boostMinutes: number | null
-  star: Star | null
-}
-
 interface TaskCardProps {
   task: TaskItem
   embersBalance: number
   now: Date
-  onClaimed: (reward: ClaimedTaskChest, title: string) => void
+  onOpenChest: (task: TaskItem) => void
 }
 
 function chestRewardLabel(task: TaskItem): string {
@@ -43,13 +32,12 @@ export function TaskCard({
   task,
   embersBalance,
   now,
-  onClaimed,
+  onOpenChest,
 }: TaskCardProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const uploadingRef = useRef(false)
   const [preparing, setPreparing] = useState(false)
   const completeTask = useCompleteTask()
-  const claimChest = useClaimTaskChest()
   const repairTask = useRepairTask()
   const notify = useUiStore((state) => state.notify)
 
@@ -89,22 +77,6 @@ export function TaskCard({
       uploadingRef.current = false
       setPreparing(false)
     }
-  }
-
-  function onClaim() {
-    claimChest.mutate(task.id, {
-      onSuccess: (result) =>
-        onClaimed(
-          {
-            rewardType: result.reward_type,
-            amount: result.amount,
-            boostMinutes: result.boost_minutes,
-            star: result.star,
-          },
-          task.title,
-        ),
-      onError: (error) => notify(describeApiError(error), 'error'),
-    })
   }
 
   function onRepair() {
@@ -179,12 +151,10 @@ export function TaskCard({
           <button
             type="button"
             className={styles.chest}
-            onClick={onClaim}
-            disabled={claimChest.isPending}
-            aria-label={`领取${task.title}的宝箱`}
+            onClick={() => onOpenChest(task)}
           >
             <Gift size={17} aria-hidden="true" />
-            {claimChest.isPending ? '领取中…' : '宝箱'}
+            开宝箱
           </button>
         ) : chestClaimed ? (
           <span className={styles.claimed} data-testid="task-claimed">

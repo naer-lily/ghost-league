@@ -132,6 +132,11 @@ npm run test:e2e      # Playwright（需要真实 token 与 running API）
 - **任务拍照**：手动任务选图后先在浏览器里把可解码图片压到 ≤1MB（`lib/image.ts`），
   压缩期间按钮显示“处理中…”，随后上传并显示“上传中…”。HEIC 等浏览器解不了的文件
   原样上传，由服务端转换并兜底压到 ≤1MB。
+- **任务宝箱**：完成后的“开宝箱”只打开 `ChestOpenDialog`，弹层内点“开启”才调用
+  `POST /v1/me/tasks/{id}/chest`。请求期间按钮禁用、宝箱抖动；成功后箱盖打开、
+  光晕扩散、奖励卡显示服务端返回的真实奖励（钻石 / 经验宝 / 星星），失败显示
+  `describeApiError` 并保留弹层重试。`prefers-reduced-motion` 下跳过抖动和光晕，
+  直接淡入结果；不播放音效。
 - **周注/日注 dialog**：目标差值只从服务端 `bet_options[tab].target_options` 渲染，
   显示 `+margin XP` 与该档赔率；自付钻石用数字输入 + `0–500` 滑杆，总本金为
   `free_stake + paid_stake`，总返为 `round(stake × 服务端赔率)`。自付 0 合法，默认只

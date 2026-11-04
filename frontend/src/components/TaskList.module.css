@@ -69,103 +69,11 @@
   animation: shimmer 1.4s ease-in-out infinite;
 }
 
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 240;
-  background: rgba(4, 10, 13, 0.72);
-  backdrop-filter: blur(5px);
-  animation: overlayIn 0.16s ease-out;
-}
-
-.dialog {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  z-index: 250;
-  display: grid;
-  justify-items: center;
-  width: min(320px, calc(100vw - 36px));
-  padding: 22px 20px 18px;
-  border: 2px solid rgba(255, 206, 92, 0.5);
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at 50% 0%, rgba(255, 206, 92, 0.18), transparent 60%),
-    var(--surface);
-  box-shadow: var(--shadow-float);
-  transform: translate(-50%, -50%);
-  animation: contentIn 0.2s var(--ease-spring);
-}
-
-.dialogTitle {
-  color: var(--muted);
-  font-size: 0.7rem;
-  font-weight: 900;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.dialogIcon {
-  display: grid;
-  place-items: center;
-  width: 64px;
-  height: 64px;
-  margin: 14px 0 10px;
-  border-radius: 20px;
-  background: rgba(255, 206, 92, 0.14);
-  color: #ffd76a;
-}
-
-.dialogAmount {
-  margin-bottom: 16px;
-  color: #ffd76a;
-  font-size: 1.45rem;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-}
-
-.close {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  color: var(--muted);
-}
-
-.close:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
-}
-
 @keyframes shimmer {
   from {
     background-position: 140% 0;
   }
   to {
     background-position: -60% 0;
-  }
-}
-
-@keyframes overlayIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes contentIn {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -46%) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
   }
 }

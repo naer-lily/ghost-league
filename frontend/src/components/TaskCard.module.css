@@ -78,7 +78,6 @@
   border: 1px solid rgba(255, 206, 92, 0.5);
   background: rgba(255, 206, 92, 0.14);
   color: #ffd76a;
-  animation: chestPulse 2.4s ease-in-out infinite;
 }
 
 .action:disabled,
@@ -107,16 +106,6 @@
   font-size: 0.7rem;
   font-weight: 800;
   white-space: nowrap;
-}
-
-@keyframes chestPulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 rgba(255, 206, 92, 0);
-  }
-  50% {
-    box-shadow: 0 0 16px rgba(255, 206, 92, 0.28);
-  }
 }
 
 @media (max-width: 420px) {
