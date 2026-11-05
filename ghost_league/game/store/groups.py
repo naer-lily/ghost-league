@@ -255,9 +255,15 @@ class GroupsMixin:
             candidates: dict[str, dict[str, Any]] = {}
             for player in (*local_humans, *legacy_ai, *channel_players):
                 candidates[str(player["id"])] = player
+            local_human_ids = {str(player["id"]) for player in local_humans}
             humans = sorted(
                 (player for player in candidates.values() if player["kind"] == "human"),
-                key=lambda player: str(player["id"]),
+                # Local account humans occupy full groups first; Channel
+                # players are ordinary contestants and fill the remainder.
+                key=lambda player: (
+                    0 if str(player["id"]) in local_human_ids else 1,
+                    str(player["id"]),
+                ),
             )
             ai_players = sorted(
                 (player for player in candidates.values() if player["kind"] == "ai"),
@@ -297,7 +303,7 @@ class GroupsMixin:
             # AI fill each group to its pre-computed balanced size.
             desired_by_tier: dict[str, list[list[str]]] = {}
             for tier in TIERS:
-                tier_humans = sorted(humans_by_tier.get(tier, []))
+                tier_humans = humans_by_tier.get(tier, [])
                 tier_ai = sorted(
                     ai_by_tier.get(tier, []),
                     key=lambda player_id: _group_order_key(

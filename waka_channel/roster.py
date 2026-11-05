@@ -13,14 +13,11 @@ import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 from ghost_league.source.normalize import normalize_seconds
 
 from .identity import player_ref
-
-KIND: Final = "ai"
-
 
 @dataclass(frozen=True, slots=True)
 class SourceRow:
@@ -33,10 +30,6 @@ class SourceRow:
     effective_seconds: int
     display_name: str | None = None
     avatar_url: str | None = None
-
-    @property
-    def kind(self) -> str:
-        return KIND
 
     @property
     def profile(self) -> dict[str, str]:
@@ -142,7 +135,7 @@ def rows_from_cache(cache: Any) -> list[SourceRow]:
 
 
 def roster_from_rows(rows: Iterable[SourceRow]) -> list[dict[str, Any]]:
-    """Build the exact Ghost roster manifest: only ref, kind and profile."""
+    """Build the exact Ghost roster manifest: only ref and profile."""
 
     players: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -153,7 +146,6 @@ def roster_from_rows(rows: Iterable[SourceRow]) -> list[dict[str, Any]]:
         players.append(
             {
                 "player_ref": row.player_ref,
-                "kind": KIND,
                 "profile": row.profile,
             }
         )
@@ -179,7 +171,6 @@ def effective_targets(rows: Iterable[SourceRow]) -> dict[str, int]:
 
 
 __all__ = [
-    "KIND",
     "SourceRow",
     "anonymous_profile",
     "build_roster",

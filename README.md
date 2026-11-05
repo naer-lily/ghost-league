@@ -6,7 +6,7 @@ Ghost 负责计分、分组、打卡、余烬补签、周结算和 PWA 展示。
 
 - **Source**：WakaTime、Duolingo、Krita 等外部活动来源，不属于本仓库。
 - **Channel**：每个来源的适配层，负责拉取、归一化、按小时投影、维护 cursor 和重试。
-- **Ghost**：通用联赛引擎，只接收匿名 `player_ref`、`kind`、展示 profile 和增量。
+- **Ghost**：通用联赛引擎，只接收匿名 `player_ref`、展示 profile 和增量。
 
 ```text
 Source (WakaTime / Duolingo / Krita / ...)
@@ -18,8 +18,9 @@ Channel (waka-channel / duolingo-channel / krita-channel / ...)
 Ghost (SQLite + FastAPI + PWA)
 ```
 
-Ghost 不 import Channel，不调用 Source，也不在业务逻辑里判断 provider。`kind` 只用于
-身份投影和审计，不参与计分、分组或难度；公开 API 和 PWA 不返回 `is_ai` / `kind`。
+Ghost 不 import Channel，不调用 Source，也不在业务逻辑里判断 provider。Ghost 的
+Channel 边界没有 AI 标识：所有 Channel player 都按普通参赛者创建/刷新，AI 只存在于
+Channel 自己的状态里。公开 API 和 PWA 不返回 `is_ai` / `kind`。
 
 ## 快速开始
 
@@ -58,8 +59,6 @@ WakaChannel 是独立于 Ghost 的接入包。它读取本地榜单缓存，生�
 ```bash
 export GHOST_LEAGUE_BASE_URL=http://127.0.0.1:8095
 export GHOST_LEAGUE_CHANNEL_TOKEN="<channel-token>"
-# live 关闭新建 kind='ai' Channel 映射；测试/dev 默认 true
-export GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS=0
 
 # 可选：刷新公开榜缓存（只写 data/cache/，不写游戏库）
 python3 scripts/source_fetch.py --out data/cache/cn-978.json --country CN
@@ -72,10 +71,9 @@ python3 -m waka_channel.cli tick
 ```
 
 Channel token 在 API 进程里由 `GHOST_LEAGUE_CHANNEL_TOKEN` 配置，不能使用普通账号
-token。`GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS`（默认 `true`，live 为 `0`；也可用
-`create_app(allow_new_ai_channel_players=...)`）关闭新建 `kind='ai'` 映射：roster 在
-任何写入前返回 `422` `new_ai_channel_player_disabled`，已有映射和新 `kind='human'`
-映射不受影响。部署模板把 Channel token 放在 `/etc/ghost-league/api.env`（API）和
+token。Channel roster 只发送 `player_ref` 和 `profile`，Ghost 一律创建/刷新普通
+player；旧 `kind` 字段会被当作未知字段拒绝。Waka 仍是 Channel，其排行榜玩家是普通
+参赛者。部署模板把 Channel token 放在 `/etc/ghost-league/api.env`（API）和
 `/etc/ghost-league/web.env`（PWA）这类 0600 的 EnvironmentFile；安装说明见
 [`deploy/systemd/README.md`](deploy/systemd/README.md)。
 
@@ -100,8 +98,8 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
 ## 关键规则
 
 - **分组**：每组最多 15 人。先按 `ceil(N/15)` 定组数，再均分；不足 15 人时允许
-  14/15 人混合小组，但不会创建 1 人组（至少 2 人）。真人优先进入满组；AI 在同一
-  tier 内按周哈希换位，跨周不会固定同一批对手。
+  14/15 人混合小组，但不会创建 1 人组（至少 2 人）。本地真人优先进入满组；
+  Channel player 在同一 tier 内按周哈希换位，跨周不会固定同一批对手。
 - **升降级**：每个组独立结算，不按整个 tier 汇总。每组配额为
   `max(1, round_half_up(group_size * 0.2))`，组内前 N 升、后 N 降。
 - **段位**：Bronze 不降段，Diamond 不升段；段位顺序为 Bronze → Silver → Gold →
@@ -110,15 +108,14 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
 - **余烬补签**：已完成自然日 D 结束后 7 天内可补（D-1 到 D-7）；每次消耗 1 枚余烬，
   只恢复打卡/连胜与历史标记，不增加周 XP、不改变名次或升降级。
 - **XP**：`XP = floor(seconds / 6)`；周榜按 XP 排名。
-- **AI 与真人同规则**：计分、打卡、分组、升降级、称号和边框完全一致；公开响应和
-  前端不暴露 AI 身份。
+- **所有参赛者同规则**：计分、打卡、分组、升降级、称号和边框完全一致；公开响应和
+  前端不暴露 AI 身份。AI 只存在于 Channel 状态里，不是 Ghost 的玩家类别。
 - **Legacy AI 迁移已完成**：2026-11-05 已把线上 1074 个 legacy `kind='ai'` 玩家原地
   adoption 为普通账号；当前 0 AI / 1076 human，1074 条 Channel 映射均为 `human`。
-  旧 Channel ingest、`kind` 分支和 human-only 门仍为 Waka 保留；新建 `kind='ai'`
-  映射已被 live switch `GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS=0` 关闭（测试/dev
-  默认 on），legacy code path 保留供测试。live provisioning 路由已配置 token 并启用
-  （token 只在服务 env 与 `ai_channel/config.json`，均 0600、untracked，不打印、
-  不提交），`ai_channel` 已有 1074 个 adopted 账号，但还没有常驻 scheduler。
+  旧 Channel ingest 仍为 Waka 保留，但 roster 现在只创建/刷新普通 player，不接受
+  AI 标识；`players.kind` 仅作为内部 legacy 列保留。live provisioning 路由已配置
+  token 并启用（token 只在服务 env 与 `ai_channel/config.json`，均 0600、untracked，
+  不打印、不提交），`ai_channel` 已有 1074 个 adopted 账号，但还没有常驻 scheduler。
 
 ## API 与 PWA
 

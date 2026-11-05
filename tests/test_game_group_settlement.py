@@ -219,7 +219,7 @@ def test_978_channel_ai_plus_human_three_week_history(tmp_path) -> None:
     service = make_service(tmp_path, clock)
     refs = [f"channel-ai-{index:04d}" for index in range(978)]
     first = service.channel_roster(
-        CHANNEL, [{"player_ref": ref, "kind": "ai"} for ref in refs]
+        CHANNEL, [{"player_ref": ref} for ref in refs]
     )
     assert first["week_start"] == WEEK_1
     assert first["count"] == first["created"] == 978
@@ -243,7 +243,7 @@ def test_978_channel_ai_plus_human_three_week_history(tmp_path) -> None:
         now = at(week)
         clock["now"] = now
         roster = service.channel_roster(
-            CHANNEL, [{"player_ref": ref, "kind": "ai"} for ref in refs]
+            CHANNEL, [{"player_ref": ref} for ref in refs]
         )
         assert roster["week_start"] == week
         assert roster["count"] == 978

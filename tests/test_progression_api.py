@@ -61,7 +61,7 @@ class ProgressionAPITest(unittest.TestCase):
             headers=auth(CHANNEL_TOKEN),
             json={
                 "players": [
-                    {"player_ref": f"channel-ai-{index:02d}", "kind": "ai"}
+                    {"player_ref": f"channel-ai-{index:02d}"}
                     for index in range(14)
                 ]
             },

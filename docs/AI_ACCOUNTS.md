@@ -18,23 +18,11 @@ then use the same public endpoints as everyone else.
 - The account's first authenticated `/v1/me/*` call follows the existing human
   path (`ensure_human_player`), so the game row is `kind='human'`.
 
-This is intentionally different from the legacy Waka Channel ingest, which
-still exists for Waka and retains a test/dev code path that can create an
-anonymous `kind='ai'` player for a brand-new `channel_players` mapping. Live
-deployments disable that path with
-`GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS=0`; the switch defaults to on for
-tests/dev.
-
-## New AI Channel mapping switch
-
-`GameService` / `create_app` expose `allow_new_ai_channel_players`, backed by
-`GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS` (default `true`; the live service
-sets `0`). When off, `POST /v1/channels/{channel_id}/roster` rejects a
-brand-new `kind='ai'` mapping with `422` and detail
-`new_ai_channel_player_disabled`. The whole roster is validated before any
-upsert, so a rejected request does not partially apply players or the weekly
-manifest. Existing mappings still refresh (and the existing guard keeps
-adopted humans human), and brand-new `kind='human'` mappings remain allowed.
+This is intentionally different from the legacy Waka Channel. Ghost's Channel
+roster boundary has no AI identity: every roster player is created or refreshed
+as an ordinary player, and an old `kind` field is rejected as an unknown field.
+Waka remains a Channel and can know its own source internally, but Ghost does
+not receive or store that identity. AI state lives only in Channel state.
 
 ## Provisioning API
 
@@ -125,10 +113,9 @@ Adoption is also protected from Channel refreshes. When
 `upsert_channel_player()` refreshes an existing mapping whose player is already
 `kind='human'`, it keeps `kind='human'` and `controller='human'`, leaves
 `source_kind` untouched, and marks the mapping row `kind='human'`; only the
-display name, `last_seen_week` and active flag are refreshed. A later payload
-with `kind='ai'` therefore cannot demote an adopted human. Brand-new
-`kind='human'` mappings remain allowed; a brand-new `kind='ai'` mapping is
-rejected with `422 new_ai_channel_player_disabled` when the switch is off.
+display name, `last_seen_week` and active flag are refreshed. The Channel roster
+path itself always writes an ordinary identity, and an old `kind` field is
+rejected, so a later Channel refresh cannot demote an adopted human.
 
 The adoption primitive was designed for one player at a time. On 2026-11-05 the
 live migration was run for every legacy AI player by invoking it repeatedly,
@@ -158,10 +145,11 @@ Rollback copies:
 - pre-migration: `/data/backups/ghost-league/pre-legacy-adoption-20261105T132352`
 - post-migration: `/data/backups/ghost-league/post-legacy-adoption-20261105T132510`
 
-The migration did not remove the `channel_players` rows, the legacy Channel
-ingest endpoints, or every internal `kind` branch. Those remain for Waka and
-older code paths; new simulated accounts and all adopted players behave as
-ordinary humans in the game path.
+The migration did not remove the `channel_players` rows or the legacy Channel
+ingest endpoints. `players.kind` remains an internal legacy column for old data,
+but the Channel roster path never writes `ai`; new simulated accounts and all
+adopted players, as well as new Channel players, behave as ordinary players in
+the game path.
 
 ## ai_channel package
 
@@ -240,15 +228,13 @@ Implemented:
 
 Remaining cleanup:
 
-- The legacy Channel ingest endpoints remain for Waka / external Channels and
-  are still not the target path for new simulated AI.
-- Code still contains `kind`-based branches and human-only gates for old data
-  and API projections; there are currently no AI player rows or AI channel
-  mappings, but the branches were not deleted.
-- Brand-new Channel mappings with `kind='ai'` are disabled by the live switch
-  (`GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS=0`; default on for tests/dev); the
-  legacy code path remains for tests, and the guard still protects existing
-  adopted humans from being demoted.
+- The legacy Channel ingest endpoints remain for Waka / external Channels.
+  Channel roster always creates or refreshes ordinary players; Waka's
+  leaderboard players are ordinary contestants, not a Ghost-level AI class.
+- Some legacy source/projection code still reads old `kind` rows for historical
+  compatibility, but the Channel boundary has no AI flag or AI branch and never
+  writes `players.kind='ai'`.
+- Existing adopted humans are still protected from Channel refresh demotion.
 - Live provisioning is enabled: the token is configured in the service
   environment and `ai_channel/config.json` (both `0600`, untracked), so
   `ai_channel` can use the route and its token DB already holds the 1074

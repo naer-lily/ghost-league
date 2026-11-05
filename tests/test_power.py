@@ -322,7 +322,7 @@ def test_status_and_standings_return_power_fields(tmp_path: Path) -> None:
             headers=auth(CHANNEL_TOKEN),
             json={
                 "players": [
-                    {"player_ref": f"ai-{index:02d}", "kind": "ai"}
+                    {"player_ref": f"ai-{index:02d}"}
                     for index in range(14)
                 ]
             },

@@ -19,9 +19,9 @@ OTHER_CHANNEL = "fake-channel-2"
 NOW = datetime(2026, 10, 26, 10, 0, 0, tzinfo=TZ)
 WEEK_START = "2026-10-26"
 PLAYERS = [
-    {"player_ref": "fake-player-a", "kind": "ai"},
-    {"player_ref": "fake-player-b", "kind": "ai"},
-    {"player_ref": "fake-player-c", "kind": "human"},
+    {"player_ref": "fake-player-a"},
+    {"player_ref": "fake-player-b"},
+    {"player_ref": "fake-player-c"},
 ]
 
 
@@ -161,87 +161,56 @@ class TestChannelIngest:
             response = client.post(
                 f"/v1/channels/{CHANNEL}/roster",
                 headers=auth(),
-                json=[{"player_ref": "array-ref", "kind": "ai"}],
+                json=[{"player_ref": "array-ref"}],
             )
             assert response.status_code == 200, response.text
             assert response.json()["count"] == 1
             assert response.json()["players"][0]["player_ref"] == "array-ref"
 
-    def test_ai_channel_player_switch_defaults_on(self, monkeypatch) -> None:
-        monkeypatch.delenv(
-            "GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS", raising=False
-        )
-        app = self.app()
-        assert app.state.game_service.allow_new_ai_channel_players is True
-        with TestClient(app) as client:
-            response = self.post_roster(
-                client, [{"player_ref": "default-ai", "kind": "ai"}]
-            )
-            assert response.status_code == 200, response.text
-
-    def test_new_ai_channel_player_is_rejected_when_switch_is_off(self) -> None:
-        with TestClient(self.app(allow_new_ai_channel_players=False)) as client:
-            response = self.post_roster(
-                client, [{"player_ref": "blocked-ai", "kind": "ai"}]
-            )
-            assert response.status_code == 422, response.text
-            assert response.json()["detail"] == "new_ai_channel_player_disabled"
-
-        assert self.scalar(
-            "SELECT COUNT(*) FROM channel_players WHERE player_ref = 'blocked-ai'"
-        ) == 0
-        assert self.scalar("SELECT COUNT(*) FROM players WHERE kind = 'ai'") == 0
-
-    def test_switch_off_rejects_whole_roster_before_creating_new_ai(self) -> None:
+    def test_new_channel_player_is_ordinary(self) -> None:
         with self.client() as client:
-            seeded = self.post_roster(client, [PLAYERS[2]])
-            assert seeded.status_code == 200, seeded.text
-            human_id = seeded.json()["players"][0]["player_id"]
-
-        with TestClient(self.app(allow_new_ai_channel_players=False)) as client:
             response = self.post_roster(
-                client,
-                [PLAYERS[2], {"player_ref": "new-ai", "kind": "ai"}],
-            )
-            assert response.status_code == 422, response.text
-            assert response.json()["detail"] == "new_ai_channel_player_disabled"
-
-        assert self.scalar(
-            "SELECT COUNT(*) FROM channel_players WHERE player_ref = 'new-ai'"
-        ) == 0
-        assert self.scalar(
-            "SELECT COUNT(*) FROM channel_players WHERE player_id = ?",
-            (human_id,),
-        ) == 1
-
-    def test_new_human_channel_player_remains_allowed_when_switch_is_off(self) -> None:
-        with TestClient(self.app(allow_new_ai_channel_players=False)) as client:
-            response = self.post_roster(
-                client, [{"player_ref": "new-human", "kind": "human"}]
+                client, [{"player_ref": "ordinary-new"}]
             )
             assert response.status_code == 200, response.text
             assert response.json()["created"] == 1
             player_id = response.json()["players"][0]["player_id"]
+            assert "kind" not in response.json()["players"][0]
 
         with sqlite3.connect(self.game_db_path) as connection:
             row = connection.execute(
                 "SELECT kind, controller FROM players WHERE id = ?", (player_id,)
             ).fetchone()
+            mapping_kind = connection.execute(
+                "SELECT kind FROM channel_players WHERE player_id = ?",
+                (player_id,),
+            ).fetchone()[0]
         assert row == ("human", "human")
+        assert mapping_kind == "human"
 
-    def test_switch_off_still_refreshes_existing_human_as_human(self) -> None:
+    def test_legacy_kind_field_is_rejected_before_any_write(self) -> None:
+        with self.client() as client:
+            response = self.post_roster(
+                client, [{"player_ref": "legacy-ai", "kind": "ai"}]
+            )
+            assert response.status_code == 422, response.text
+
+        assert self.scalar(
+            "SELECT COUNT(*) FROM channel_players WHERE player_ref = 'legacy-ai'"
+        ) == 0
+        assert self.scalar("SELECT COUNT(*) FROM players WHERE kind = 'ai'") == 0
+
+    def test_existing_human_channel_player_stays_human_on_refresh(self) -> None:
         with self.client() as client:
             seeded = self.post_roster(client, [PLAYERS[2]])
             assert seeded.status_code == 200, seeded.text
             player_id = seeded.json()["players"][0]["player_id"]
 
-        with TestClient(self.app(allow_new_ai_channel_players=False)) as client:
             response = self.post_roster(
                 client,
                 [
                     {
                         **PLAYERS[2],
-                        "kind": "ai",
                         "profile": {"display_name": "Still Human"},
                     }
                 ],
@@ -260,32 +229,8 @@ class TestChannelIngest:
         assert player == ("human", "human", "Still Human")
         assert mapping_kind == "human"
 
-    def test_create_app_reads_ai_channel_switch_from_env(
-        self, monkeypatch
-    ) -> None:
-        monkeypatch.setenv("GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS", "0")
-        app = self.app()
-        assert app.state.game_service.allow_new_ai_channel_players is False
-        with TestClient(app) as client:
-            response = self.post_roster(
-                client, [{"player_ref": "env-blocked-ai", "kind": "ai"}]
-            )
-            assert response.status_code == 422, response.text
-            assert response.json()["detail"] == "new_ai_channel_player_disabled"
-            human = self.post_roster(
-                client, [{"player_ref": "env-human", "kind": "human"}]
-            )
-            assert human.status_code == 200, human.text
-
-    def test_create_app_parameter_overrides_ai_channel_switch_env(
-        self, monkeypatch
-    ) -> None:
-        monkeypatch.setenv("GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS", "0")
-        app = self.app(allow_new_ai_channel_players=True)
-        assert app.state.game_service.allow_new_ai_channel_players is True
-
     def test_same_player_ref_in_different_channels_does_not_conflict(self) -> None:
-        player = {"player_ref": "shared-ref", "kind": "ai"}
+        player = {"player_ref": "shared-ref"}
         with self.client() as client:
             one = self.post_roster(client, [player], channel="channel-a")
             two = self.post_roster(client, [player], channel="channel-b")
@@ -351,7 +296,7 @@ class TestChannelIngest:
             assert missing.status_code == 404, missing.text
 
             assert self.post_roster(
-                client, [{"player_ref": "known-elsewhere", "kind": "ai"}],
+                client, [{"player_ref": "known-elsewhere"}],
                 channel=OTHER_CHANNEL,
             ).status_code == 200
             wrong_channel = self.post_increment(
@@ -417,7 +362,6 @@ class TestChannelIngest:
                 [
                     {
                         "player_ref": "profile-ref",
-                        "kind": "ai",
                         "profile": {
                             "display_name": "Snapshot Name",
                             "avatar_url": "/snapshot.webp",
@@ -444,7 +388,6 @@ class TestChannelIngest:
                 [
                     {
                         "player_ref": "profile-ref",
-                        "kind": "ai",
                         "profile": {"display_name": "Renamed Snapshot"},
                     }
                 ],
@@ -479,7 +422,6 @@ class TestChannelIngest:
                 [
                     {
                         "player_ref": "avatar-ai",
-                        "kind": "ai",
                         "profile": {
                             "display_name": "Waka Public",
                             "avatar_url": avatar_url,
@@ -539,14 +481,14 @@ class TestChannelIngest:
                 headers=auth(),
                 json={
                     "provider": "forbidden",
-                    "players": [{"player_ref": "bad-ref", "kind": "ai"}],
+                    "players": [{"player_ref": "bad-ref"}],
                 },
             )
             assert provider_roster.status_code == 422, provider_roster.text
 
             raw_player = self.post_roster(
                 client,
-                [{"player_ref": "bad-ref", "kind": "ai", "raw_seconds": 123}],
+                [{"player_ref": "bad-ref", "raw_seconds": 123}],
             )
             assert raw_player.status_code == 422, raw_player.text
 
@@ -581,7 +523,7 @@ class TestChannelIngest:
             now_fn=lambda: NOW,
         )
         roster = service.channel_roster(
-            "standalone-channel", [{"player_ref": "standalone-ref", "kind": "ai"}]
+            "standalone-channel", [{"player_ref": "standalone-ref"}]
         )
         assert roster["created"] == 1
         increment = service.channel_increment(

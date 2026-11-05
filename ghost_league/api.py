@@ -56,7 +56,6 @@ from .game.rules import (
     DuplicateIdempotencyKey,
     GameError,
     InsufficientDiamonds,
-    NewAIChannelPlayerDisabled,
     PlayerNotFound,
     RepairRejected,
     ShopCooldown,
@@ -115,15 +114,6 @@ MAX_TASK_PROOF_UPLOAD_BYTES = 8 * 1024 * 1024
 SAFE_USER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 
 
-def _env_flag(name: str, default: bool) -> bool:
-    """Read a boolean environment switch; blank or unset keeps ``default``."""
-
-    raw = os.environ.get(name)
-    if raw is None or not raw.strip():
-        return default
-    return raw.strip().lower() not in {"0", "false", "no", "off"}
-
-
 class FutureTimestampError(ValueError):
     """Raised when an increment is timestamped in the future."""
 
@@ -166,7 +156,6 @@ class ChannelRosterPlayer(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     player_ref: str = Field(min_length=1, max_length=200)
-    kind: Literal["human", "ai"]
     profile: ChannelProfileSnapshot | None = None
 
 
@@ -589,7 +578,6 @@ class GameService:
         secret_path: str | Path = DEFAULT_SECRET_PATH,
         now_fn: Callable[[], datetime] | None = None,
         game_now_fn: Callable[[], datetime] | None = None,
-        allow_new_ai_channel_players: bool | None = None,
     ) -> None:
         self.game_db_path = Path(game_db_path)
         self.cache_path = Path(cache_path)
@@ -621,13 +609,6 @@ class GameService:
             if provisioning_token is not None
             else os.environ.get("GHOST_LEAGUE_PROVISIONING_TOKEN")
         ) or None
-        # New anonymous AI identities are a legacy Channel-ingest path.  Keep
-        # the default on for tests/dev; live deployments set the env to ``0``.
-        self.allow_new_ai_channel_players = (
-            allow_new_ai_channel_players
-            if allow_new_ai_channel_players is not None
-            else _env_flag("GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS", True)
-        )
         self.store: GameStore | None = None
         self._week_iso: str | None = None
         self._lock = threading.RLock()
@@ -805,23 +786,22 @@ class GameService:
             return avatar_url.strip()
         return None
 
-    def _avatar_for_player(self, player_id: str, *, is_ai: bool) -> str | None:
-        """Local account avatars win for humans; AI use the Channel profile."""
+    def _avatar_for_player(self, player_id: str) -> str | None:
+        """Prefer a local account avatar; otherwise use the Channel snapshot."""
 
-        if is_ai:
-            assert self.store is not None
-            return self._profile_avatar_url(
-                self.store.channel_profile_for_player(player_id)
-            )
-        return self._avatar_public_url(self.accounts.get(player_id))
+        account = self.accounts.get(player_id)
+        if account is not None:
+            return self._avatar_public_url(account)
+        assert self.store is not None
+        return self._profile_avatar_url(
+            self.store.channel_profile_for_player(player_id)
+        )
 
     def _decorate_feed_item(self, item: dict[str, Any]) -> dict[str, Any]:
         author = item.get("author")
         if isinstance(author, dict):
             player_id = str(author.get("id") or "")
-            author["avatar_url"] = self._avatar_for_player(
-                player_id, is_ai=bool(author.get("is_ai"))
-            )
+            author["avatar_url"] = self._avatar_for_player(player_id)
             # ``kind`` is an internal identity/audit field.  It must never be
             # visible in the public feed payload.
             author.pop("is_ai", None)
@@ -1022,14 +1002,13 @@ class GameService:
         promotion_quota = group_quota(group_size) if group_size >= 2 else 0
         demotion_quota = promotion_quota
         channel_profiles = self.store.channel_profiles_for_players(
-            str(row["player_id"]) for row in rows if bool(row.get("is_ai"))
+            str(row["player_id"]) for row in rows
         )
         standings: list[dict[str, Any]] = []
         for row in rows:
             player_id = str(row["player_id"])
             player_account = self.accounts.get(player_id)
             loadout = self.store.loadout_view(player_id)
-            is_ai = bool(row.get("is_ai"))
             promoted, demoted = (
                 group_movement(
                     int(row["rank"]), group_tier, group_size
@@ -1043,9 +1022,11 @@ class GameService:
                     "user_id": player_id,
                     "display_name": str(row["display_name"]),
                     "avatar_url": (
-                        self._profile_avatar_url(channel_profiles.get(player_id))
-                        if is_ai
-                        else self._avatar_public_url(player_account)
+                        self._avatar_public_url(player_account)
+                        if player_account is not None
+                        else self._profile_avatar_url(
+                            channel_profiles.get(player_id)
+                        )
                     ),
                     "is_me": player_id == user_id,
                     "xp": int(row["xp"]),
@@ -1096,16 +1077,7 @@ class GameService:
         if payload is None:
             return None
         player_id = str(payload.get("user_id") or "")
-        player = None
-        if player_id:
-            try:
-                player = self.store.get_player(player_id)  # type: ignore[union-attr]
-            except GameError:
-                player = None
-        payload["avatar_url"] = self._avatar_for_player(
-            player_id,
-            is_ai=bool(player is not None and str(player["kind"]) == "ai"),
-        )
+        payload["avatar_url"] = self._avatar_for_player(player_id)
         return payload
 
     def _rival_payload(
@@ -1338,24 +1310,6 @@ class GameService:
         seen_refs: set[str] = set()
         created_count = 0
         with self._lock:
-            # Validate the whole roster before any upsert.  A blocked new AI
-            # identity must not leave earlier players or the weekly manifest
-            # partially applied.
-            if not self.allow_new_ai_channel_players:
-                checked_refs: set[str] = set()
-                for item in players:
-                    player_ref = str(item["player_ref"])
-                    if player_ref in checked_refs:
-                        continue
-                    checked_refs.add(player_ref)
-                    if (
-                        str(item["kind"]) == "ai"
-                        and self.store.get_channel_player(channel_id, player_ref)
-                        is None
-                    ):
-                        raise NewAIChannelPlayerDisabled(
-                            "new_ai_channel_player_disabled"
-                        )
             for item in players:
                 player_ref = str(item["player_ref"])
                 if player_ref in seen_refs:
@@ -1365,7 +1319,7 @@ class GameService:
                 player, created = self.store.upsert_channel_player(
                     channel_id,
                     player_ref,
-                    kind=str(item["kind"]),
+                    kind="human",
                     profile=profile,
                     joined_week=week,
                     now=now,
@@ -1376,7 +1330,6 @@ class GameService:
                     {
                         "player_ref": player_ref,
                         "player_id": str(player["id"]),
-                        "kind": str(item["kind"]),
                         "profile": profile or {},
                         "created": created,
                     }
@@ -1914,11 +1867,10 @@ class GameService:
         )
         loadout = self.store.loadout_view(user_id)
         following, followers = self.follows.counts(user_id)
-        is_ai = bool(player is not None and str(player["kind"]) == "ai")
         avatar_url: str | None = None
         if account is not None:
             avatar_url = self._avatar_public_url(account)
-        elif is_ai:
+        elif player is not None:
             avatar_url = self._profile_avatar_url(
                 self.store.channel_profile_for_player(user_id)
             )
@@ -2243,7 +2195,6 @@ def create_app(
     scheduler_tick_seconds: float = 20.0,
     scheduler_startup_grace_seconds: float = 0.25,
     scheduler_shutdown_timeout_seconds: float = 15.0,
-    allow_new_ai_channel_players: bool | None = None,
 ) -> FastAPI:
     """Application factory used by production and tests.
 
@@ -2283,7 +2234,6 @@ def create_app(
         secret_path=secret_path,
         now_fn=now_fn,
         game_now_fn=game_now_fn,
-        allow_new_ai_channel_players=allow_new_ai_channel_players,
     )
     widget_store = WidgetStore(
         widgets_dir

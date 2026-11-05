@@ -76,7 +76,6 @@ class RivalAPITestBase(unittest.TestCase):
                 "players": [
                     {
                         "player_ref": f"rival-ai-{index:02d}",
-                        "kind": "ai",
                     }
                     for index in range(players)
                 ]
@@ -196,21 +195,24 @@ class RivalStateAPITests(RivalAPITestBase):
             )
 
         store = self.store(client)
-        ai_ids = [player["id"] for player in store.list_players(kind="ai")]
+        candidate_ids = [candidate["user_id"] for candidate in payload["candidates"][:2]]
+        self.assertEqual(len(candidate_ids), 2)
         with store.transaction() as conn:
             conn.execute(
                 "UPDATE players SET power = 500 WHERE id = 'owner'"
             )
             conn.execute(
-                "UPDATE players SET power = 1000 WHERE id = ?", (ai_ids[0],)
+                "UPDATE players SET power = 1000 WHERE id = ?", (candidate_ids[0],)
             )
             conn.execute(
-                "UPDATE players SET power = 600 WHERE id = ?", (ai_ids[1],)
+                "UPDATE players SET power = 600 WHERE id = ?", (candidate_ids[1],)
             )
         sorted_payload = client.get(
             "/v1/me/rival/candidates", headers=auth()
         ).json()
-        self.assertEqual(sorted_payload["candidates"][0]["user_id"], ai_ids[1])
+        self.assertEqual(
+            sorted_payload["candidates"][0]["user_id"], candidate_ids[1]
+        )
         self.assertEqual(sorted_payload["candidates"][0]["power"], 600)
 
     def test_daily_target_options_do_not_drift_during_the_day(self) -> None:

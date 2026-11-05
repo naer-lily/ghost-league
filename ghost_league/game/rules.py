@@ -179,12 +179,6 @@ class ChannelRosterMissing(PlayerNotFound):
     pass
 
 
-class NewAIChannelPlayerDisabled(GameError):
-    """A new ``kind='ai'`` mapping is blocked by the deployment switch."""
-
-    pass
-
-
 class WeekLocked(GameError):
     pass
 

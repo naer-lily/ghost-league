@@ -44,7 +44,7 @@ def make_service(
 def roster(service: GameService, refs: list[str]) -> dict:
     return service.channel_roster(
         CHANNEL,
-        [{"player_ref": ref, "kind": "ai"} for ref in refs],
+        [{"player_ref": ref} for ref in refs],
     )
 
 
@@ -77,11 +77,11 @@ def table_count(store: GameStore, table: str) -> int:
         return int(conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"])
 
 
-def test_978_channel_ai_form_66_balanced_groups_and_replay_is_idempotent(
+def test_978_channel_players_form_66_balanced_groups_and_replay_is_idempotent(
     tmp_path,
 ) -> None:
     service = make_service(tmp_path)
-    refs = [f"channel-ai-{index:04d}" for index in range(978)]
+    refs = [f"channel-player-{index:04d}" for index in range(978)]
     first = roster(service, refs)
     assert first["week_start"] == WEEK_1
     assert first["count"] == first["created"] == 978
@@ -121,8 +121,8 @@ def test_978_channel_ai_form_66_balanced_groups_and_replay_is_idempotent(
     assert table_count(store, "opponent_week_plan") == 0
     assert table_count(store, "sources") == 0
 
-    # One local human rebalances the same 978 AI into 55 full groups and
-    # eleven 14-person groups, with the human's group full.
+    # One local human joins the same 978 Channel players: 55 full groups and
+    # eleven 14-person groups, with the local human in a full group first.
     store.ensure_human_player(
         "human-1",
         display_name="Human One",
@@ -136,17 +136,16 @@ def test_978_channel_ai_form_66_balanced_groups_and_replay_is_idempotent(
     assert human_group is not None
     human_members = store.group_members(int(human_group["id"]))
     assert len(human_members) == 15
-    assert sum(1 for member in human_members if member["kind"] == "human") == 1
-    assert sum(1 for member in human_members if member["kind"] == "ai") == 14
+    assert all(member["kind"] == "human" for member in human_members)
     members = flat_members(with_human)
     assert len(members) == 979
     assert len(set(members)) == 979
     assert set(membership_counts(store, WEEK_1).values()) == {1}
 
 
-def test_1000_channel_ai_plus_one_human_form_67_groups(tmp_path) -> None:
+def test_1000_channel_players_plus_one_human_form_67_groups(tmp_path) -> None:
     service = make_service(tmp_path)
-    refs = [f"channel-ai-{index:04d}" for index in range(1000)]
+    refs = [f"channel-player-{index:04d}" for index in range(1000)]
     assert roster(service, refs)["created"] == 1000
     store = service.store
     assert store is not None
@@ -164,7 +163,7 @@ def test_1000_channel_ai_plus_one_human_form_67_groups(tmp_path) -> None:
     assert human_group is not None
     human_members = store.group_members(int(human_group["id"]))
     assert len(human_members) == 15
-    assert sum(1 for member in human_members if member["kind"] == "ai") == 14
+    assert all(member["kind"] == "human" for member in human_members)
     assert len(set(flat_members(groups))) == 1001
 
 
@@ -194,9 +193,9 @@ def test_roster_endpoint_returns_week_and_replaces_only_current_manifest(
     )
     headers = {"Authorization": f"Bearer {CHANNEL_TOKEN}"}
     players = [
-        {"player_ref": "ref-a", "kind": "ai"},
-        {"player_ref": "ref-b", "kind": "ai"},
-        {"player_ref": "ref-c", "kind": "ai"},
+        {"player_ref": "ref-a"},
+        {"player_ref": "ref-b"},
+        {"player_ref": "ref-c"},
     ]
     with TestClient(app) as client:
         store = app.state.game_service.store
@@ -223,10 +222,9 @@ def test_roster_endpoint_returns_week_and_replaces_only_current_manifest(
             headers=headers,
             json={
                 "players": [
-                    {"player_ref": "ref-a", "kind": "ai"},
+                    {"player_ref": "ref-a"},
                     {
                         "player_ref": "ref-b",
-                        "kind": "ai",
                         "profile": {"display_name": "Updated B"},
                     },
                 ]
@@ -271,7 +269,7 @@ def test_channel_roster_changes_across_weeks_keep_history_and_reuse_ids(
 ) -> None:
     clock = {"now": AT_1}
     service = make_service(tmp_path, clock)
-    first_refs = [f"week-ai-{index:02d}" for index in range(40)]
+    first_refs = [f"week-player-{index:02d}" for index in range(40)]
     first = roster(service, first_refs)
     first_ids = {row["player_ref"]: row["player_id"] for row in first["players"]}
     store = service.store
@@ -287,7 +285,7 @@ def test_channel_roster_changes_across_weeks_keep_history_and_reuse_ids(
     assert group_sizes(week_one_groups) == [14, 14, 13]
 
     removed_refs = first_refs[30:]
-    added_refs = [f"new-ai-{index}" for index in range(5)]
+    added_refs = [f"new-player-{index}" for index in range(5)]
     second_refs = first_refs[:30] + added_refs
     clock["now"] = AT_2
     second = roster(service, second_refs)
@@ -299,7 +297,7 @@ def test_channel_roster_changes_across_weeks_keep_history_and_reuse_ids(
     assert len(week_two_groups) == 3
     assert group_sizes(week_two_groups) == [12, 12, 12]
     week_two_members = set(flat_members(week_two_groups))
-    assert len(week_two_members) == 36  # 35 Channel AI + local human
+    assert len(week_two_members) == 36  # 35 Channel players + local human
     assert set(second_ids.values()) == week_two_members - {"human-1"}
 
     old_week_members = set(flat_members(week_one_groups))
@@ -339,7 +337,7 @@ def test_channel_roster_changes_across_weeks_keep_history_and_reuse_ids(
     for ref in added_refs:
         assert third_ids[ref] == second_ids[ref]
         assert store.get_player(second_ids[ref])["joined_week"] == WEEK_2
-    assert table_count(store, "players") == 46  # 45 Channel AI + local human
+    assert table_count(store, "players") == 46  # 45 Channel players + local human
     week_three_groups = ensure_all_groups(store, WEEK_3, now=AT_3)
     assert len(week_three_groups) == 4
     assert group_sizes(week_three_groups) == [12, 12, 11, 11]
@@ -349,10 +347,10 @@ def test_channel_roster_changes_across_weeks_keep_history_and_reuse_ids(
     assert table_count(store, "opponent_week_plan") == 0
 
 
-def test_zero_second_channel_ai_stays_in_group_and_ranks_last(tmp_path) -> None:
+def test_zero_second_channel_player_stays_in_group_and_ranks_last(tmp_path) -> None:
     clock = {"now": AT_1}
     service = make_service(tmp_path, clock)
-    refs = ["zero-ai", "fast-ai", "slow-ai"]
+    refs = ["zero-player", "fast-player", "slow-player"]
     result = roster(service, refs)
     ids = {row["player_ref"]: row["player_id"] for row in result["players"]}
     store = service.store
@@ -365,19 +363,19 @@ def test_zero_second_channel_ai_stays_in_group_and_ranks_last(tmp_path) -> None:
     clock["now"] = datetime(2026, 10, 28, 12, 0, 0, tzinfo=TZ)
     service.channel_increment(
         CHANNEL,
-        player_ref="fast-ai",
+        player_ref="fast-player",
         event_id="fast-event",
         seconds=600,
         occurred_at=datetime(2026, 10, 28, 10, 0, 0, tzinfo=TZ),
     )
     service.channel_increment(
         CHANNEL,
-        player_ref="slow-ai",
+        player_ref="slow-player",
         event_id="slow-event",
         seconds=300,
         occurred_at=datetime(2026, 10, 28, 11, 0, 0, tzinfo=TZ),
     )
-    zero_id = ids["zero-ai"]
+    zero_id = ids["zero-player"]
     assert store.get_week_score(zero_id, WEEK_1)["seconds"] == 0
     assert store.get_player(zero_id)["is_active"] == 1
 
@@ -387,8 +385,8 @@ def test_zero_second_channel_ai_stays_in_group_and_ranks_last(tmp_path) -> None:
         for row in settled["results"]
         if row["player_id"] in set(ids.values())
     }
-    assert ranks[ids["fast-ai"]] == 1
-    assert ranks[ids["slow-ai"]] == 2
+    assert ranks[ids["fast-player"]] == 1
+    assert ranks[ids["slow-player"]] == 2
     assert ranks[zero_id] == 3
     assert store.group_for_player(zero_id, WEEK_1) is not None
 
@@ -410,7 +408,7 @@ def test_zero_second_channel_ai_stays_in_group_and_ranks_last(tmp_path) -> None:
 
 def test_channel_grouping_does_not_require_legacy_source_tables(tmp_path) -> None:
     service = make_service(tmp_path)
-    refs = ["independent-ai"]
+    refs = ["independent-player"]
     roster(service, refs)
     store = service.store
     assert store is not None
@@ -422,7 +420,7 @@ def test_channel_grouping_does_not_require_legacy_source_tables(tmp_path) -> Non
     assert table_count(store, "groups") == 0
     assert table_count(store, "opponent_week_plan") == 0
 
-    second_id = roster(service, ["independent-ai", "second-ai"])["players"][1][
+    second_id = roster(service, ["independent-player", "second-player"])["players"][1][
         "player_id"
     ]
     groups = ensure_all_groups(store, WEEK_1, now=AT_1)

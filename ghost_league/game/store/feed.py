@@ -165,7 +165,9 @@ class FeedMixin:
             for row in conn.execute(
                 "SELECT p.id FROM group_members gm "
                 "JOIN players p ON p.id = gm.player_id "
-                "WHERE gm.group_id = ? AND p.kind = 'ai' AND p.id != ?",
+                "WHERE gm.group_id = ? AND p.id != ? "
+                "AND (p.kind = 'ai' OR EXISTS ("
+                "SELECT 1 FROM channel_players cp WHERE cp.player_id = p.id))",
                 (int(group["group_id"]), author_id),
             )
         ]

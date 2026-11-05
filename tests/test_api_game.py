@@ -88,7 +88,7 @@ class GameAPITestBase(unittest.TestCase):
             headers=auth(CHANNEL_TOKEN),
             json={
                 "players": [
-                    {"player_ref": f"channel-ai-{index:02d}", "kind": "ai"}
+                    {"player_ref": f"channel-ai-{index:02d}"}
                     for index in range(players)
                 ]
             },
@@ -474,11 +474,15 @@ class HistoryTests(GameAPITestBase):
             day=19
         )
         store = GameStore(self.game_db_path)
-        ai_ids = [player["id"] for player in store.list_players(kind="ai")]
+        channel_ids = [
+            player["id"]
+            for player in store.list_players(kind="human")
+            if player["id"] != "owner"
+        ]
         store.create_group(
             previous_week,
             tier="Bronze",
-            player_ids=["owner"] + ai_ids,
+            player_ids=["owner"] + channel_ids,
             now=NOW.isoformat(),
         )
         store.ingest_activity(

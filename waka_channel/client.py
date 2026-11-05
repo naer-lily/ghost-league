@@ -185,16 +185,12 @@ class ChannelClient:
             if ref in seen:
                 continue
             seen.add(ref)
-            kind = player.get("kind", "ai")
-            if kind not in {"ai", "human"}:
-                raise ValueError("roster kind must be ai or human")
             profile = player.get("profile")
             if profile is not None and not isinstance(profile, Mapping):
                 raise ValueError("roster profile must be an object or null")
             clean.append(
                 {
                     "player_ref": ref,
-                    "kind": kind,
                     "profile": dict(profile) if profile is not None else None,
                 }
             )

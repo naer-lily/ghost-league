@@ -13,28 +13,28 @@ Ghost (通用联赛引擎)
 ```
 
 - **Ghost 不 import Channel，不调用 Source，不出现 provider 名称。**
-- Ghost 只接收匿名 `player_ref`、`kind`、展示资料和 `{event_id, seconds, occurred_at}`。
+- Ghost 只接收匿名 `player_ref`、展示资料和 `{event_id, seconds, occurred_at}`。
+  Ghost 的 Channel 边界没有 AI 标识；AI 只存在于 Channel 自己的状态里。
 - Channel 可以有状态和生命周期：拉周快照、cursor、重试、心跳、补推。
 - Channel 可以是模块，也可以独立部署；这是部署选择，不改变边界。
 - `channel_id` 是认证/路由用的不透明标识；Ghost 不按它分支。
-- `kind` 只用于身份投影、附近的人、审计，不参与计分/分组/难度/行为。
+- Channel roster 一律创建/刷新普通 player，不接收、存储或分支 AI 身份。
+  `players.kind` 仅作为内部 legacy 列保留，Channel 路径永远不写 `ai`。
 - Ghost 的 Channel ingest：`POST /v1/channels/{channel_id}/roster` 与
   `POST /v1/channels/{channel_id}/increments`；契约在
   `ghost_league/channels/contract.py`。
 - Channel 使用独立 token（`GHOST_LEAGUE_CHANNEL_TOKEN` / `create_app(channel_token=...)`），
   不能复用普通账号 token。
-- 请求字段固定为 roster 的 `player_ref` / `kind` / `profile` 和 increment 的
-  `player_ref` / `event_id` / `seconds` / `occurred_at`；未知字段 422。
-- 新建 `kind='ai'` Channel 映射默认允许（测试/dev），live 用
-  `GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS=0` 关闭；关闭时 roster 在任何写入前
-  返回 422 `new_ai_channel_player_disabled`，已有映射和新 `kind='human'` 映射不受
-  影响。
+- 请求字段固定为 roster 的 `player_ref` / `profile` 和 increment 的
+  `player_ref` / `event_id` / `seconds` / `occurred_at`；未知字段（含旧 `kind`）422。
+- 没有 AI roster 开关；Channel roster 的新玩家和已有映射都保持普通身份。Waka 仍是
+  Channel，其排行榜玩家是普通参赛者，不是 Ghost 级 AI 类。
 - **Account-backed AI（v1）**：新模拟 AI 是普通账号，由独立 `ai_channel/` 通过
   `POST /v1/provisioning/accounts` 创建，之后只调用 `/v1/me/*` 与 `/v1/shop*`；
   账号第一次读取走既有 `ensure_human_player`，游戏行是 `kind='human'`。Ghost 不写
   AI 标记，也不为模拟器新增私有接口或数据库旁路。
-- 新模拟 AI 不得新增 `kind` 分支或新的内部身份体系；身份和策略留在 `ai_channel/`
-  自己的状态里。旧 Waka `kind='ai'` 玩家可用 provisioning 的
+- 新模拟 AI 不得新增 Ghost 级 `kind` 分支或新的内部身份体系；身份和策略留在
+  `ai_channel/` 自己的状态里。旧 Waka `kind='ai'` 玩家可用 provisioning 的
   `adopt_existing_player=true` **原地** adoption 成普通账号：保留 player id、
   `source_key_hash`、XP/历史、小组关系和 `channel_players` 映射，只改
   `kind` / `controller` / `source_kind` 并补建钱包；不删除/重建 player，不改
@@ -76,15 +76,15 @@ Ghost (通用联赛引擎)
 
 ## 身份与 ID
 
-- 当前 ingest 只做匿名 player：`kind` 落库，`(channel_id, player_ref)` 映射稳定 `player_id`；本地 account 命中/合并和全量 roster 是后续任务。
+- 当前 ingest 只做匿名玩家的普通身份：`(channel_id, player_ref)` 映射稳定 `player_id`；Channel 路径不写 AI 标记，本地 account 命中/合并和全量 roster 是后续任务。
 - 后续真人：Channel 用本地账号 ID 作为 `player_ref`；Ghost 查账号表，命中即真人，资料用本地 account profile，忽略 Channel 的 profile。
-- AI：Channel 用稳定 ID，例如 `UUIDv5(channel_id + source_id)`；同一来源行永远同一 ID，不要每次随机。
+- Channel player：Channel 用稳定 ID，例如 `UUIDv5(channel_id + source_id)`；同一来源行永远同一 ID，不要每次随机。
 - Ghost 内部 `player_id` 与 `player_ref` 分离，保存 `(channel_id, player_ref) -> player_id`；
   同一 `player_ref` 在不同 Channel 不混用。
-- AI 进过系统就不硬删；某周不在 roster 就是没参赛，不建组、不写 dormant/absent 状态；历史保留，回归复用同一 ID。
+- 玩家进过系统就不硬删；某周不在 roster 就是没参赛，不建组、不写 dormant/absent 状态；历史保留，回归复用同一 ID。
 - **展示硬规则**：产品 UI、文案、截图里不得出现 AI / 机器人 / 人机 / Channel / provider 等
-  身份词；AI 与真人都是参赛者，不单独标身份。缺少 handle 时不显示 handle 行，不用身份词
-  兜底；`kind` 只用于内部投影/审计，不参与展示。
+  身份词；Channel player 与本地真人都是普通参赛者，不单独标身份。缺少 handle 时不显示
+  handle 行，不用身份词兜底；内部 legacy 字段不参与展示。
 
 ## 分组
 
@@ -104,10 +104,9 @@ Ghost (通用联赛引擎)
   `diamond_balance` 为 1076 个钱包，1074 条 `channel_players` 映射全部
   `kind='human'`，`group_members.is_human` 全部为 human；账户 token 在
   `ai_channel/data/ai_accounts.db`（0600，Git-ignored）。
-- **迁移后 caveat**：旧 Channel ingest 仍为 Waka 保留；新建 `kind='ai'` 映射已被
-  live switch `GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS=0` 关闭（测试/dev 默认
-  on），legacy code path 仍留在代码里供测试；旧 `kind` 分支与 human-only 门仍在
-  代码里。live 服务已配置 provisioning token，`POST /v1/provisioning/accounts` 已启用
+- **迁移后 caveat**：旧 Channel ingest 仍为 Waka 保留，但 Channel roster 只创建/刷新
+  普通 player，不接受 AI 标识；没有 live switch，`players.kind` 仅作为内部 legacy 列
+  保留。live 服务已配置 provisioning token，`POST /v1/provisioning/accounts` 已启用
   并按 Bearer 鉴权；token 只在服务 env 与 `ai_channel/config.json`（均 0600、
   Git-ignored），不打印、不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074
   个 adopted 账号，但还没有常驻 scheduler 或完整行为策略。Channel roster 刷新不会把

@@ -304,7 +304,12 @@ class ProgressionMixin:
     ) -> dict[str, Any] | None:
         player = self._get_player_with(conn, player_id)
         if str(player["kind"]) != "ai":
-            return None
+            is_channel_player = conn.execute(
+                "SELECT 1 FROM channel_players WHERE player_id = ? LIMIT 1",
+                (player_id,),
+            ).fetchone()
+            if is_channel_player is None:
+                return None
         title_rows = conn.execute(
             "SELECT pt.title_id FROM player_titles pt "
             "JOIN catalog_titles ct ON ct.id = pt.title_id "

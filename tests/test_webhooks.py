@@ -671,7 +671,7 @@ class DerivedEventTests(unittest.TestCase):
             headers=auth(CHANNEL_TOKEN),
             json={
                 "players": [
-                    {"player_ref": f"webhook-ai-{index:02d}", "kind": "ai"}
+                    {"player_ref": f"webhook-ai-{index:02d}"}
                     for index in range(players)
                 ]
             },

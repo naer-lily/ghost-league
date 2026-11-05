@@ -120,9 +120,7 @@ def test_real_cache_has_unique_stable_anonymous_roster_rows() -> None:
     assert expected
     assert len(rows) == len(roster) == expected
     assert len(set(refs)) == expected
-    assert all(row.kind == "ai" for row in rows)
-    assert all(set(player) == {"player_ref", "kind", "profile"} for player in roster)
-    assert all(player["kind"] == "ai" for player in roster)
+    assert all(set(player) == {"player_ref", "profile"} for player in roster)
     assert all(player["profile"]["display_name"] for player in roster)
     assert all(player["profile"]["avatar_url"] for player in roster)
 
@@ -290,7 +288,7 @@ def test_fake_http_receives_roster_and_increment_with_token_and_event_id() -> No
     assert set(roster_request["body"]) == {"players"}
     assert len(roster_request["body"]["players"]) == 2
     assert all(
-        set(player) == {"player_ref", "kind", "profile"}
+        set(player) == {"player_ref", "profile"}
         for player in roster_request["body"]["players"]
     )
     sent_profiles = [
@@ -342,7 +340,7 @@ def test_http_errors_are_exposed_not_swallowed() -> None:
 
     with pytest.raises(ValueError):
         ChannelClient("http://ghost.test", token=None, post_fn=transport).post_roster(
-            [{"player_ref": "x", "kind": "ai"}]
+            [{"player_ref": "x"}]
         )
 
 

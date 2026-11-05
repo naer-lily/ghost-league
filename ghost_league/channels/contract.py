@@ -17,13 +17,12 @@ from typing import Any
 class RosterPlayer:
     """One player announced by a Channel.
 
-    ``player_ref`` is only unique inside the Channel namespace.  ``kind`` is
-    identity metadata for projection/audit and never changes scoring or
-    grouping.  ``profile`` is a display snapshot, not game state.
+    ``player_ref`` is only unique inside the Channel namespace.  ``profile`` is
+    a display snapshot, not game state; Ghost derives an ordinary player
+    identity and does not accept any AI marker from a Channel.
     """
 
     player_ref: str
-    kind: str
     profile: dict[str, Any] | None = None
 
 

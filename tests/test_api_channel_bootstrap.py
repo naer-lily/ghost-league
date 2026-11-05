@@ -1,4 +1,4 @@
-"""API bootstrap is Channel-only: no cache read, no AI before a roster."""
+"""API bootstrap is Channel-only: no cache read, no players before a roster."""
 
 from __future__ import annotations
 
@@ -124,7 +124,7 @@ def _late_service(base: Path) -> tuple[GameService, Path]:
     return service, accounts_db
 
 
-def test_startup_reads_no_cache_and_builds_no_ai_or_groups(tmp_path) -> None:
+def test_startup_reads_no_cache_and_builds_no_channel_players_or_groups(tmp_path) -> None:
     api_cache = tmp_path / "unused-cache" / "cn-978.json"
     app = _make_app(tmp_path, cache_path=api_cache)
     with TestClient(app) as client:
@@ -177,26 +177,26 @@ def test_startup_reads_no_cache_and_builds_no_ai_or_groups(tmp_path) -> None:
         assert _counts(tmp_path / "league.db")["groups"] == 0
 
 
-def test_roster_builds_978_ai_and_late_human_rebalances_without_duplicates(
+def test_roster_builds_978_channel_players_and_late_human_rebalances_without_duplicates(
     tmp_path,
 ) -> None:
     service, _ = _late_service(tmp_path)
-    refs = [f"late-ai-{index:04d}" for index in range(978)]
+    refs = [f"late-channel-{index:04d}" for index in range(978)]
     result = service.channel_roster(
-        CHANNEL, [{"player_ref": ref, "kind": "ai"} for ref in refs]
+        CHANNEL, [{"player_ref": ref} for ref in refs]
     )
     assert result["count"] == 978
     store = service.store
     assert store is not None
 
-    ai_groups = ensure_all_groups(store, WEEK_START, now=NOW)
-    assert len(ai_groups) == 66
+    channel_groups = ensure_all_groups(store, WEEK_START, now=NOW)
+    assert len(channel_groups) == 66
     assert _group_sizes(tmp_path / "league.db") == [15] * 54 + [14] * 12
-    assert sum(group["member_count"] for group in ai_groups) == 978
+    assert sum(group["member_count"] for group in channel_groups) == 978
 
     # The local human arrives after the Channel roster.  The next grouping
     # pass must add it to the existing league, keep 66 groups and never copy
-    # an AI into a second group.
+    # a Channel player into a second group.
     service.initialize()
     account = service.accounts.get("owner")
     assert account is not None
@@ -219,7 +219,7 @@ def test_roster_builds_978_ai_and_late_human_rebalances_without_duplicates(
         memberships = connection.execute(
             "SELECT player_id, COUNT(*) FROM group_members GROUP BY player_id"
         ).fetchall()
-    assert players == [("ai", 978), ("human", 1)]
+    assert players == [("human", 979)]
     assert len(memberships) == 979
     assert {int(row[1]) for row in memberships} == {1}
 
@@ -361,7 +361,7 @@ def test_real_waka_channel_client_end_to_end(tmp_path) -> None:
             ).fetchall()
         )
 
-    assert by_kind == {"ai": 978, "human": 1}
+    assert by_kind == {"human": 979}
     assert group_count == 66
     assert _group_sizes(db_path) == [15] * 55 + [14] * 11
     assert human_group_size == 15
