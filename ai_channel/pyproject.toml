@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ghost-ai-channel"
 version = "0.1.0"
-description = "Stdlib-only account-backed AI simulator for Ghost League"
+description = "Account-backed Channel client for Ghost League"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -20,3 +20,7 @@ include = ["ai_channel*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# Waka projection mode imports the sibling ``waka_channel`` package and Ghost's
+# pure projection helpers, so the repository root must be importable when the
+# suite is run from this directory.
+pythonpath = ["..", "."]

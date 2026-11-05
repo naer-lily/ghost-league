@@ -25,9 +25,6 @@ from ghost_league.runtime_jobs import (
     JOB_DIAMOND_DECAY,
     JOB_POWER,
     JOB_RIVAL_AUTO,
-    JOB_SOURCE_FETCH,
-    JOB_WAKA_ROSTER,
-    JOB_WAKA_TICK,
     JOB_WEEKLY_SETTLE,
     build_scheduled_tasks,
 )
@@ -88,9 +85,6 @@ def make_daily_pair(
 
 def all_fake_runners(calls: list[tuple[str, str]]) -> dict[str, object]:
     names = (
-        JOB_WAKA_TICK,
-        JOB_SOURCE_FETCH,
-        JOB_WAKA_ROSTER,
         JOB_WEEKLY_SETTLE,
         JOB_RIVAL_AUTO,
         JOB_POWER,
@@ -264,7 +258,7 @@ def test_claim_uses_a_lease_and_expires_for_another_worker(
 # ---------------------------------------------------------------------------
 # Startup catch-up
 # ---------------------------------------------------------------------------
-def test_monday_startup_catches_up_weekly_jobs_in_order(tmp_path: Path) -> None:
+def test_monday_startup_catches_up_game_jobs_in_order(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     calls: list[tuple[str, str]] = []
     scheduler = GhostScheduler(
@@ -277,15 +271,39 @@ def test_monday_startup_catches_up_weekly_jobs_in_order(tmp_path: Path) -> None:
     executed = asyncio.run(scheduler.run_once(now=MONDAY, catchup=True))
     names = [name for name, _ in calls]
     assert names == [
-        JOB_WAKA_TICK,
-        JOB_SOURCE_FETCH,
-        JOB_WAKA_ROSTER,
         JOB_WEEKLY_SETTLE,
         JOB_POWER,
         JOB_DIAMOND_DECAY,
     ]
     assert executed == names
-    assert all(period == WEEK for _, period in calls[1:4])
+    assert calls[0][1] == WEEK
+
+
+def test_no_source_or_channel_jobs_are_registered(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    names = [
+        task.name
+        for task in build_scheduled_tasks(
+            store,
+            cache_path=tmp_path / "cache.json",
+        )
+    ]
+    assert names == [
+        JOB_WEEKLY_SETTLE,
+        JOB_RIVAL_AUTO,
+        JOB_DAILY_BETS,
+        JOB_POWER,
+        JOB_DIAMOND_DECAY,
+    ]
+    assert "source-fetch" not in names
+    assert not any("waka" in name for name in names)
+
+    import ghost_league.runtime_jobs as runtime_jobs
+
+    source = Path(runtime_jobs.__file__).read_text(encoding="utf-8")
+    assert "waka" not in source.lower()
+    assert "waka_channel" not in source
+    assert "from .fetch" not in source
 
 
 def test_tuesday_startup_catches_up_rival_auto(tmp_path: Path) -> None:
@@ -303,7 +321,7 @@ def test_tuesday_startup_catches_up_rival_auto(tmp_path: Path) -> None:
     assert JOB_RIVAL_AUTO in names
 
 
-def test_wednesday_skips_expired_source_and_roster_but_keeps_settle(
+def test_wednesday_keeps_weekly_settle_without_source_jobs(
     tmp_path: Path,
 ) -> None:
     store = make_store(tmp_path)
@@ -317,9 +335,9 @@ def test_wednesday_skips_expired_source_and_roster_but_keeps_settle(
 
     asyncio.run(scheduler.run_once(now=WEDNESDAY, catchup=True))
     names = [name for name, _ in calls]
-    assert JOB_SOURCE_FETCH not in names
-    assert JOB_WAKA_ROSTER not in names
     assert JOB_WEEKLY_SETTLE in names
+    assert "source-fetch" not in names
+    assert not any("waka" in name for name in names)
 
 
 def test_2130_does_not_settle_todays_daily_bet_but_2231_does(

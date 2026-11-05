@@ -23,6 +23,19 @@ player identity class：所有 Channel player 都按普通参赛者创建/刷新
 Ghost 只保存 `source_kind` / `source_key_hash` 作为 provenance。公开 API 和 PWA 不返回
 `is_ai` / player `kind`。
 
+Waka 的 XP 传输走 account-backed 路径：
+
+```text
+Waka cache / projection  ->  ai_channel (Channel)
+ai_channel uses the existing ordinary account tokens
+  -> POST /v1/me/increments (same public API as any player)
+Ghost: fixed rules, no provider imports, no Waka scheduler jobs
+```
+
+前端看到的 event id、秒数和每日 XP 口径不变；只有传输从 Channel ingest 换成普通
+账号 API。历史 `channel_events` 保留，详见
+[`docs/CHANNEL_BOUNDARY.md`](docs/CHANNEL_BOUNDARY.md)。
+
 ## 快速开始
 
 要求 Python 3.11+。
@@ -52,31 +65,31 @@ python3 -m uvicorn ghost_league.pwa:app --host 127.0.0.1 --port 8096
 生产环境的 PWA 入口建议由 HTTPS 反向代理提供；`scripts/run_pwa.sh` 会读取
 `GHOST_LEAGUE_TLS_CERT` / `GHOST_LEAGUE_TLS_KEY`（默认 `deploy/tls/`，已 gitignore）。
 
-### 接入 WakaChannel
+### Waka 数据与 ai_channel
 
-WakaChannel 是独立于 Ghost 的接入包。它读取本地榜单缓存，生成稳定匿名 `player_ref`，
-再通过 Channel ingest 推送 roster 和已完成小时的增量。token 只放在环境变量里：
+Waka 的缓存和按周投影在 `waka_channel/`：只读本地榜单快照，复用
+`ghost_league/schedule.py` 的纯投影函数，产出与今天相同的 `event_id` / `seconds`。
+XP 传输由独立 `ai_channel/` 的 Waka 模式完成：它把每个 `player_ref` 映射到
+`ch-` + sha256(`ghost-channel-player-v1\0waka\0` + `player_ref`) 的普通账号，
+再用 `ai_accounts.db` 里的 token 调用 `POST /v1/me/increments`。Ghost 不注册
+Waka 调度任务，也不 import Channel 或 provider 客户端。
 
 ```bash
-export GHOST_LEAGUE_BASE_URL=http://127.0.0.1:8095
-export GHOST_LEAGUE_CHANNEL_TOKEN="<channel-token>"
+export PYTHONPATH=/opt/ghost-league:/opt/ghost-league/ai_channel
 
 # 可选：刷新公开榜缓存（只写 data/cache/，不写游戏库）
 python3 scripts/source_fetch.py --out data/cache/cn-978.json --country CN
 
-# 发送本周全量名单
-python3 -m waka_channel.cli sync-roster --cache data/cache/cn-978.json
-
-# 只推送已经结束的整点；重复 tick 不会重发
-python3 -m waka_channel.cli tick
+# 只推送已经结束的整点；event_id 沿用 Waka 投影，cursor 幂等
+python3 -m ai_channel tick --config ai_channel/config.json --source waka \
+  --cache data/cache/cn-978.json \
+  --state data/cache/waka-channel-state.json
 ```
 
-Channel token 在 API 进程里由 `GHOST_LEAGUE_CHANNEL_TOKEN` 配置，不能使用普通账号
-token。Channel roster 只发送 `player_ref` 和 `profile`，Ghost 一律创建/刷新普通
-player；旧 `kind` 字段会被当作未知字段拒绝。Waka 仍是 Channel，其排行榜玩家是普通
-参赛者。部署模板把 Channel token 放在 `/etc/ghost-league/api.env`（API）和
-`/etc/ghost-league/web.env`（PWA）这类 0600 的 EnvironmentFile；安装说明见
-[`deploy/systemd/README.md`](deploy/systemd/README.md)。
+缺 token 的 `player_ref` 只记录并跳过，不创建玩家或账号。传输不再走
+`/v1/channels/...`；历史 `channel_events` 行保留，前端和每日 XP resolver 不改。
+`ai_channel serve --source waka` 是常驻形式；`sim-` 通用模式保持不变。live
+`ai-channel.service` 仍运行 `--prefix sim-`，切流和重启不在本单执行。
 
 ### 进程内调度器
 
@@ -85,14 +98,16 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
 任务；`job_runs` 表用 `(name, period_key)` 唯一键和租约保证多进程下同一周期只执行
 一次，失败/崩溃的周期会在后续 tick 重试，成功的周期幂等跳过。
 
-- `waka tick`：每小时第 1 分钟推送已完成小时。
+Ghost 调度器只注册通用游戏任务：
+
 - `power`：每小时第 5 分钟刷新当前战力。
 - `diamond-decay`：每小时第 10 分钟执行钻石软上限衰减。
-- `source fetch`：周一 00:02 刷新公开榜缓存（只在周一当天补跑）。
-- `waka roster`：周一 00:03 发送本周 roster（只在周一当天补跑）。
 - `weekly settle`：周一 00:05 结算上一周；本周内未完成可补跑。
 - `rival-auto`：周二 00:00 为没有宿敌的真人自动匹配；本周内可补跑。
 - `daily-bets`：每天 10:30 结算日注；09:00 锁注，之后不能再下。
+
+Waka 缓存刷新、roster 和 XP push 是 Channel/运维侧工作，不在 Ghost 调度器里；
+历史 `job_runs` 中的旧任务行保留作审计，不删除。
 
 结算只处理上一个本地周，不预建下一周；提前或重复运行会安全跳过。
 
@@ -127,9 +142,13 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
   `ai_channel/config.json`，均 0600、untracked，不打印、不提交），本地 token DB
   保留 1074 个 Waka `ch-` 普通账号。`ai_channel serve` 常驻入口已存在；systemd
   unit `ai-channel.service` 已于 2026-11-05 15:07 CST 安装并启用，当前 active，
-  运行 `serve --prefix sim-`。`sim-` 前缀目前匹配 0 个账号，服务处于 idle（日志
+  仍运行 `serve --prefix sim-`。`sim-` 前缀目前匹配 0 个账号，服务处于 idle（日志
   accounts=0，不发起 HTTP 请求）；它只处理 `sim-` 前缀，不加载也不使用 Waka
-  `ch-` token。完整行为策略（bets/tasks/rival/chests）仍待后续。
+  `ch-` token。`--source waka` 已实现，但本单不做 live 切流、不重启服务。
+- **Waka 作业退出 Ghost 调度器**：`waka-tick`、`waka-roster`、`source-fetch` 不再注册；
+  历史 `job_runs` 行保留。Waka XP 切到 `ai_channel` 后写入 `activity_events`，
+  历史 `channel_events` 行保留，前端不变，每日 XP resolver 仍取两者较大值。
+- 完整行为策略（bets/tasks/rival/chests）仍待后续。
 
 ## API 与 PWA
 
@@ -141,7 +160,7 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
 - [`docs/DAILY_TASKS.md`](docs/DAILY_TASKS.md)：每日手动、补断联、周末与周连续任务，以及宝箱和 API 契约。
 - [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md)：webhook 事件、签名、重试和 CLI。
 - [`docs/CHANNEL_ACCOUNTS.md`](docs/CHANNEL_ACCOUNTS.md)：Channel 账号模拟、provisioning API、
-  `ai_channel` 模拟器、普通玩家模型与 player identity 迁移。
+  `ai_channel` 的 Waka 传输、普通玩家模型与 player identity 迁移。
 - PWA：`web/` 是旧的移动优先静态应用，`ghost_league/pwa.py` 先注册 API 路由，再挂载
   静态根；`/v1/...`、`/avatars/...` 始终走 API。当前生产通过
   `GHOST_LEAGUE_WEB_ROOT=/opt/ghost-league/web-next` 挂载新构建，SPA 深链回退到
@@ -238,8 +257,8 @@ ghost_league/
   game/               # 规则、分组、打卡、结算、SQLite store、进程内调度器
   source/             # 旧的归一化工具，仅供 Channel/fetch 兼容
   fetch.py            # 公开榜抓取（只写 cache）
-  runtime_jobs.py     # 调度任务与 Channel/Source 的运行时装配
-waka_channel/         # 独立 WakaTime Channel 包
+  runtime_jobs.py     # 进程内调度器任务注册（仅通用游戏任务）
+waka_channel/         # Waka 缓存/归一化/小时投影库（由 ai_channel Waka 模式使用）
 print-service/        # 独立 FastAPI + SQLite 打印队列（ESC/POS 原始字节）
 print-daemon/         # PC 端纯标准库打印守护进程
 web/                  # 旧 PWA 静态资源（生产默认入口，保留回滚；含 web/widget-studio/）

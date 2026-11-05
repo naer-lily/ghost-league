@@ -1,24 +1,19 @@
 """Composition root for the in-process scheduler jobs.
 
-The game core stays free of Channel and Source imports.  This module is the
-runtime adapter that wires those deployable units into the scheduler owned by
-the API process.  Every runner is safe to invoke repeatedly; the scheduler's
-``job_runs`` lease adds cross-worker at-most-once coordination per period.
+The scheduler registers only generic game jobs.  Source/Channel cache refresh is
+a Channel or operator concern: it is deliberately not registered here, and this
+module does not import a Channel or provider client.  Every runner is safe to
+invoke repeatedly; the scheduler's ``job_runs`` lease adds cross-worker
+at-most-once coordination per period.
 """
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from datetime import time
 from pathlib import Path
 from typing import Any, Final
 
-from waka_channel.cli import DEFAULT_STATE as DEFAULT_WAKA_STATE
-from waka_channel.cli import sync_roster, tick
-from waka_channel.client import DEFAULT_BASE_URL, ChannelClient
-
-from .fetch import fetch_to_cache
 from .game.jobs import (
     run_auto_assign_rivals,
     run_daily_bets,
@@ -37,66 +32,31 @@ from .game.scheduler import (
 )
 from .game.store import GameStore
 
-JOB_WAKA_TICK: Final = "waka-tick"
 JOB_POWER: Final = "power"
 JOB_DIAMOND_DECAY: Final = "diamond-decay"
-JOB_SOURCE_FETCH: Final = "source-fetch"
-JOB_WAKA_ROSTER: Final = "waka-roster"
 JOB_WEEKLY_SETTLE: Final = "weekly-settle"
 JOB_RIVAL_AUTO: Final = "rival-auto"
 JOB_DAILY_BETS: Final = "daily-bets"
 
-DEFAULT_SOURCE_COUNTRY: Final = "CN"
 DAILY_CATCHUP_DAYS: Final = 7
-
-
-def _make_channel_client() -> ChannelClient:
-    base_url = os.environ.get("GHOST_LEAGUE_BASE_URL") or DEFAULT_BASE_URL
-    return ChannelClient(base_url)
 
 
 def build_scheduled_tasks(
     store: GameStore,
     *,
-    cache_path: str | Path,
+    cache_path: str | Path | None = None,
     source_country: str | None = None,
     runners: Mapping[str, Runner] | None = None,
 ) -> list[ScheduledTask]:
     """Build every Ghost background job with its local-time schedule.
 
-    ``runners`` lets tests replace network-backed jobs (source fetch, Waka
-    roster/tick) while keeping the real due-time rules and database lease.
+    ``runners`` lets tests replace a job while keeping the real due-time rules
+    and database lease.  ``cache_path`` / ``source_country`` remain accepted for
+    older callers but are unused: no source or Channel job is registered here.
     """
 
-    cache = Path(cache_path)
-    state_path = os.environ.get("WAKA_CHANNEL_STATE", str(DEFAULT_WAKA_STATE))
-    country = (
-        source_country
-        if source_country is not None
-        else os.environ.get("GHOST_LEAGUE_SOURCE_COUNTRY", DEFAULT_SOURCE_COUNTRY)
-    )
+    del cache_path, source_country
     overrides = runners or {}
-
-    def run_source_fetch(now: Any, _: JobSlot) -> dict[str, Any]:
-        data = fetch_to_cache(cache, country=country or None, now=now)
-        return {
-            "status": "fetched",
-            "row_count": data.get("row_count"),
-            "pages": data.get("pages"),
-            "source_week_start": data.get("source_week_start"),
-            "fetched_at": data.get("fetched_at"),
-        }
-
-    def run_waka_tick(now: Any, _: JobSlot) -> dict[str, Any]:
-        return tick(
-            _make_channel_client(),
-            at=now,
-            cache=cache,
-            state_path=state_path,
-        )
-
-    def run_waka_roster(now: Any, _: JobSlot) -> dict[str, Any]:
-        return sync_roster(_make_channel_client(), cache=cache)
 
     def run_power(now: Any, _: JobSlot) -> dict[str, Any]:
         return run_power_refresh(store.path, at=now)
@@ -114,9 +74,6 @@ def build_scheduled_tasks(
         return run_daily_bets(store.path, day=slot.period_key, at=now)
 
     defaults: dict[str, Runner] = {
-        JOB_SOURCE_FETCH: run_source_fetch,
-        JOB_WAKA_ROSTER: run_waka_roster,
-        JOB_WAKA_TICK: run_waka_tick,
         JOB_POWER: run_power,
         JOB_DIAMOND_DECAY: run_decay,
         JOB_WEEKLY_SETTLE: run_settle,
@@ -128,24 +85,6 @@ def build_scheduled_tasks(
         return overrides.get(name) or defaults[name]
 
     return [
-        ScheduledTask(
-            name=JOB_WAKA_TICK,
-            order=10,
-            slots=hourly_slots(1),
-            run=runner(JOB_WAKA_TICK),
-        ),
-        ScheduledTask(
-            name=JOB_SOURCE_FETCH,
-            order=20,
-            slots=weekly_slots(0, time(0, 2), same_day_only=True),
-            run=runner(JOB_SOURCE_FETCH),
-        ),
-        ScheduledTask(
-            name=JOB_WAKA_ROSTER,
-            order=30,
-            slots=weekly_slots(0, time(0, 3), same_day_only=True),
-            run=runner(JOB_WAKA_ROSTER),
-        ),
         ScheduledTask(
             name=JOB_WEEKLY_SETTLE,
             order=40,
@@ -185,14 +124,10 @@ def build_scheduled_tasks(
 
 __all__ = [
     "DAILY_CATCHUP_DAYS",
-    "DEFAULT_SOURCE_COUNTRY",
     "JOB_DAILY_BETS",
     "JOB_DIAMOND_DECAY",
     "JOB_POWER",
     "JOB_RIVAL_AUTO",
-    "JOB_SOURCE_FETCH",
-    "JOB_WAKA_ROSTER",
-    "JOB_WAKA_TICK",
     "JOB_WEEKLY_SETTLE",
     "build_scheduled_tasks",
 ]

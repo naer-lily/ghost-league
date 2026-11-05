@@ -22,6 +22,10 @@ token, then use the same public endpoints as everyone else.
   `source_key_hash`; those fields are provenance, not identity. There is no
   `SOURCE_AI`, no `players.kind` / `players.controller`, and no
   `channel_players.kind`.
+- Waka's XP transport is account-backed: `waka_channel` supplies the cache and
+  hourly projection, and `ai_channel --source waka` uses the existing 1074
+  ordinary `ch-` account tokens to call `POST /v1/me/increments`. Ghost has no
+  Waka scheduler job and imports no Channel/provider client.
 - `group_members.is_human` remains only for the existing UI contract. Every
   ordinary member is written with value `1`; it is not a new identity class.
 
@@ -74,9 +78,10 @@ Rules:
 The provisioning token is only for account creation. It cannot call
 `/v1/me/*`, and an ordinary account token cannot call the provisioning route.
 
-Waka roster sync looks players up by `source_key_hash` only. A row that returns
-after a missing week refreshes the same player id and never creates a duplicate
-identity beside it.
+The legacy Waka roster sync looks players up by `source_key_hash` only. A row that
+returns after a missing week refreshes the same player id and never creates a
+duplicate identity beside it. Ghost no longer schedules that sync; Waka XP uses
+the account path described below.
 
 ## Player identity live migration
 
@@ -122,20 +127,34 @@ database while the service is running.
 
 ## ai_channel package
 
-`ai_channel/` is a separate, stdlib-only simulator. It uses `urllib.request`,
-never imports Ghost internals and never writes Ghost's database.
+`ai_channel/` is a separate account-backed Channel client. Its generic mode is
+stdlib-only (`urllib.request`) and creates accounts through provisioning. Its
+Waka mode adds the `waka_channel` source/projection library, which borrows only
+Ghost's pure schedule math; neither mode imports Ghost's game/store/channels
+code or writes Ghost's database.
 
 ```text
 ai_channel CLI
-  ├─ provisioning token -> POST /v1/provisioning/accounts
-  ├─ local SQLite (0600) -> user ids + ordinary account tokens
-  └─ account token      -> /v1/me/increments, /v1/me/status, /v1/shop*
+  ├─ generic mode
+  │    ├─ provisioning token -> POST /v1/provisioning/accounts
+  │    ├─ local SQLite (0600) -> user ids + ordinary account tokens
+  │    └─ account token      -> /v1/me/increments, /v1/me/status, /v1/shop*
+  └─ Waka mode (--source waka)
+       ├─ data/cache/cn-978.json + waka_channel.projection
+       ├─ player_ref -> ch- + sha256(namespace + "waka\\0" + player_ref)
+       ├─ local SQLite (0600) -> existing ordinary account token
+       └─ account token      -> POST /v1/me/increments only
 ```
 
 State:
 
 - `accounts(user_id, display_name, token, created_at)`
 - `runs(id, user_id, event_id, seconds, created_at)`
+
+Waka mode does not add a table: it reuses the existing weekly cursor in
+`waka_channel.state` (default `data/cache/waka-channel-state.json`). A missing
+token is reported and skipped, never provisioned. The generic `sim-` mode is
+unchanged.
 
 `provision` prints only user ids and a count. `list` prints ids and display
 names. Neither command prints tokens; the local SQLite DB is created with mode
@@ -144,7 +163,9 @@ names. Neither command prints tokens; the local SQLite DB is created with mode
 Config is a local secret file (`ai_channel/config.json`, copied from
 `config.example.json`). `AI_CHANNEL_PROVISIONING_TOKEN` and
 `AI_CHANNEL_BASE_URL` override the file. The base URL must be an absolute
-HTTP(S) URL, and timeout/default seconds must be positive.
+HTTP(S) URL, and timeout/default seconds must be positive. Waka mode also
+accepts `--cache` and `--state`; run it with the repository root on
+`PYTHONPATH` (for example `PYTHONPATH=/opt/ghost-league:/opt/ghost-league/ai_channel`).
 
 ### Lifecycle
 
@@ -167,7 +188,7 @@ PYTHONPATH=ai_channel python -m ai_channel --version
 Installing the package (`pip install -e ai_channel`) lets you drop the
 `PYTHONPATH` prefix. Use an absolute `state_db` path if you run from elsewhere.
 
-V1 policy:
+Generic v1 policy:
 
 - One XP increment per account per hour, default 900 seconds.
 - `event_id = ai_channel:{user_id}:{YYYYMMDDTHH}`; a repeated tick in the same
@@ -181,14 +202,54 @@ V1 policy:
 - `serve` runs the tick loop residently; the behavior policy itself is still deliberately
   small.
 
+### Waka mode
+
+Waka mode keeps the existing cache, normalization and hourly projection, and
+only changes the transport. Each projected increment is sent with its existing
+`event_id`, `seconds` and `occurred_at` to the ordinary account that already
+exists for that `player_ref`:
+
+```bash
+cd /opt/ghost-league
+export PYTHONPATH=/opt/ghost-league:/opt/ghost-league/ai_channel
+
+# Optional cache refresh; only data/cache is written.
+python3 scripts/source_fetch.py --out data/cache/cn-978.json --country CN
+
+# One tick: completed hours only, existing Waka cursor.
+python3 -m ai_channel tick --config ai_channel/config.json --source waka \
+  --cache data/cache/cn-978.json \
+  --state data/cache/waka-channel-state.json
+
+# Resident form with the same source.
+python3 -m ai_channel serve --config ai_channel/config.json --source waka \
+  --cache data/cache/cn-978.json \
+  --state data/cache/waka-channel-state.json
+```
+
+- `player_ref` maps to `ch-` + sha256(`ghost-channel-player-v1\0waka\0` +
+  `player_ref`), the same id Ghost already uses for the Channel mapping.
+- The token is read from `ai_accounts.db`; a missing token is reported and
+  skipped, and no account or player is created.
+- Every positive event is one `POST /v1/me/increments`; there is no Channel
+  ingest call.
+- The cursor advances only for players whose batch succeeded. A repeated tick
+  sends no duplicate events, and Ghost also deduplicates by `event_id`.
+- The legacy `waka_channel.cli tick` and `ai_channel --source waka` share the
+  cursor; do not run both at the same time.
+- `--source waka` ignores the generic `--prefix`, `--seconds` and `--buy-stars`
+  options. The default `--source accounts` mode and its `sim-` prefix behavior
+  are unchanged.
+
 ### Deployment status
 
 `ai-channel.service` was installed and enabled on 2026-11-05 15:07 CST and is
-active. It runs `serve --prefix sim-` from `/opt/ghost-league/ai_channel`. The
-current local state DB has zero `sim-` accounts, so each cycle logs `accounts=0`
-and makes no HTTP request; the service is idle. It filters to `sim-` accounts,
-so it never loads or uses Waka `ch-` tokens. There is no timer; systemd starts
-the long-running service at boot.
+active. It still runs `serve --prefix sim-` from `/opt/ghost-league/ai_channel`.
+The current local state DB has zero `sim-` accounts, so each cycle logs
+`accounts=0` and makes no HTTP request; the service is idle. It filters to
+`sim-` accounts, so it never loads or uses Waka `ch-` tokens. `--source waka`
+is implemented, but the live service is not switched and not restarted in this
+task. There is no timer; systemd starts the long-running service at boot.
 
 ## Current scope and remaining cleanup
 
@@ -198,14 +259,21 @@ Implemented:
 - Ordinary accounts that enter the normal player path; no Ghost identity field.
 - `ai_channel/` provisioning, local token state, XP ticks and optional star
   purchases through public API calls.
+- `ai_channel --source waka`: existing cache + `waka_channel.projection` sent
+  per account through `POST /v1/me/increments`, with the existing Waka cursor,
+  missing-token reporting and no Channel ingest.
 - Idempotent player-identity schema migration with automatic backup, applied
   live on 2026-11-05 14:53 CST.
 - Waka as a Channel whose leaderboard players are ordinary contestants; only
   `source_kind` / `source_key_hash` record provenance.
+- Ghost's in-process scheduler no longer registers `waka-tick`, `waka-roster`
+  or `source-fetch`, and imports no Channel/provider client. Historical
+  `job_runs` rows are retained.
 
 Remaining cleanup:
 
-- The legacy Channel ingest endpoints remain for Waka / external Channels.
+- The legacy Channel ingest endpoints remain for other/external Channels and
+  historical data; Waka XP no longer uses them.
 - Legacy source/projection code remains for historical compatibility, but it
   must not write a player identity column or branch on one.
 - Live provisioning is enabled: the token is configured in the service
@@ -213,9 +281,14 @@ Remaining cleanup:
   `ai_channel` can use the route. The repository-root local token DB retains the
   1074 Waka `ch-` ordinary accounts. Keep the token out of logs and Git.
 - `ai_channel/` has tokens, one-shot commands and a resident `serve` loop, now
-  deployed as `ai-channel.service` (see Deployment status). A full behavior
-  policy (bets, tasks, rival selection, chests) remains future work and is not
-  implemented.
+  deployed as `ai-channel.service` (see Deployment status). The live service is
+  still on `--prefix sim-`; switching it to `--source waka`, disabling the old
+  jobs and restarting are separate cutover steps.
+- Waka's existing `channel_events` rows remain untouched. New Waka XP writes
+  `activity_events`; the daily XP resolver still takes the larger of the two,
+  so current frontend data is preserved and the frontend is unchanged.
+- A full behavior policy (bets, tasks, rival selection, chests) remains future
+  work and is not implemented.
 
 The long-term design remains in the `ghost-league` skill reference
 `references/agent-symmetry.md`.

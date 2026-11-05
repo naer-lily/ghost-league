@@ -1,8 +1,10 @@
-"""Independent WakaTime -> Ghost Channel.
+"""Independent WakaTime source/projection library.
 
 This package owns WakaTime snapshot reading, p75 winsorization, stable anonymous
-identity, hourly projection and the Ghost Channel HTTP client.  Ghost never
-imports it, and it only borrows Ghost's pure normalization/schedule math.
+identity and hourly projection.  The account-backed XP transport lives in
+``ai_channel --source waka``; the Channel HTTP client and CLI here remain for the
+legacy ingest path and manual diagnostics.  Ghost never imports this package,
+and it only borrows Ghost's pure normalization/schedule math.
 """
 
 from .client import (

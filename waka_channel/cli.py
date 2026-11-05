@@ -1,4 +1,9 @@
-"""Command line entry points for WakaChannel.
+"""Legacy command line entry points for the Waka Channel.
+
+Production Waka XP uses ``ai_channel --source waka``: it reads this package's
+cache/projection and sends through ordinary account tokens.  The commands here
+remain for the legacy Channel ingest path and manual diagnostics; Ghost no
+longer schedules them.
 
 Examples::
 

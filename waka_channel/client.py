@@ -1,8 +1,11 @@
-"""Minimal Ghost Channel client for roster and hourly increments.
+"""Legacy minimal Ghost Channel client for roster and hourly increments.
 
-Only the documented ingest fields are serialized.  The bearer token comes from
-``GHOST_LEAGUE_CHANNEL_TOKEN`` (or an explicit constructor argument) and is
-never logged.  Any non-2xx response is raised as :class:`ChannelHTTPError`.
+Production Waka XP uses ``ai_channel --source waka`` and ordinary account
+tokens; this client remains for the legacy Channel ingest path and manual
+diagnostics.  Only the documented ingest fields are serialized.  The bearer
+token comes from ``GHOST_LEAGUE_CHANNEL_TOKEN`` (or an explicit constructor
+argument) and is never logged.  Any non-2xx response is raised as
+:class:`ChannelHTTPError`.
 """
 
 from __future__ import annotations

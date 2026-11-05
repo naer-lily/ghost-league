@@ -1,13 +1,32 @@
 # ai_channel
 
-An independent, **stdlib-only** Channel simulator that acts like an ordinary
-Ghost League client. It provisions normal accounts through Ghost's provisioning
-API, stores their tokens locally, and then calls only public `/v1/me/*` and
-`/v1/shop*` endpoints.
+An independent, account-backed Channel client for Ghost League. It acts like an
+ordinary client: it owns local account tokens and calls only Ghost's public
+`/v1/me/*` and `/v1/shop*` endpoints. Ghost sees normal accounts and ordinary
+player rows; it has no player identity column and never learns which accounts are
+simulated.
 
-Ghost sees normal accounts and ordinary player rows. It has no player identity
-column and never learns which accounts are simulated. This package owns the
-Channel's local account state and policy; Ghost never imports it.
+There are two tick sources:
+
+- **`accounts` (default)** — the existing generic simulator. It provisions
+  normal accounts through Ghost's provisioning API, stores their tokens locally,
+  and sends one increment per account per hour.
+- **`waka`** — the Waka projection transport. It reads the existing
+  `waka_channel` cache/projection library and sends each projected hour with the
+  already stored ordinary account token, keeping the existing Waka `event_id`,
+  `seconds` and `occurred_at`.
+
+Waka remains a source/projection library used by this Channel:
+
+```text
+Waka cache / projection  ->  ai_channel (Channel)
+ai_channel uses the existing ordinary account tokens
+  -> POST /v1/me/increments (same public API as any player)
+Ghost: fixed rules, no provider imports, no Waka scheduler jobs
+```
+
+`waka_channel` borrows Ghost's pure schedule math but this package never imports
+Ghost's game/store/channels code and never writes Ghost's database.
 
 ## Setup
 
@@ -42,6 +61,54 @@ the repository root. The installed systemd unit runs from
 `data/ai_accounts.db` or an absolute path such as
 `/opt/ghost-league/ai_channel/data/ai_accounts.db`.
 
+Waka mode also imports the sibling `waka_channel` package, so run it with the
+repository root importable:
+
+```bash
+export PYTHONPATH=/opt/ghost-league:/opt/ghost-league/ai_channel
+```
+
+## Waka source mode
+
+```bash
+cd /opt/ghost-league
+
+# Optional: refresh the public leaderboard cache. Only data/cache is written.
+python3 scripts/source_fetch.py --out data/cache/cn-978.json --country CN
+
+# Send completed Waka hours through the ordinary account tokens.
+python3 -m ai_channel tick --config ai_channel/config.json --source waka \
+  --cache data/cache/cn-978.json \
+  --state data/cache/waka-channel-state.json
+
+# Resident form.
+python3 -m ai_channel serve --config ai_channel/config.json --source waka \
+  --cache data/cache/cn-978.json \
+  --state data/cache/waka-channel-state.json
+```
+
+How it works:
+
+- The cache is read only; `waka_channel.projection` produces the same hourly
+  `event_id` / seconds / `occurred_at` as the existing Waka Channel.
+- Each `player_ref` maps to the stable Ghost user id `ch-` + sha256(
+  `ghost-channel-player-v1\0waka\0` + `player_ref`). That is the same id Ghost
+  already uses for the Channel mapping.
+- The ordinary account token is read from `ai_accounts.db`. A missing token is
+  reported and skipped; no account or player is created.
+- Each positive event is one `POST /v1/me/increments`. There is no Channel
+  ingest call and no Ghost database write.
+- The cursor is the existing Waka weekly hour cursor. A repeated tick sends no
+  duplicate events; Ghost also deduplicates by `event_id`.
+- The legacy `waka_channel.cli tick` and `ai_channel --source waka` share that
+  cursor file; do not run both at the same time.
+- `--source waka` ignores `--prefix`, `--seconds` and `--buy-stars`. The generic
+  `--source accounts` mode and its `sim-` prefix behavior are unchanged.
+
+Historical `channel_events` rows remain in Ghost. New Waka XP writes
+`activity_events` through the public API, and Ghost's daily XP resolver still
+takes the larger of the two, so current frontend data is preserved.
+
 ## One-shot commands
 
 From the repository root (`PYTHONPATH=ai_channel` finds the package without
@@ -70,15 +137,15 @@ PYTHONPATH=ai_channel python -m ai_channel --version
 Alternatively install the package (`pip install -e ai_channel`) and use
 `python -m ai_channel ...` without `PYTHONPATH`.
 
-`tick` uses the stable event id `ai_channel:{user_id}:{YYYYMMDDTHH}`, so
+Generic `tick` uses the stable event id `ai_channel:{user_id}:{YYYYMMDDTHH}`, so
 running it twice in the same hour is idempotent on Ghost. With `--buy-stars` it
 reads `/v1/me/status` and `/v1/shop`, then buys the cheapest available
 `star` / `seasonal_star` the wallet can afford. The purchase request id is
 stable per account/item/day, so a repeated tick does not double-buy.
 
 Use `--at 2026-11-05T12:00:00+08:00` to simulate a specific hour in tests or
-backfills. `tick --prefix` limits the run to matching `user_id` values; without
-`--prefix`, manual `tick` still processes every local account.
+backfills. Generic `tick --prefix` limits the run to matching `user_id` values;
+without `--prefix`, manual generic `tick` still processes every local account.
 
 ## Resident mode
 
@@ -92,20 +159,26 @@ python3 -m ai_channel serve \
 
 Arguments:
 
+- `--source` `accounts` (default) or `waka`.
 - `--interval` seconds between ticks, default `3600`, must be positive.
 - `--seconds` increment size; defaults to `default_seconds` from the config.
-- `--prefix` account filter, default `sim-`.
+  Ignored by `--source waka`.
+- `--prefix` account filter for generic mode, default `sim-`.
+- `--cache` / `--state` Waka cache and cursor paths, default
+  `data/cache/cn-978.json` and `data/cache/waka-channel-state.json`.
+- `--week-start` optional ISO Monday for a Waka catch-up.
 - `--cycles` number of ticks, default `0` (run forever). Bounded runs are for
   tests and manual dry runs; `--cycles 1` returns immediately without waiting.
 - `--at` fixed ISO-8601 simulation time, mainly for tests.
-- `--buy-stars` enables the optional cheapest-affordable-star purchase.
+- `--buy-stars` enables the optional cheapest-affordable-star purchase. Ignored
+  by `--source waka`.
 
 The loop runs one `tick`, logs its summary, then waits on a
 `threading.Event`. `SIGINT` and `SIGTERM` set that event and the process exits
 cleanly after logging a final summary. Tokens are never printed.
 
-If the prefix matches no accounts, `serve` logs a zero-count summary and waits
-for the next interval; it makes no HTTP request at all.
+If the generic prefix matches no accounts, `serve` logs a zero-count summary and
+waits for the next interval; it makes no HTTP request at all.
 
 ## Prefix isolation from Waka accounts
 
@@ -113,16 +186,16 @@ The local SQLite store can contain rows for more than one Channel. In particular
 the existing Waka-backed rows use `ch-...` ids, while simulator accounts use
 `sim-...`.
 
-- `serve` defaults to `--prefix sim-`, so resident ticks never use Waka account
-  tokens against `/v1/me/*`.
-- `tick` keeps its manual default of all accounts for deliberate full runs.
-  On a mixed DB, pass `--prefix sim-` (or another Channel prefix) to isolate
-  the run.
+- Generic `serve` defaults to `--prefix sim-`, so resident generic ticks never
+  use Waka account tokens.
+- Generic `tick` keeps its manual default of all accounts for deliberate full
+  runs. On a mixed DB, pass `--prefix sim-` (or another Channel prefix) to
+  isolate the run.
+- Waka mode is the deliberate exception: `--source waka` looks up the exact
+  `ch-` account for each projected `player_ref` and never touches `sim-`
+  accounts.
 - `list --prefix` only prints matching ids and names.
 - Filtering happens in SQLite before token rows are loaded.
-
-Do not point resident mode at `ch-` accounts unless that Channel is explicitly
-supposed to tick those accounts.
 
 ## systemd unit
 
@@ -141,19 +214,29 @@ The unit contains no token. The token stays in `config.json` (mode `0600`, Git
 ignored) and is read by the process.
 
 `ai-channel.service` was installed and enabled on 2026-11-05 15:07 CST and is
-active. It runs `serve --prefix sim-`. The configured local state DB currently
-has zero `sim-` accounts, so each cycle logs `accounts=0` and makes no HTTP
-request; the service is idle. It filters to `sim-` accounts, so it never loads
-or uses Waka `ch-` tokens. There is no timer; systemd starts the long-running
-service at boot.
+active. It still runs `serve --prefix sim-`. The configured local state DB
+currently has zero `sim-` accounts, so each cycle logs `accounts=0` and makes no
+HTTP request; the service is idle. It filters to `sim-` accounts, so it never
+loads or uses Waka `ch-` tokens. Waka mode (`--source waka`) is implemented, but
+the live service is not switched or restarted in this task. There is no timer;
+systemd starts the long-running service at boot.
+
+A future cutover changes the unit to `--source waka --cache ... --state ...` and
+sets `PYTHONPATH` to include `/opt/ghost-league`, so the sibling
+`waka_channel`/`ghost_league` packages are importable from the unit's working
+directory.
 
 ## V1 scope
 
-- The package only provisions new simulated accounts. Ghost has no
+- Generic mode only provisions new simulated accounts. Ghost has no
   `adopt_existing_player`; the player-identity schema migration preserves the
   existing ordinary players, and this package never writes Ghost's database.
-- One XP increment per account per hour, default 900 seconds.
-- Optional one cheapest affordable star purchase per day.
+- Waka mode only reuses the existing ordinary `ch-` accounts; it never
+  provisions missing players.
+- Generic: one XP increment per account per hour, default 900 seconds.
+- Waka: one increment per projected positive Waka hour, same event ids and
+  seconds as the existing projection.
+- Optional one cheapest affordable star purchase per day (generic mode only).
 - No bets, tasks, rival selection, chests, or multi-account coordination.
 - No direct database writes and no private Ghost endpoints.
 - One-shot commands plus a resident loop; behavior policy is still deliberately
@@ -161,4 +244,4 @@ service at boot.
   future work.
 
 See [`../docs/CHANNEL_ACCOUNTS.md`](../docs/CHANNEL_ACCOUNTS.md) for the architecture,
-player-identity migration and remaining cleanup.
+the Waka transport, player-identity migration and remaining cleanup.

@@ -13,6 +13,9 @@ Ghost (通用联赛引擎)
 ```
 
 - **Ghost 不 import Channel，不调用 Source，不出现 provider 名称。**
+- Waka 的缓存与按周投影是 `waka_channel/` 的 source/projection 库；生产 XP 由
+  `ai_channel --source waka` 映射到已有普通账号 token，再调用 `/v1/me/increments`。
+  Ghost 不注册 Waka/source 调度任务，也不 import `waka_channel` 或 provider 客户端。
 - Ghost 只接收匿名 `player_ref`、展示资料和 `{event_id, seconds, occurred_at}`。
   Ghost 没有 player identity class：每名玩家都是普通参赛者，不按 human / ai 分支。
 - Channel 可以有状态和生命周期：拉周快照、cursor、重试、心跳、补推。
@@ -38,6 +41,13 @@ Ghost (通用联赛引擎)
   账号第一次读取走既有 `ensure_human_player`，写普通 player 行。Ghost 不写 AI
   标记，也不为模拟器新增私有接口或数据库旁路。身份和策略只留在 `ai_channel/`
   自己的状态里；provisioning 不再提供 `adopt_existing_player`。
+- **Waka projection transport**：`ai_channel tick --source waka` / `serve --source waka`
+  读取 `data/cache/cn-978.json` 与 `waka_channel.projection`，把每个 `player_ref`
+  映射为 `ch-` + sha256(`ghost-channel-player-v1\0waka\0` + `player_ref`) 的普通
+  账号，再逐个 `POST /v1/me/increments`；`event_id` / `seconds` / `occurred_at`
+  沿用现有 Waka 投影。账号 token 来自 `ai_accounts.db`；缺 token 只报告并跳过，
+  不创建玩家。cursor 复用 Waka 状态文件，重复 tick 不重复发送；通用 `sim-` 模式
+  不变。没有走 Channel ingest，也没有 Ghost 数据库写入。
 
 ## Widget Studio（图片模版编辑器）
 
@@ -115,11 +125,18 @@ Ghost (通用联赛引擎)
   Bearer 鉴权；token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），
   不打印、不提交。`ai_channel/` 可用该路由，仓库根的本地 token DB 保留 1074 个
   Waka `ch-` 普通账号。`ai_channel serve` 常驻入口已存在；systemd unit
-  `ai-channel.service` 已于 2026-11-05 15:07 CST 安装并启用，当前 active，运行
+  `ai-channel.service` 已于 2026-11-05 15:07 CST 安装并启用，当前 active，仍运行
   `serve --prefix sim-`。`sim-` 前缀目前匹配 0 个账号，服务因此处于 idle（日志
   accounts=0，不发起 HTTP 请求）；它只处理 `sim-` 前缀，不会加载或使用 Waka
-  `ch-` token。完整行为策略（bets/tasks/rival/chests）仍是未来工作。Channel roster
-  刷新不会改变 provenance。
+  `ch-` token。Waka 模式的 `--source waka` 已实现，但本单不做 live 切流、不重启
+  服务；切流后同一批 `ch-` 账号才由 Waka 模式使用。完整行为策略
+  （bets/tasks/rival/chests）仍是未来工作。Channel roster 刷新不会改变 provenance。
+- Ghost 进程内调度器已不再注册 `waka-tick`、`waka-roster` 或 `source-fetch`；
+  `ghost_league/runtime_jobs.py` 只注册通用游戏任务，不 import Channel/provider。
+  历史 `job_runs` 行保留作审计，不删除。
+- Waka XP 的切换只改变传输：新事件经 `/v1/me/increments` 写入 `activity_events`；
+  历史 `channel_events` 行保留，前端不改。每日 XP 仍由 store resolver 取
+  `max(activity_events, channel_events)`，所以现有前端数据不丢。
 - 新 Channel ingest 已落在 `channel_players` / `channel_events`，按 `(channel_id, player_ref)`
   映射身份，按全局 `event_id` 幂等；不读取 `sources` / `opponent_week_plan`，不调用
   `projection.tick`。旧 source 分组也暂时排除 `source_kind=channel_ingest` 的 player。
@@ -128,7 +145,9 @@ Ghost (通用联赛引擎)
   不要把 WakaTime 周总量重新塞进 Ghost。
 - 待删清单以 `docs/CHANNEL_BOUNDARY.md` 的“旧代码迁移”为准；新增代码不得让
   game/ingest 路径 import `ghost_league/source/`、`fetch.py` 或任何 provider。
-- 排行榜快照在 `data/cache/cn-978.json`；source fetch 只写缓存，不写游戏库。
+- 排行榜快照在 `data/cache/cn-978.json`；缓存由 `scripts/source_fetch.py` 或 Channel
+  显式刷新，只写缓存，不写游戏库。Ghost 调度器不注册 source/Channel 任务，也不再
+  import `fetch.py` 或 provider。
 - **每日 XP 只经 store resolver 读取**：单日走 `daily_activity_on_day()` /
   `_daily_activity_on_day_with()`，窗口走 `daily_xp_between()`。check-in 存在时权威
   （`xp=0` 也是），否则取当天 `max(activity_events, channel_events)`，不得在
@@ -170,8 +189,12 @@ npm test
 
 - 所有周期任务由 API 进程内 `ghost_league/game/scheduler.py` 触发，FastAPI lifespan
   启动/停止；不使用 systemd timer、cron、ifrule，也不新增 worker service。
-- 任务注册与 Channel/Source 运行时装配在 `ghost_league/runtime_jobs.py`；`game/` 和
-  ingest 路径仍不得 import Channel/Source。
+- 任务注册在 `ghost_league/runtime_jobs.py`，只注册通用游戏任务
+  （`weekly-settle`、`rival-auto`、`daily-bets`、`power`、`diamond-decay`）；
+  不注册 Waka/source 任务，不 import Channel/Source/provider。`game/` 和 ingest
+  路径仍不得 import Channel/Source。
+- 历史 `job_runs` 里的 `waka-tick` / `waka-roster` / `source-fetch` 行保留作审计，
+  不删除、不改写；新调度器不再产生这些名字。
 - 运行记录在 `league.db` 的 `job_runs`：`(name, period_key)` 唯一，带租约；多进程
   同一周期只执行一次，失败/崩溃后下一 tick 可重试，成功周期永久跳过。
 - 时间口径：日注 09:00 锁注、10:30 结算；周注/组注仍是周一 23:59:59 锁、周一

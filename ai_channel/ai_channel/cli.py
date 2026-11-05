@@ -2,6 +2,12 @@
 
 Commands only use Ghost's public HTTP API.  Tokens live in the local state DB
 and are never printed by ``list``, ``provision``, ``tick`` or ``serve``.
+
+Two tick sources exist:
+
+- ``accounts`` (default): the existing generic per-account simulator, unchanged;
+- ``waka``: read the Waka cache/projection library and send each projected
+  increment through the matching ordinary account token.
 """
 
 from __future__ import annotations
@@ -24,6 +30,18 @@ Output = Callable[[str], None]
 
 DEFAULT_SERVE_INTERVAL_SECONDS = 3600
 DEFAULT_SERVE_PREFIX = "sim-"
+DEFAULT_WAKA_CACHE = "data/cache/cn-978.json"
+DEFAULT_WAKA_STATE = "data/cache/waka-channel-state.json"
+SOURCE_ACCOUNTS = "accounts"
+SOURCE_WAKA = "waka"
+TICK_SOURCES = (SOURCE_ACCOUNTS, SOURCE_WAKA)
+DEFAULT_TICK_SOURCE = SOURCE_ACCOUNTS
+
+
+def _validate_source(source: str) -> str:
+    if source not in TICK_SOURCES:
+        raise ValueError(f"source must be one of {', '.join(TICK_SOURCES)}")
+    return source
 
 
 def _valid_prefix(prefix: str) -> str:
@@ -120,18 +138,40 @@ def tick(
     client: AIClient,
     store: StateStore,
     *,
-    seconds: int,
+    seconds: int | None = None,
     buy_stars: bool = False,
     at: datetime | str | None = None,
     prefix: str | None = None,
+    source: str = DEFAULT_TICK_SOURCE,
+    cache: str | None = None,
+    state_path: str | None = None,
+    week_start: str | None = None,
     out: Output = print,
 ) -> dict[str, Any]:
     """Send one hourly increment per matching account, then buy stars.
 
     ``prefix=None`` keeps the one-shot default of every local account.  The
-    resident ``serve`` command defaults to ``sim-`` instead so Waka channel
-    tokens stored in the same local DB are never touched.
+    resident ``serve`` command defaults to ``sim-`` instead so unrelated
+    Channel tokens stored in the same local DB are never touched.
+
+    ``source="waka"`` delegates to the Waka projection transport, which uses
+    ``--cache`` / ``--state`` and ignores ``seconds`` / ``prefix`` /
+    ``buy_stars``.  The generic account mode is unchanged.
     """
+
+    source = _validate_source(source)
+    if source == SOURCE_WAKA:
+        from .waka import DEFAULT_CACHE, DEFAULT_STATE, waka_tick
+
+        return waka_tick(
+            client,
+            store,
+            at=at,
+            cache=cache if cache is not None else DEFAULT_CACHE,
+            state_path=state_path if state_path is not None else DEFAULT_STATE,
+            week_start=week_start,
+            out=out,
+        )
 
     seconds = _positive_int("seconds", seconds)
     prefix = _validate_optional_prefix(prefix)
@@ -255,9 +295,13 @@ def serve(
     store: StateStore,
     *,
     interval: int = DEFAULT_SERVE_INTERVAL_SECONDS,
-    seconds: int,
+    seconds: int | None = None,
     buy_stars: bool = False,
     prefix: str | None = DEFAULT_SERVE_PREFIX,
+    source: str = DEFAULT_TICK_SOURCE,
+    cache: str | None = None,
+    state_path: str | None = None,
+    week_start: str | None = None,
     cycles: int = 0,
     at: datetime | str | None = None,
     out: Output = print,
@@ -269,25 +313,33 @@ def serve(
     for tests and manual dry runs; the last cycle never sleeps, so
     ``--cycles 1`` returns immediately.  An empty account set costs no HTTP
     request at all: ``tick`` still logs its zero summary, then the loop waits.
+
+    ``source="waka"`` repeats the Waka projection tick; ``cache`` / ``state_path``
+    select the snapshot and cursor, and ``prefix`` / ``buy_stars`` are ignored.
     """
 
+    source = _validate_source(source)
     interval = _positive_int("interval", interval)
-    seconds = _positive_int("seconds", seconds)
+    waka = source == SOURCE_WAKA
+    seconds = 0 if waka else _positive_int("seconds", seconds)
     if isinstance(cycles, bool) or not isinstance(cycles, int) or cycles < 0:
         raise ValueError("cycles must be a non-negative integer")
-    prefix = _validate_optional_prefix(prefix)
+    prefix = None if waka else _validate_optional_prefix(prefix)
     moment = parse_at(at)
 
     event = stop_event if stop_event is not None else threading.Event()
     handlers = _install_stop_handlers(event)
     totals: dict[str, Any] = {
         "cycles": 0,
+        "source": source,
         "prefix": prefix,
         "interval": interval,
         "accounts": 0,
+        "events": 0,
         "increments": 0,
         "duplicates": 0,
         "purchases": 0,
+        "missing_tokens": 0,
         "errors": 0,
     }
     try:
@@ -301,34 +353,57 @@ def serve(
                 buy_stars=buy_stars,
                 at=moment,
                 prefix=prefix,
+                source=source,
+                cache=cache,
+                state_path=state_path,
+                week_start=week_start,
                 out=out,
             )
             totals["cycles"] += 1
             for key in (
                 "accounts",
+                "events",
                 "increments",
                 "duplicates",
                 "purchases",
+                "missing_tokens",
                 "errors",
             ):
                 totals[key] += int(summary.get(key, 0))
-            out(
-                f"serve: cycle={totals['cycles']} prefix={prefix or '*'} "
-                f"accounts={summary['accounts']} increments={summary['increments']} "
-                f"purchases={summary['purchases']} errors={summary['errors']}"
-            )
+            if waka:
+                out(
+                    f"serve: cycle={totals['cycles']} source=waka "
+                    f"accounts={summary['accounts']} events={summary['events']} "
+                    f"sent={summary['sent']} "
+                    f"missing_tokens={summary['missing_tokens']} "
+                    f"errors={summary['errors']}"
+                )
+            else:
+                out(
+                    f"serve: cycle={totals['cycles']} prefix={prefix or '*'} "
+                    f"accounts={summary['accounts']} increments={summary['increments']} "
+                    f"purchases={summary['purchases']} errors={summary['errors']}"
+                )
             if cycles and totals["cycles"] >= cycles:
                 break
             if event.wait(interval):
                 break
     finally:
         _restore_stop_handlers(handlers)
-    out(
-        f"serve: stopped cycles={totals['cycles']} prefix={prefix or '*'} "
-        f"accounts={totals['accounts']} increments={totals['increments']} "
-        f"duplicates={totals['duplicates']} purchases={totals['purchases']} "
-        f"errors={totals['errors']}"
-    )
+    if waka:
+        out(
+            f"serve: stopped cycles={totals['cycles']} source=waka "
+            f"accounts={totals['accounts']} events={totals['events']} "
+            f"sent={totals['increments']} missing_tokens={totals['missing_tokens']} "
+            f"duplicates={totals['duplicates']} errors={totals['errors']}"
+        )
+    else:
+        out(
+            f"serve: stopped cycles={totals['cycles']} prefix={prefix or '*'} "
+            f"accounts={totals['accounts']} increments={totals['increments']} "
+            f"duplicates={totals['duplicates']} purchases={totals['purchases']} "
+            f"errors={totals['errors']}"
+        )
     return totals
 
 
@@ -361,6 +436,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tick_parser.add_argument("--config", default="config.json")
     tick_parser.add_argument(
+        "--source",
+        choices=TICK_SOURCES,
+        default=DEFAULT_TICK_SOURCE,
+        help="account simulator or Waka projection transport (default: accounts)",
+    )
+    tick_parser.add_argument(
         "--seconds",
         type=int,
         default=None,
@@ -373,6 +454,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="only tick user ids with this prefix (default: all accounts)",
     )
     tick_parser.add_argument(
+        "--cache",
+        default=DEFAULT_WAKA_CACHE,
+        help="Waka cache path for --source waka",
+    )
+    tick_parser.add_argument(
+        "--state",
+        default=DEFAULT_WAKA_STATE,
+        help="Waka cursor state path for --source waka",
+    )
+    tick_parser.add_argument(
+        "--week-start",
+        default=None,
+        help="optional ISO Monday for a Waka catch-up",
+    )
+    tick_parser.add_argument(
         "--at",
         default=None,
         help="ISO-8601 simulation time (default: now)",
@@ -382,6 +478,12 @@ def build_parser() -> argparse.ArgumentParser:
         "serve", help="run tick every interval until SIGINT/SIGTERM"
     )
     serve_parser.add_argument("--config", default="config.json")
+    serve_parser.add_argument(
+        "--source",
+        choices=TICK_SOURCES,
+        default=DEFAULT_TICK_SOURCE,
+        help="account simulator or Waka projection transport (default: accounts)",
+    )
     serve_parser.add_argument(
         "--interval",
         type=int,
@@ -399,6 +501,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--prefix",
         default=DEFAULT_SERVE_PREFIX,
         help="only tick user ids with this prefix (default: sim-)",
+    )
+    serve_parser.add_argument(
+        "--cache",
+        default=DEFAULT_WAKA_CACHE,
+        help="Waka cache path for --source waka",
+    )
+    serve_parser.add_argument(
+        "--state",
+        default=DEFAULT_WAKA_STATE,
+        help="Waka cursor state path for --source waka",
+    )
+    serve_parser.add_argument(
+        "--week-start",
+        default=None,
+        help="optional ISO Monday for a Waka catch-up",
     )
     serve_parser.add_argument(
         "--cycles",
@@ -449,6 +566,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 buy_stars=bool(args.buy_stars),
                 at=args.at,
                 prefix=args.prefix,
+                source=args.source,
+                cache=args.cache,
+                state_path=args.state,
+                week_start=args.week_start,
             )
             if summary["errors"]:
                 return 1
@@ -463,6 +584,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 seconds=seconds,
                 buy_stars=bool(args.buy_stars),
                 prefix=args.prefix,
+                source=args.source,
+                cache=args.cache,
+                state_path=args.state,
+                week_start=args.week_start,
                 cycles=args.cycles,
                 at=args.at,
             )
@@ -473,6 +598,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (
         AIChannelHTTPError,
         AIChannelTransportError,
+        ImportError,
         OSError,
         TypeError,
         ValueError,
@@ -483,6 +609,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = [
+    "DEFAULT_TICK_SOURCE",
+    "DEFAULT_WAKA_CACHE",
+    "DEFAULT_WAKA_STATE",
+    "SOURCE_ACCOUNTS",
+    "SOURCE_WAKA",
+    "TICK_SOURCES",
     "build_parser",
     "list_accounts",
     "main",

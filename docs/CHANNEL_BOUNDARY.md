@@ -14,6 +14,10 @@ Krita      --events--> krita-channel  --push--> Ghost
 
 Channel 可以是模块，也可以独立部署；这是部署选择，不改变边界。
 
+Waka 的当前实现是 account-backed 变体：`waka_channel` 只负责 cache 和小时投影，
+`ai_channel --source waka` 用已有普通账号 token 调用 `/v1/me/increments`。Ghost 仍只
+看到普通账号和固定规则，不注册 Waka/source 任务，也不 import `waka_channel`。
+
 ## 为什么叫 Channel
 
 Adapter 听起来像无状态翻译器，但 Channel 有自己的生命周期：每周拉快照、维护 source
@@ -165,16 +169,20 @@ Ghost 只把 profile 当**展示层快照**：不参与计分、分组、难度�
    幂等；
 6. Channel 心跳丢失时，Ghost 保留玩家和历史，不把 Channel 当真相源。
 
-周一的任务统一由 API 进程内调度器触发（`ghost_league/runtime_jobs.py` 装配）：
-`source-fetch` 00:02、`waka-roster` 00:03、`weekly-settle` 00:05。前两个是 Channel
-任务，最后一个是 Ghost 任务；调度器只是运行时组合根，`game/` 与 ingest 路径仍不
-import Channel/Source，二者依旧通过 roster/increments 契约交互。
+周一及每天的 Ghost 任务由 API 进程内调度器触发（`ghost_league/runtime_jobs.py`
+装配）：`weekly-settle` 00:05、`rival-auto`、`daily-bets`、`power`、
+`diamond-decay`。Waka 的缓存刷新、roster 和小时投影属于 Channel 侧，不在 Ghost
+调度器注册；历史 `job_runs` 中的旧任务行保留作审计。调度器只是运行时组合根，
+`game/` 与 ingest 路径仍不 import Channel/Source。
 
-## WakaChannel 独立包
+## Waka 缓存/投影与 ai_channel
 
-WakaTime 接入在独立包 `waka_channel/`，不进入 Ghost 的 `game/` 或 `channels/`。Ghost
-只通过上面的 roster/increments 契约接收匿名结果；进程内调度器通过 Channel 的公开
-CLI/客户端入口触发周任务，不复制其内部逻辑。包内职责：
+Waka 仍是 Channel，但 XP 路径不再走 Channel ingest：`waka_channel/` 是
+source/projection 库，`ai_channel/` 是 account-backed 传输层。Ghost 只看到普通账号和
+`/v1/me/increments`，不注册 Waka/source 调度任务，也不 import `waka_channel` 或
+provider 客户端。
+
+`waka_channel/` 职责：
 
 - `identity.py`：对每条 source row id 生成固定命名空间的 UUIDv5 `player_ref`；
 - `roster.py`：只读 `data/cache/cn-978.json`，保留全量行（含 0 秒行），复用 p75 缩尾；
@@ -182,22 +190,36 @@ CLI/客户端入口触发周任务，不复制其内部逻辑。包内职责：
 - `projection.py`：复用 `ghost_league/schedule.py` 的纯函数，把每行 effective target
   投到 168 小时；`event_id` 固定为 `waka:{player_ref}:{week_start}:{hour_iso}`，只发出
   已经结束的整点；
-- `client.py`：POST 到 `/v1/channels/waka/roster` 与 `/v1/channels/waka/increments`，
-  token 从 `GHOST_LEAGUE_CHANNEL_TOKEN`（兼容 `WAKA_CHANNEL_TOKEN`）读取；
-- `state.py` / `cli.py`：本地按周记录每个 ref 的已处理小时，重复 tick 不重发；cursor
-  默认写在 `data/cache/waka-channel-state.json`，可用 `WAKA_CHANNEL_STATE` 覆盖。
+- `state.py`：本地按周记录每个 ref 的已处理小时，重复 tick 不重发；cursor 默认写在
+  `data/cache/waka-channel-state.json`，可用 `WAKA_CHANNEL_STATE` 覆盖；
+- `client.py` / `cli.py`：旧 Channel ingest 客户端和手动命令保留作历史数据/诊断，
+  Ghost 不再调度它们，也不是当前 Waka XP 的生产路径。
+
+`ai_channel/` Waka 模式：
+
+- 读取现有 cache 和 `waka_channel.projection`，不写 Ghost 数据库；
+- 把 `player_ref` 映射为 `ch-` + sha256(`ghost-channel-player-v1\0waka\0` +
+  `player_ref`)，与 Ghost 现有 Channel player id 完全一致；
+- 从 `ai_accounts.db` 读取该普通账号的 token；缺 token 只报告并跳过，不创建玩家；
+- 每个正增量调用 `POST /v1/me/increments`，沿用 Waka 的 `event_id` / `seconds` /
+  `occurred_at`，不走 `/v1/channels/...`；
+- 复用 Waka cursor；只推进整批成功的玩家，重复 tick 不再发送同一小时；
+- `tick --source waka` / `serve --source waka` 支持 `--cache` / `--state`；
+  通用 `sim-` 账号模式不变。
 
 ```bash
-cd ghost-league
-export GHOST_LEAGUE_BASE_URL=http://127.0.0.1:8095
-export GHOST_LEAGUE_CHANNEL_TOKEN=<channel-token>
+cd /opt/ghost-league
+export PYTHONPATH=/opt/ghost-league:/opt/ghost-league/ai_channel
+# 可选：刷新公开榜缓存（只写 cache，不写游戏库）
 python3 scripts/source_fetch.py --out data/cache/cn-978.json --country CN
-python3 -m waka_channel.cli sync-roster --cache data/cache/cn-978.json
-python3 -m waka_channel.cli tick
+python3 -m ai_channel tick --config ai_channel/config.json --source waka \
+  --cache data/cache/cn-978.json \
+  --state data/cache/waka-channel-state.json
 ```
 
-`sync-roster` 每次发送当前全量名单：新行加入，消失行本周不出现，回归行复用同一
-`player_ref`。`tick` 默认处理 `--at` 所在周，也可用 `--week-start` 显式补推上一周。
+切换只改变传输：`event_id`、秒数和小时边界沿用现有投影，历史 `channel_events` 行
+保留；新事件写入 `activity_events`，每日 XP resolver 仍取两者较大值，所以当前前端
+数据不变。live 切流、服务重启和旧 job 的停用是单独的 cutover 步骤，不在本代码任务内。
 
 ## Channel account simulation (v1)
 
@@ -206,23 +228,27 @@ python3 -m waka_channel.cli tick
 - Ghost 提供独立 provisioning token（`GHOST_LEAGUE_PROVISIONING_TOKEN` /
   `create_app(provisioning_token=...)`）和 `POST /v1/provisioning/accounts`；
   该 token 不能与 owner / bootstrap / Channel token 混用。
-- `ai_channel/` 是独立的 stdlib-only 模拟器：通过 provisioning API 创建普通账号、
+- `ai_channel/` 是独立的账号模拟器：通用模式通过 provisioning API 创建普通账号、
   在本地保存 token，然后调用 `/v1/me/increments`、`/v1/me/status` 和
-  `/v1/shop/purchase`；不写 Ghost 数据库，不调用私有接口。
+  `/v1/shop/purchase`；Waka 模式直接复用已有的 1074 个 Waka `ch-` 普通账号 token，
+  读取 `waka_channel.projection` 后同样调用 `/v1/me/increments`。两种模式都不写
+  Ghost 数据库，不调用私有接口。
 - 账号第一次调用 `/v1/me/*` 时走既有 `ensure_human_player` 路径，写普通 player 行；
   Ghost 没有 player identity 列，也不写 AI 标记。provisioning 不提供
   `adopt_existing_player`。
 - Waka 仍是 Channel，其排行榜玩家是普通参赛者；Ghost 没有来源身份分类。Waka 的
   provenance 常量是 `SOURCE_WAKA`（值仍为 `wakatime_public_leaderboard`），
-  不存在 `SOURCE_AI`。
+  不存在 `SOURCE_AI`。Ghost 已不注册 `waka-tick` / `waka-roster` / `source-fetch`，
+  历史 `job_runs` 行保留。
 - live 服务已配置 provisioning token，`/v1/provisioning/accounts` 已启用并鉴权；
   token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），不打印、
   不提交。`ai_channel/` 可用该路由，仓库根的本地 token DB 保留 1074 个 Waka
   `ch-` 普通账号。`ai_channel serve` 常驻入口已存在；systemd unit
-  `ai-channel.service` 已于 2026-11-05 15:07 CST 安装并启用，当前 active，运行
+  `ai-channel.service` 已于 2026-11-05 15:07 CST 安装并启用，当前 active，仍运行
   `serve --prefix sim-`。`sim-` 前缀目前匹配 0 个账号，服务因此处于 idle（日志
   accounts=0，不发起 HTTP 请求）；它只处理 `sim-` 前缀，不会加载或使用 Waka
-  `ch-` token。完整行为策略（bets/tasks/rival/chests）仍是未来工作。见
+  `ch-` token。`--source waka` 已实现，但本单不做 live 切流、不重启服务。完整行为
+  策略（bets/tasks/rival/chests）仍是未来工作。见
   [`CHANNEL_ACCOUNTS.md`](CHANNEL_ACCOUNTS.md)。
 
 ## Player identity live migration
@@ -272,6 +298,9 @@ schema 13 代码；不要在服务运行时覆盖数据库文件。
 
 API 和 ingest 主路径已经是 Channel-only：`GameService.initialize()` 只建账号、social
 和 GameStore，不读 `data/cache`、不投影旧 source、不建组；roster 到达后才建组。旧 source
-计划/投影代码只作历史兼容，不在 API/ingest 路径，也不应被新增代码 import。唯一的
-跨边界装配点是 `ghost_league/runtime_jobs.py`：它只把 Channel/Source 的公开入口注册
-为后台任务，不把 provider 字段、token 或 Channel 状态写进游戏库。
+计划/投影代码只作历史兼容，不在 API/ingest 路径，也不应被新增代码 import。
+`ghost_league/runtime_jobs.py` 只注册通用游戏任务，不 import Channel/Source/provider，
+也不注册 Waka/source 任务；历史 `job_runs` 行保留作审计。
+
+Waka 的传输切换不删除历史：现有 `channel_events` 行继续保留，切流前由旧 tick 写入的
+数据仍会被每日 XP resolver 读取；切流后新事件写 `activity_events`，前端数据口径不变。
