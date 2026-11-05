@@ -97,19 +97,27 @@ Ghost (通用联赛引擎)
 - 旧 `data/league/state.json`、`data/api/membership.json`、旧 `events.db` 只作历史留档，不再作为联赛真相源。
 - 新游戏状态在 `data/league/league.db`（GameStore）。
 - **Player identity 列移除**：schema 14 起 `players` 没有 `kind` / `controller`，
-  `channel_players` 没有 `kind`。游戏状态仍是 `data/league/league.db`；现有 1076 名
-  普通玩家、1074 条 Channel 映射、XP、小组与 source key 都会在迁移中原样保留，
-  `group_members.is_human` 统一回填为 1。
-- **live 迁移尚未执行**：代码内 `GameStore.initialize()` 对旧库是幂等的，会先备份
-  `league.db.backup-player-identity-<timestamp>` 再重建两张表；上线前先停服务，
-  跑 `PYTHONPATH=. python3 scripts/migrate_player_identity.py --db data/league/league.db`
-  （脚本只初始化并打印校验结果），确认 `PRAGMA integrity_check` 与玩家/映射/小组计数，
-  再启动服务。回滚时停服务、恢复备份文件后回退代码。详见 `docs/CHANNEL_BOUNDARY.md`
+  `channel_players` 没有 `kind`。游戏状态仍是 `data/league/league.db`；live 迁移已于
+  2026-11-05 14:53 CST 执行，迁移时 1076 名普通玩家、1074 条 Channel 映射、1954 条
+  group member、XP、小组与 source key 均保留，`group_members.is_human` 统一回填为 1，
+  `PRAGMA integrity_check=ok`，API/Web 重启后健康。迁移后 Waka 全量 roster sync 成功：
+  972 行、0 新建、972 已有，Waka 排行榜未受影响。
+- **live 迁移已执行（无需重跑）**：迁移前备份在
+  `/data/backups/ghost-league/pre-player-kind-20261105T145317`（含 `league.db`、
+  `accounts.db`、`SHA256SUMS`）；`GameStore.initialize()` 在重建前另写了数据库旁备份
+  `data/league/league.db.backup-player-identity-20261105T145319553868`。脚本仍保留给
+  新实例或演练：
+  `PYTHONPATH=. python3 scripts/migrate_player_identity.py --db data/league/league.db`
+  （已迁移库上幂等，不新增备份）。回滚时停服务、恢复上述备份（连同需要的
+  `-wal` / `-shm` 状态）后回退到 schema 13 代码。详见 `docs/CHANNEL_BOUNDARY.md`
   与 `docs/CHANNEL_ACCOUNTS.md`。
 - live 服务已配置 provisioning token，`POST /v1/provisioning/accounts` 已启用并按
   Bearer 鉴权；token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），
-  不打印、不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074 个普通账号，但
-  还没有常驻 scheduler 或完整行为策略。Channel roster 刷新不会改变 provenance。
+  不打印、不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074 个普通账号；
+  `ai_channel serve` 常驻入口已存在，systemd unit 模板在
+  `ai_channel/deploy/ai-channel.service`，但未安装、未启用；`serve` 默认
+  `--prefix sim-`，不会使用 Waka `ch-` token；完整行为策略仍待后续。Channel roster
+  刷新不会改变 provenance。
 - 新 Channel ingest 已落在 `channel_players` / `channel_events`，按 `(channel_id, player_ref)`
   映射身份，按全局 `event_id` 幂等；不读取 `sources` / `opponent_week_plan`，不调用
   `projection.tick`。旧 source 分组也暂时排除 `source_kind=channel_ingest` 的 player。

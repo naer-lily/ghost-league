@@ -217,12 +217,23 @@ python3 -m waka_channel.cli tick
   不存在 `SOURCE_AI`。
 - live 服务已配置 provisioning token，`/v1/provisioning/accounts` 已启用并鉴权；
   token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），不打印、
-  不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074 个普通账号，并已有
-  `serve` 常驻 scheduler；完整行为策略仍待后续。见 [`CHANNEL_ACCOUNTS.md`](CHANNEL_ACCOUNTS.md)。
+  不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074 个普通账号。
+  `ai_channel serve` 常驻入口已存在；systemd unit 模板在
+  `ai_channel/deploy/ai-channel.service`，但未安装、未启用；`serve` 默认
+  `--prefix sim-`，不会使用 Waka `ch-` token；完整行为策略仍待后续。见
+  [`CHANNEL_ACCOUNTS.md`](CHANNEL_ACCOUNTS.md)。
 
 ## Player identity live migration
 
 schema 14 删除 `players.kind` / `players.controller` 和 `channel_players.kind`。
+该迁移已于 2026-11-05 14:53 CST 在 live 执行：迁移前备份在
+`/data/backups/ghost-league/pre-player-kind-20261105T145317`，数据库旁自动备份为
+`data/league/league.db.backup-player-identity-20261105T145319553868`；迁移时
+1076 名玩家、1074 条 Channel 映射、1954 条 group member 全部保留，
+`PRAGMA integrity_check=ok`，API/Web 重启后健康。迁移后的 Waka 全量 roster sync
+成功：972 行、0 新建、972 已有，Waka 排行榜未受影响。以下机制与命令保留作复核、
+新实例和回滚参考；live 库无需重跑。
+
 迁移是幂等的，由 `GameStore.initialize()` 在打开旧库时执行：
 
 1. 检测三列中任意一条仍存在；
@@ -233,7 +244,7 @@ schema 14 删除 `players.kind` / `players.controller` 和 `channel_players.kind
    映射、XP、`weekly_scores`、小组关系和钱包；不删除任何玩家行；
 5. 把 `group_members.is_human` 统一设为 1（旧 UI 兼容值，不再代表身份分类）。
 
-执行（先停 API/Web）：
+执行（live 已按此完成；新实例或演练仍先停 API/Web）：
 
 ```bash
 cd /opt/ghost-league
@@ -241,7 +252,8 @@ PYTHONPATH=. python3 scripts/migrate_player_identity.py --db data/league/league.
 ```
 
 脚本打印 `integrity_check`、`players`、`channel_players`、`group_members` 计数和
-备份路径。重复运行不会再次迁移，也不会新增备份。回滚：停服务，恢复最近的
+备份路径。已迁移库上重复运行不会再次迁移，也不会新增备份。回滚：停服务，恢复上述
+迁移前备份（`/data/backups/ghost-league/pre-player-kind-20261105T145317`）或最近的
 `league.db.backup-player-identity-*`（连同需要的 `-wal` / `-shm` 状态），再回退到
 schema 13 代码；不要在服务运行时覆盖数据库文件。
 

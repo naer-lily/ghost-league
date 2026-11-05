@@ -81,7 +81,17 @@ identity beside it.
 ## Player identity live migration
 
 Schema 14 removes the retired identity columns from the game database. The
-migration is idempotent and runs from `GameStore.initialize()`:
+migration was applied live on 2026-11-05 14:53 CST. The pre-migration backup is
+`/data/backups/ghost-league/pre-player-kind-20261105T145317`, and the automatic
+backup beside the database is
+`data/league/league.db.backup-player-identity-20261105T145319553868`. It
+preserved 1076 players, 1074 channel mappings and 1954 group members at
+migration time, `PRAGMA integrity_check` returned `ok`, and the API/Web
+restarted healthy. A full Waka roster sync after migration succeeded with 972
+rows, 0 created and 972 existing; the Waka leaderboard was intact.
+
+The migration itself is idempotent and runs from `GameStore.initialize()` on an
+old database:
 
 1. Detect any remaining `players.kind` / `players.controller` /
    `channel_players.kind` column.
@@ -94,7 +104,8 @@ migration is idempotent and runs from `GameStore.initialize()`:
    No player row is deleted.
 5. Set `group_members.is_human = 1` for all existing memberships.
 
-Apply it with the API and Web stopped:
+The live database is already migrated, so no rerun is needed. For a fresh
+instance or a drill, apply it with the API and Web stopped:
 
 ```bash
 cd /opt/ghost-league
@@ -104,10 +115,10 @@ PYTHONPATH=. python3 scripts/migrate_player_identity.py --db data/league/league.
 The script prints `integrity_check`, `players`, `channel_players`,
 `group_members` counts and the backup path. Re-running it on an already
 migrated database is a no-op and creates no second backup. Roll back by
-stopping the service, restoring the most recent
-`league.db.backup-player-identity-*` (plus any needed `-wal` / `-shm` state),
-then returning to the schema 13 code. Never overwrite a live database while the
-service is running.
+stopping the service, restoring the pre-migration backup directory above or the
+most recent `league.db.backup-player-identity-*` (plus any needed `-wal` /
+`-shm` state), then returning to the schema 13 code. Never overwrite a live
+database while the service is running.
 
 ## ai_channel package
 
@@ -178,7 +189,8 @@ Implemented:
 - Ordinary accounts that enter the normal player path; no Ghost identity field.
 - `ai_channel/` provisioning, local token state, XP ticks and optional star
   purchases through public API calls.
-- Idempotent player-identity schema migration with automatic backup.
+- Idempotent player-identity schema migration with automatic backup, applied
+  live on 2026-11-05 14:53 CST.
 - Waka as a Channel whose leaderboard players are ordinary contestants; only
   `source_kind` / `source_key_hash` record provenance.
 
@@ -191,8 +203,10 @@ Remaining cleanup:
   environment and `ai_channel/config.json` (both `0600`, untracked), so
   `ai_channel` can use the route and its token DB already holds the 1074
   ordinary accounts. Keep the token out of logs and Git.
-- `ai_channel/` has tokens, one-shot commands and a resident `serve` loop;
-  a full behavior policy remains future work.
+- `ai_channel/` has tokens, one-shot commands and a resident `serve` loop. The
+  systemd unit template at `ai_channel/deploy/ai-channel.service` is not
+  installed or enabled, and `serve` defaults to `--prefix sim-`, so it cannot
+  touch Waka `ch-` tokens. A full behavior policy remains future work.
 
 The long-term design remains in the `ghost-league` skill reference
 `references/agent-symmetry.md`.

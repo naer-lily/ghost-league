@@ -113,14 +113,21 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
   player identity class，公开响应和前端不暴露 `kind` / `is_ai`。
 - **Player identity 列移除**：schema 14 起 `players` 没有 `kind` / `controller`，
   `channel_players` 没有 `kind`；`group_members.is_human` 仅为旧 UI 保留并统一写 1。
-  现有玩家、XP、profile、source key、Channel 映射和小组关系都保留。
-- **live 迁移尚未执行**：先停服务并备份，再运行
-  `PYTHONPATH=. python3 scripts/migrate_player_identity.py --db data/league/league.db`。
-  脚本幂等，旧库会自动生成 `league.db.backup-player-identity-<timestamp>`；确认
-  `integrity_check=ok` 和玩家/映射/小组计数后启动服务。回滚时停服务、恢复备份并回退
-  代码。live provisioning 路由已配置 token 并启用（token 只在服务 env 与
+  live 迁移已于 2026-11-05 14:53 CST 执行，迁移时 1076 名玩家、1074 条 Channel
+  映射、1954 条 group member、XP、profile、source key 和小组关系均保留，
+  `integrity_check=ok`，API/Web 重启后健康。迁移后 Waka 全量 roster sync 成功：
+  972 行、0 新建、972 已有，Waka 排行榜未受影响。
+- **live 迁移已执行（无需重跑）**：迁移前备份在
+  `/data/backups/ghost-league/pre-player-kind-20261105T145317`；数据库旁另有
+  `data/league/league.db.backup-player-identity-20261105T145319553868`。脚本仍可用于
+  新实例或演练：
+  `PYTHONPATH=. python3 scripts/migrate_player_identity.py --db data/league/league.db`；
+  已迁移库上幂等，不新增备份。回滚时停服务、恢复备份（连同需要的 `-wal` / `-shm`
+  状态）并回退代码。live provisioning 路由已配置 token 并启用（token 只在服务 env 与
   `ai_channel/config.json`，均 0600、untracked，不打印、不提交），`ai_channel`
-  已有 1074 个普通账号，但还没有常驻 scheduler。
+  已有 1074 个普通账号。`ai_channel serve` 常驻入口已存在；systemd unit 模板在
+  `ai_channel/deploy/ai-channel.service`，但未安装、未启用；`serve` 默认
+  `--prefix sim-`，不会使用 Waka `ch-` token；完整行为策略仍待后续。
 
 ## API 与 PWA
 
