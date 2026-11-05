@@ -105,6 +105,14 @@ After adoption, Waka identity lookup is kind-independent: both
 adopted human's display name and `last_seen_week` and returns `created=False`
 instead of inserting a duplicate AI row.
 
+Adoption is also protected from Channel refreshes. When
+`upsert_channel_player()` refreshes an existing mapping whose player is already
+`kind='human'`, it keeps `kind='human'` and `controller='human'`, leaves
+`source_kind` untouched, and marks the mapping row `kind='human'`; only the
+display name, `last_seen_week` and active flag are refreshed. A later payload
+with `kind='ai'` therefore cannot demote an adopted human. Brand-new mappings
+still follow the incoming `kind`.
+
 This started as a one-player migration primitive. On 2026-11-05 the live
 migration was run for every legacy AI player.
 

@@ -194,15 +194,29 @@ class ChannelMixin:
                     updated_at,
                 ),
             )
+            current = conn.execute(
+                "SELECT kind FROM players WHERE id = ?", (player_id,)
+            ).fetchone()
+            # Adoption is deliberate and permanent: an older Channel payload
+            # may refresh display/freshness but must not demote the human.
+            protected_human = current is not None and str(current["kind"]) == "human"
+            effective_kind = "human" if protected_human else kind
+            effective_controller = "human" if effective_kind == "human" else "ai"
             conn.execute(
                 "UPDATE players SET kind = ?, controller = ?, display_name = ?, "
                 "last_seen_week = ?, is_active = 1 WHERE id = ?",
-                (kind, controller, display_name, joined_week, player_id),
+                (
+                    effective_kind,
+                    effective_controller,
+                    display_name,
+                    joined_week,
+                    player_id,
+                ),
             )
             conn.execute(
                 "UPDATE channel_players SET kind = ?, profile_json = ?, "
                 "updated_at = ? WHERE channel_id = ? AND player_ref = ?",
-                (kind, profile_json, updated_at, channel_id, player_ref),
+                (effective_kind, profile_json, updated_at, channel_id, player_ref),
             )
         return self._get_player_with(conn, player_id), created
 

@@ -211,10 +211,15 @@ python3 -m waka_channel.cli tick
   重建 player，也不改 `channel_players`。
 - adoption 后 Waka 身份查询按 `source_key_hash` 匹配、不按 `kind` 过滤；周 roster
   同步会刷新同一个玩家，不会重新造一个 AI 行。
+- 已 adoption 的 human 不会被后续 Channel roster 刷新降级：
+  `upsert_channel_player` 刷新已存在映射时，若 `players.kind='human'`，只更新展示名、
+  `last_seen_week` 和活跃状态，保持 `kind='human'` / `controller='human'` 与原
+  `source_kind`，并把 `channel_players.kind` 改为 `human`；新映射仍按传入 `kind`
+  创建。旧 payload 不能再把 deliberate adoption 改回 AI。
 - 2026-11-05 已将线上 1074 个 legacy `kind='ai'` 玩家通过
   `adopt_existing_player=true` 原地 adoption 为普通账号；player id、
   `source_key_hash`、XP/历史、小组关系和 `channel_players` 映射均保留，钱包已补建。
-- `channel_players.kind='ai'` 仍作为 legacy Channel 映射元数据存在，不参与游戏路径；
+- 尚未刷新过的 legacy `channel_players.kind='ai'` 只是映射元数据，不参与游戏路径；
   旧 Channel ingest 仍服务 Waka，不是新模拟 AI 的目标路径。剩余 `kind` 分支、
   `channel_players` 元数据和自动 backfill 尚未清理，见
   [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。

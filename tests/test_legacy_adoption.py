@@ -282,6 +282,80 @@ def test_adopt_ai_preserves_identity_history_and_waka_sync(tmp_path: Path) -> No
     assert matching == 1
 
 
+def test_channel_refresh_cannot_demote_adopted_human(tmp_path: Path) -> None:
+    player_id = _seed_legacy_ai(tmp_path / "league.db")
+    app, game_db, _ = _make_app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/provisioning/accounts",
+            headers=_headers(PROVISIONING_TOKEN),
+            json=_payload(player_id),
+        )
+        assert response.status_code == 201, response.text
+
+    adopted = _snapshot(game_db, player_id)
+    assert adopted["player"]["kind"] == "human"
+    assert adopted["player"]["controller"] == "human"
+    assert adopted["player"]["source_kind"] == "local_increment"
+    assert adopted["player"]["source_key_hash"] == SOURCE_HASH
+    assert adopted["scores"]
+    assert adopted["events"]
+    assert adopted["memberships"]
+    assert adopted["wallet_count"] == 1
+    # Adoption leaves the legacy mapping metadata untouched.
+    assert adopted["mappings"] == [(CHANNEL_ID, PLAYER_REF, player_id, "ai")]
+
+    store = GameStore(game_db, epoch_reason="test")
+    refreshed, created = store.upsert_channel_player(
+        CHANNEL_ID,
+        PLAYER_REF,
+        kind="ai",
+        profile={"display_name": "Waka Refreshed"},
+        joined_week=WEEK,
+        now=NOW,
+    )
+    assert created is False
+    assert refreshed["id"] == player_id
+    assert refreshed["kind"] == "human"
+    assert refreshed["controller"] == "human"
+    assert refreshed["source_kind"] == adopted["player"]["source_kind"]
+    assert refreshed["display_name"] == "Waka Refreshed"
+
+    after = _snapshot(game_db, player_id)
+    assert after["scores"] == adopted["scores"]
+    assert after["events"] == adopted["events"]
+    assert after["memberships"] == adopted["memberships"]
+    assert after["wallet_count"] == adopted["wallet_count"]
+    assert after["mappings"] == [(CHANNEL_ID, PLAYER_REF, player_id, "human")]
+
+    replay, replayed_created = store.upsert_channel_player(
+        CHANNEL_ID,
+        PLAYER_REF,
+        kind="ai",
+        profile={"display_name": "Waka Refreshed"},
+        joined_week=WEEK,
+        now=NOW,
+    )
+    assert replayed_created is False
+    assert replay == refreshed
+    assert _snapshot(game_db, player_id) == after
+
+    # A genuinely new legacy roster entry is still allowed to be AI.
+    fresh, fresh_created = store.upsert_channel_player(
+        CHANNEL_ID,
+        "fresh-legacy-ref",
+        kind="ai",
+        profile={"display_name": "Fresh Legacy"},
+        joined_week=WEEK,
+        now=NOW,
+    )
+    assert fresh_created is True
+    assert fresh["kind"] == "ai"
+    assert fresh["controller"] == "ai"
+    assert store.get_channel_player(CHANNEL_ID, "fresh-legacy-ref")["kind"] == "ai"
+
+
 def test_67_character_legacy_id_can_be_provisioned_and_adopted(
     tmp_path: Path,
 ) -> None:
