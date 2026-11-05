@@ -211,9 +211,13 @@ python3 -m waka_channel.cli tick
   重建 player，也不改 `channel_players`。
 - adoption 后 Waka 身份查询按 `source_key_hash` 匹配、不按 `kind` 过滤；周 roster
   同步会刷新同一个玩家，不会重新造一个 AI 行。
-- 旧 Channel ingest（roster / increments）继续服务 Waka 等外部 Channel，**不是**
-  新模拟 AI 的目标路径。未 adoption 的 `kind='ai'` players 和 `channel_players` 保持
-  原样；完整批量迁移尚未完成，见 [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
+- 2026-11-05 已将线上 1074 个 legacy `kind='ai'` 玩家通过
+  `adopt_existing_player=true` 原地 adoption 为普通账号；player id、
+  `source_key_hash`、XP/历史、小组关系和 `channel_players` 映射均保留，钱包已补建。
+- `channel_players.kind='ai'` 仍作为 legacy Channel 映射元数据存在，不参与游戏路径；
+  旧 Channel ingest 仍服务 Waka，不是新模拟 AI 的目标路径。剩余 `kind` 分支、
+  `channel_players` 元数据和自动 backfill 尚未清理，见
+  [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
 
 ## 历史归属
 

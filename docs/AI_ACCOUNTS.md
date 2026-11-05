@@ -105,9 +105,36 @@ After adoption, Waka identity lookup is kind-independent: both
 adopted human's display name and `last_seen_week` and returns `created=False`
 instead of inserting a duplicate AI row.
 
-This is a **migration primitive for one player at a time**, not the full bulk
-migration. No live database, production deployment or existing Waka row was
-changed here; callers must choose ids and run adoption deliberately.
+This started as a one-player migration primitive. On 2026-11-05 the live
+migration was run for every legacy AI player.
+
+## Live legacy adoption (2026-11-05)
+
+The live `data/league/league.db` was backed up while the API/Web were stopped,
+then all 1074 legacy `kind='ai'` players were adopted in place through the
+provisioning endpoint. The result:
+
+- `players`: `1074 -> 0` AI and `2 -> 1076` human; player ids, XP, weekly
+  history, group memberships and `source_key_hash` are preserved.
+- `diamond_balance`: 1076 wallets (one for every human, including the owner).
+- `channel_players`: 1074 mappings preserved; the mapping's legacy `kind`
+  metadata is not used by the game path.
+- `group_members.is_human`: all human members are marked human, so settlement
+  rewards use the human rule.
+- `ai_channel/data/ai_accounts.db`: 1074 ordinary account tokens, file mode
+  `0600`, Git-ignored.
+- A sample adopted account returns `200` from `/v1/me/status` with its existing
+  XP.
+
+Rollback copies:
+
+- pre-migration: `/data/backups/ghost-league/pre-legacy-adoption-20261105T132352`
+- post-migration: `/data/backups/ghost-league/post-legacy-adoption-20261105T132510`
+
+The migration did not remove the `channel_players` rows, the legacy Channel
+ingest endpoints, or every internal `kind` branch. Those remain for Waka and
+older code paths; new simulated accounts and all adopted players behave as
+ordinary humans in the game path.
 
 ## ai_channel package
 
@@ -168,31 +195,28 @@ V1 policy:
 - No bets, tasks, rival selection or multi-account coordination.
 - No Ghost DB access and no private endpoints.
 
-## Current scope and remaining migration
+## Current scope and remaining cleanup
 
-Implemented in v1:
+Implemented:
 
 - Separate provisioning token and `/v1/provisioning/accounts`.
 - Ordinary accounts that enter the normal human game path.
 - `ai_channel/` provisioning, local token state, XP ticks and optional star
   purchases through public API calls.
-
-**Single-player adoption primitive implemented.** Full bulk migration of the
-legacy AI path is still pending.
-
-- An existing Waka `kind='ai'` player can be adopted into an ordinary account
-  one at a time through `adopt_existing_player`, preserving its player id,
+- One-player legacy adoption via `adopt_existing_player`, preserving id,
   history, group membership and channel mapping.
-- Waka lookup and weekly roster sync are safe after adoption: they match the
-  same `source_key_hash` regardless of `kind` and do not recreate an AI row.
-- Existing unadopted Waka `kind='ai'` rows and their `channel_players` rows are
-  otherwise unchanged.
+- Live adoption of all 1074 legacy AI players on 2026-11-05.
+
+Remaining cleanup:
+
+- The 1074 `channel_players` mappings still carry legacy `kind='ai'` metadata;
+  the game path does not use it, but a strict identity audit would still see it.
 - The legacy Channel ingest endpoints remain for Waka / external Channels and
   are still not the target path for new simulated AI.
-- There is no automatic backfill, no bulk account migration and no removal of
-  the remaining internal `kind='ai'` branches. The owner must select and adopt
-  players explicitly.
-- No live database or production deployment was changed by this slice.
+- Code still contains `kind`-based branches for old data and API projections;
+  there are currently no AI player rows, but the branches were not deleted.
+- The adoption migration was a one-off administrative run; there is no
+  automatic backfill or scheduled reconciliation for future legacy rows.
 
 The long-term design remains in the `ghost-league` skill reference
 `references/agent-symmetry.md`.
