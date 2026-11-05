@@ -125,8 +125,9 @@ provisioning endpoint. The result:
 - `players`: `1074 -> 0` AI and `2 -> 1076` human; player ids, XP, weekly
   history, group memberships and `source_key_hash` are preserved.
 - `diamond_balance`: 1076 wallets (one for every human, including the owner).
-- `channel_players`: 1074 mappings preserved; the mapping's legacy `kind`
-  metadata is not used by the game path.
+- `channel_players`: 1074 mappings preserved and their `kind` values were
+  changed to `human` after adoption; the mapping is now an ordinary channel
+  identity, not an AI marker.
 - `group_members.is_human`: all human members are marked human, so settlement
   rewards use the human rule.
 - `ai_channel/data/ai_accounts.db`: 1074 ordinary account tokens, file mode
@@ -217,12 +218,13 @@ Implemented:
 
 Remaining cleanup:
 
-- The 1074 `channel_players` mappings still carry legacy `kind='ai'` metadata;
-  the game path does not use it, but a strict identity audit would still see it.
 - The legacy Channel ingest endpoints remain for Waka / external Channels and
   are still not the target path for new simulated AI.
 - Code still contains `kind`-based branches for old data and API projections;
-  there are currently no AI player rows, but the branches were not deleted.
+  there are currently no AI player rows or AI channel mappings, but the
+  branches were not deleted.
+- Brand-new Channel mappings with `kind='ai'` still create AI players; the
+  guard only protects existing adopted humans from being demoted.
 - The adoption migration was a one-off administrative run; there is no
   automatic backfill or scheduled reconciliation for future legacy rows.
 
