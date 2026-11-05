@@ -41,7 +41,7 @@ Channel token；`/v1/provisioning/accounts` 使用独立的 provisioning token�
 | POST | `/v1/me/bets` | 下注周注、任一组注盘口或日注 |
 | GET | `/v1/me/stars/{star_id}/svg` | 自己一颗星的独属 SVG |
 | POST | `/v1/me/increments` | 写入真人活动增量 |
-| POST | `/v1/provisioning/accounts` | 受控创建普通账号（独立 provisioning token） |
+| POST | `/v1/provisioning/accounts` | 受控创建普通账号；可 adoption 现有 AI 玩家（独立 provisioning token） |
 | POST | `/v1/channels/{channel_id}/roster` | Channel 全量周名单 |
 | POST | `/v1/channels/{channel_id}/increments` | Channel 小时增量 |
 | GET | `/v1/me/league` | 自己的小组与本周数据 |
@@ -85,6 +85,27 @@ token 只以 SHA-256 哈希保存在 `data/api/accounts.db`，不会出现在 AP
 它不能调用 `/v1/me/*`，普通账号 token 也不能调用 provisioning 接口；未配置时返回
 `503 service_token_not_configured`。账号创建后第一次调用 `/v1/me/*` 仍走普通真人
 路径，不写入 AI 标记。
+
+请求体：
+
+```json
+{
+  "user_id": "sim-0001",
+  "display_name": "Sim One",
+  "activity_label": "练习",
+  "adopt_existing_player": false
+}
+```
+
+- `adopt_existing_player` 默认 `false`：只创建新账号，不写游戏行。
+- 设为 `true` 时，`user_id` 必须是已存在的 `kind='ai'` 玩家。接口会在同一个联赛
+  事务中把该玩家原地升级为 `kind='human'` / `controller='human'` /
+  `source_kind='local_increment'`，保留 player id、`source_key_hash`、周标记、XP/
+  历史、小组关系和 `channel_players` 映射，并补建钻石钱包。返回的仍是普通账号
+  token，之后第一次 `/v1/me/*` 走普通真人路径。
+- 玩家不存在返回 `404`；玩家已经是真人返回 `409 player already human`；已有账号
+  （包括重复 adoption）返回 `409`；owner 返回 `422`。adoption 是一次一个玩家的
+  迁移原语，不是全量迁移。
 
 账号管理：
 

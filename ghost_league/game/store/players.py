@@ -104,11 +104,16 @@ class PlayersMixin:
         *,
         conn: sqlite3.Connection | None = None,
     ) -> dict[str, Any] | None:
-        """Find the stable AI identity bound to one anonymous source key."""
+        """Find the stable identity bound to one anonymous source key.
+
+        Legacy Waka identities start as ``kind='ai'`` but may later be adopted
+        into an ordinary account.  The source key belongs to the player, not
+        to its current kind, so lookup deliberately does not filter on kind.
+        """
 
         sql = (
-            "SELECT * FROM players WHERE kind = 'ai' "
-            "AND source_key_hash = ? ORDER BY id LIMIT 1"
+            "SELECT * FROM players WHERE source_key_hash = ? "
+            "ORDER BY id LIMIT 1"
         )
         if conn is not None:
             row = conn.execute(sql, (source_key_hash,)).fetchone()
@@ -166,9 +171,12 @@ class PlayersMixin:
         last_seen_week: str,
         now: datetime,
     ) -> tuple[dict[str, Any], bool]:
+        # Adopted legacy AI rows are ordinary humans now.  Match the source
+        # key regardless of kind so weekly roster sync refreshes that player
+        # instead of creating a duplicate AI identity beside it.
         row = conn.execute(
-            "SELECT * FROM players WHERE kind = 'ai' "
-            "AND source_key_hash = ? ORDER BY id LIMIT 1",
+            "SELECT * FROM players WHERE source_key_hash = ? "
+            "ORDER BY id LIMIT 1",
             (source_key_hash,),
         ).fetchone()
         if row is not None:
@@ -239,6 +247,42 @@ class PlayersMixin:
                 "UPDATE players SET is_active = ? WHERE id = ?",
                 (1 if active else 0, player_id),
             )
+
+    def adopt_ai_player(
+        self,
+        player_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Promote one legacy AI player in place into a human game identity.
+
+        The player id, source key, week markers, created_at, XP/history and
+        group/channel mappings are preserved; only kind, controller,
+        source_kind and is_active change.  The wallet is created in the same
+        transaction so an adopted player can use the normal human economy.
+        """
+
+        local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM players WHERE id = ?", (player_id,)
+            ).fetchone()
+            if row is None:
+                raise PlayerNotFound(player_id)
+            if str(row["kind"]) != "ai":
+                raise ValueError("player is not an ai")
+            conn.execute(
+                "UPDATE players SET kind = 'human', controller = 'human', "
+                "source_kind = ?, is_active = 1 WHERE id = ?",
+                (SOURCE_HUMAN, player_id),
+            )
+            self._ensure_wallet_with(
+                conn,
+                player_id,
+                now=local_now,
+                create_for_unknown=False,
+            )
+            return self._get_player_with(conn, player_id)
 
     def ensure_human_player(
         self,

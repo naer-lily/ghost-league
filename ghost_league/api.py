@@ -56,6 +56,7 @@ from .game.rules import (
     DuplicateIdempotencyKey,
     GameError,
     InsufficientDiamonds,
+    PlayerNotFound,
     RepairRejected,
     ShopCooldown,
     ShopNotAllowed,
@@ -141,6 +142,7 @@ class ProvisioningAccountRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=64)
     display_name: str = Field(min_length=1, max_length=80)
     activity_label: str = Field(default=DEFAULT_ACTIVITY_LABEL)
+    adopt_existing_player: bool = False
 
 
 class ChannelProfileSnapshot(BaseModel):
@@ -2828,6 +2830,16 @@ def create_app(
             raise HTTPException(status_code=422, detail="display_name is required")
         if service.accounts.get(user_id) is not None:
             raise HTTPException(status_code=409, detail="account already exists")
+        if request.adopt_existing_player:
+            assert service.store is not None
+            try:
+                player = service.store.get_player(user_id)
+            except PlayerNotFound as exc:
+                raise HTTPException(status_code=404, detail="player not found") from exc
+            if str(player["kind"]) == "human":
+                raise HTTPException(status_code=409, detail="player already human")
+            if str(player["kind"]) != "ai":
+                raise HTTPException(status_code=422, detail="player is not an ai")
         try:
             account, token = service.accounts.create(
                 user_id,
@@ -2840,6 +2852,16 @@ def create_app(
                     status_code=409, detail="account already exists"
                 ) from exc
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if request.adopt_existing_player:
+            assert service.store is not None
+            try:
+                service.store.adopt_ai_player(user_id, now=service.now())
+            except PlayerNotFound as exc:
+                raise HTTPException(
+                    status_code=404, detail="player not found"
+                ) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"account": account, "token": token}
 
     @app.post("/v1/channels/{channel_id}/roster")

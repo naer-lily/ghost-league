@@ -60,6 +60,52 @@ Rules:
 The provisioning token is only for account creation. It cannot call
 `/v1/me/*`, and an ordinary account token cannot call the provisioning route.
 
+### Adopting one legacy AI player
+
+`adopt_existing_player` promotes one existing Waka `players.id` that is still
+`kind='ai'` into an ordinary account without changing its player id:
+
+```http
+POST /v1/provisioning/accounts
+Authorization: Bearer <provisioning-token>
+Content-Type: application/json
+
+{
+  "user_id": "ai-0123456789ab",
+  "display_name": "Adopted player",
+  "activity_label": "练习",
+  "adopt_existing_player": true
+}
+```
+
+Adoption rules:
+
+- `adopt_existing_player` defaults to `false`; the default path creates a new
+  account exactly as v1 does.
+- `user_id` must be an existing `players.id` with `kind='ai'`. A missing player
+  returns `404`; an already-human player returns `409` with
+  `player already human`; the owner is still rejected with `422`.
+- An account is created only if that id has none. A duplicate adoption or any
+  other existing account returns `409`.
+- The player row is promoted in one league transaction to `kind='human'`,
+  `controller='human'`, `source_kind='local_increment'` and `is_active=1`.
+- `source_key_hash`, `joined_week`, `last_seen_week`, `created_at`, XP/history
+  and group membership are preserved. The player row is updated in place, never
+  deleted or recreated, and `channel_players` rows are not touched.
+- A normal diamond wallet is created in the same transaction.
+- The returned token is an ordinary account token. The first `/v1/me/*` call
+  follows the normal human path.
+
+After adoption, Waka identity lookup is kind-independent: both
+`get_player_by_source_key_hash()` and the weekly `upsert_ai_player()` match on
+`source_key_hash` alone. A later Waka roster sync therefore refreshes the
+adopted human's display name and `last_seen_week` and returns `created=False`
+instead of inserting a duplicate AI row.
+
+This is a **migration primitive for one player at a time**, not the full bulk
+migration. No live database, production deployment or existing Waka row was
+changed here; callers must choose ids and run adoption deliberately.
+
 ## ai_channel package
 
 `ai_channel/` is a separate, stdlib-only simulator. It uses `urllib.request`,
@@ -128,14 +174,21 @@ Implemented in v1:
 - `ai_channel/` provisioning, local token state, XP ticks and optional star
   purchases through public API calls.
 
-**Not done:** full migration of the legacy AI path.
+**Single-player adoption primitive implemented.** Full bulk migration of the
+legacy AI path is still pending.
 
-- Existing Waka `kind='ai'` `players` rows are unchanged.
-- Existing `channel_players` rows are unchanged.
+- An existing Waka `kind='ai'` player can be adopted into an ordinary account
+  one at a time through `adopt_existing_player`, preserving its player id,
+  history, group membership and channel mapping.
+- Waka lookup and weekly roster sync are safe after adoption: they match the
+  same `source_key_hash` regardless of `kind` and do not recreate an AI row.
+- Existing unadopted Waka `kind='ai'` rows and their `channel_players` rows are
+  otherwise unchanged.
 - The legacy Channel ingest endpoints remain for Waka / external Channels and
   are still not the target path for new simulated AI.
-- There is no data migration, no account backfill and no removal of the
-  remaining internal `kind='ai'` branches.
+- There is no automatic backfill, no bulk account migration and no removal of
+  the remaining internal `kind='ai'` branches. The owner must select and adopt
+  players explicitly.
 - No live database or production deployment was changed by this slice.
 
 The long-term design remains in the `ghost-league` skill reference

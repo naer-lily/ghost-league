@@ -204,9 +204,16 @@ python3 -m waka_channel.cli tick
   `/v1/shop/purchase`；不写 Ghost 数据库，不调用私有接口。
 - 账号第一次调用 `/v1/me/*` 时走既有 `ensure_human_player` 路径，游戏行是
   `kind='human'`；Ghost 不写 AI 标记。
+- 旧 Waka 的 `kind='ai'` 玩家可以通过 provisioning 的
+  `adopt_existing_player=true` 原地 adoption 成普通账号：player id、`source_key_hash`、
+  XP/历史、小组关系和 `channel_players` 映射都保留，只把 `kind` / `controller` /
+  `source_kind` 改为 human 并补建钱包。adoption 是一次一个玩家的迁移原语，不删除或
+  重建 player，也不改 `channel_players`。
+- adoption 后 Waka 身份查询按 `source_key_hash` 匹配、不按 `kind` 过滤；周 roster
+  同步会刷新同一个玩家，不会重新造一个 AI 行。
 - 旧 Channel ingest（roster / increments）继续服务 Waka 等外部 Channel，**不是**
-  新模拟 AI 的目标路径。Waka 现有的 `kind='ai'` players 和 `channel_players` 未迁移；
-  完整迁移尚未完成，见 [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
+  新模拟 AI 的目标路径。未 adoption 的 `kind='ai'` players 和 `channel_players` 保持
+  原样；完整批量迁移尚未完成，见 [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
 
 ## 历史归属
 
