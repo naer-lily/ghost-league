@@ -124,10 +124,12 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
   `PYTHONPATH=. python3 scripts/migrate_player_identity.py --db data/league/league.db`；
   已迁移库上幂等，不新增备份。回滚时停服务、恢复备份（连同需要的 `-wal` / `-shm`
   状态）并回退代码。live provisioning 路由已配置 token 并启用（token 只在服务 env 与
-  `ai_channel/config.json`，均 0600、untracked，不打印、不提交），`ai_channel`
-  已有 1074 个普通账号。`ai_channel serve` 常驻入口已存在；systemd unit 模板在
-  `ai_channel/deploy/ai-channel.service`，但未安装、未启用；`serve` 默认
-  `--prefix sim-`，不会使用 Waka `ch-` token；完整行为策略仍待后续。
+  `ai_channel/config.json`，均 0600、untracked，不打印、不提交），本地 token DB
+  保留 1074 个 Waka `ch-` 普通账号。`ai_channel serve` 常驻入口已存在；systemd
+  unit `ai-channel.service` 已于 2026-11-05 15:07 CST 安装并启用，当前 active，
+  运行 `serve --prefix sim-`。`sim-` 前缀目前匹配 0 个账号，服务处于 idle（日志
+  accounts=0，不发起 HTTP 请求）；它只处理 `sim-` 前缀，不加载也不使用 Waka
+  `ch-` token。完整行为策略（bets/tasks/rival/chests）仍待后续。
 
 ## API 与 PWA
 

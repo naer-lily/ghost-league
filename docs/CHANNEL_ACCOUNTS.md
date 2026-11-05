@@ -176,10 +176,19 @@ V1 policy:
   item price. Choose the lowest-price available `star` / `seasonal_star`.
 - `request_id = ai_star:{user_id}:{item_id}:{YYYYMMDD}` prevents a repeated
   tick from double-buying.
-- No bets, tasks, rival selection or multi-account coordination.
+- No bets, tasks, rival selection, chests or multi-account coordination.
 - No Ghost DB access and no private endpoints.
 - `serve` runs the tick loop residently; the behavior policy itself is still deliberately
   small.
+
+### Deployment status
+
+`ai-channel.service` was installed and enabled on 2026-11-05 15:07 CST and is
+active. It runs `serve --prefix sim-` from `/opt/ghost-league/ai_channel`. The
+current local state DB has zero `sim-` accounts, so each cycle logs `accounts=0`
+and makes no HTTP request; the service is idle. It filters to `sim-` accounts,
+so it never loads or uses Waka `ch-` tokens. There is no timer; systemd starts
+the long-running service at boot.
 
 ## Current scope and remaining cleanup
 
@@ -201,12 +210,12 @@ Remaining cleanup:
   must not write a player identity column or branch on one.
 - Live provisioning is enabled: the token is configured in the service
   environment and `ai_channel/config.json` (both `0600`, untracked), so
-  `ai_channel` can use the route and its token DB already holds the 1074
-  ordinary accounts. Keep the token out of logs and Git.
-- `ai_channel/` has tokens, one-shot commands and a resident `serve` loop. The
-  systemd unit template at `ai_channel/deploy/ai-channel.service` is not
-  installed or enabled, and `serve` defaults to `--prefix sim-`, so it cannot
-  touch Waka `ch-` tokens. A full behavior policy remains future work.
+  `ai_channel` can use the route. The repository-root local token DB retains the
+  1074 Waka `ch-` ordinary accounts. Keep the token out of logs and Git.
+- `ai_channel/` has tokens, one-shot commands and a resident `serve` loop, now
+  deployed as `ai-channel.service` (see Deployment status). A full behavior
+  policy (bets, tasks, rival selection, chests) remains future work and is not
+  implemented.
 
 The long-term design remains in the `ghost-league` skill reference
 `references/agent-symmetry.md`.

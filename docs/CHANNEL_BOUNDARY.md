@@ -217,10 +217,12 @@ python3 -m waka_channel.cli tick
   不存在 `SOURCE_AI`。
 - live 服务已配置 provisioning token，`/v1/provisioning/accounts` 已启用并鉴权；
   token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），不打印、
-  不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074 个普通账号。
-  `ai_channel serve` 常驻入口已存在；systemd unit 模板在
-  `ai_channel/deploy/ai-channel.service`，但未安装、未启用；`serve` 默认
-  `--prefix sim-`，不会使用 Waka `ch-` token；完整行为策略仍待后续。见
+  不提交。`ai_channel/` 可用该路由，仓库根的本地 token DB 保留 1074 个 Waka
+  `ch-` 普通账号。`ai_channel serve` 常驻入口已存在；systemd unit
+  `ai-channel.service` 已于 2026-11-05 15:07 CST 安装并启用，当前 active，运行
+  `serve --prefix sim-`。`sim-` 前缀目前匹配 0 个账号，服务因此处于 idle（日志
+  accounts=0，不发起 HTTP 请求）；它只处理 `sim-` 前缀，不会加载或使用 Waka
+  `ch-` token。完整行为策略（bets/tasks/rival/chests）仍是未来工作。见
   [`CHANNEL_ACCOUNTS.md`](CHANNEL_ACCOUNTS.md)。
 
 ## Player identity live migration

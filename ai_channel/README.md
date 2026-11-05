@@ -37,9 +37,10 @@ the existing ordinary accounts. Never print or commit the token.
 
 `state_db` is resolved relative to the process working directory. The example
 path (`ai_channel/data/ai_accounts.db`) is meant for one-shot commands run from
-the repository root. The systemd unit runs from `/opt/ghost-league/ai_channel`,
-so the config it loads should use `data/ai_accounts.db` or an absolute path
-such as `/opt/ghost-league/ai_channel/data/ai_accounts.db`.
+the repository root. The installed systemd unit runs from
+`/opt/ghost-league/ai_channel`, so the config it loads should use
+`data/ai_accounts.db` or an absolute path such as
+`/opt/ghost-league/ai_channel/data/ai_accounts.db`.
 
 ## One-shot commands
 
@@ -125,7 +126,7 @@ supposed to tick those accounts.
 
 ## systemd unit
 
-The template lives at
+The unit source lives at
 [`deploy/ai-channel.service`](deploy/ai-channel.service). It runs the package
 from `/opt/ghost-league/ai_channel`:
 
@@ -137,9 +138,14 @@ Restart=on-failure
 ```
 
 The unit contains no token. The token stays in `config.json` (mode `0600`, Git
-ignored) and is read by the process. The template is provided for future
-deployment only; this package does not install or enable it, and there is no
-service or timer in the repository that starts it automatically.
+ignored) and is read by the process.
+
+`ai-channel.service` was installed and enabled on 2026-11-05 15:07 CST and is
+active. It runs `serve --prefix sim-`. The configured local state DB currently
+has zero `sim-` accounts, so each cycle logs `accounts=0` and makes no HTTP
+request; the service is idle. It filters to `sim-` accounts, so it never loads
+or uses Waka `ch-` tokens. There is no timer; systemd starts the long-running
+service at boot.
 
 ## V1 scope
 
@@ -148,10 +154,11 @@ service or timer in the repository that starts it automatically.
   existing ordinary players, and this package never writes Ghost's database.
 - One XP increment per account per hour, default 900 seconds.
 - Optional one cheapest affordable star purchase per day.
-- No bets, tasks, rival selection, or multi-account coordination.
+- No bets, tasks, rival selection, chests, or multi-account coordination.
 - No direct database writes and no private Ghost endpoints.
 - One-shot commands plus a resident loop; behavior policy is still deliberately
-  small.
+  small. Full behavior policy (bets, tasks, rival selection, chests) remains
+  future work.
 
 See [`../docs/CHANNEL_ACCOUNTS.md`](../docs/CHANNEL_ACCOUNTS.md) for the architecture,
 player-identity migration and remaining cleanup.
