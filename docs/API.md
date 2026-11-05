@@ -82,10 +82,10 @@ token 只以 SHA-256 哈希保存在 `data/api/accounts.db`，不会出现在 AP
 
 账号 provisioning 接口使用**独立的 provisioning token**（环境变量
 `GHOST_LEAGUE_PROVISIONING_TOKEN`），只负责创建普通账号并一次性返回账号 token。
-它不能调用 `/v1/me/*`，普通账号 token 也不能调用 provisioning 接口；未配置时返回
-`503 service_token_not_configured`。live 服务当前未配置该 token，因此线上 provisioning
-路由返回 503，直到运维补上。账号创建后第一次调用 `/v1/me/*` 仍走普通真人路径，
-不写入 AI 标记。
+它不能调用 `/v1/me/*`，普通账号 token 也不能调用 provisioning 接口；缺少 token 配置
+时该路由保持禁用。live 服务已配置该 token，provisioning 路由已启用并按 Bearer 鉴权；
+token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），不打印、不提交。
+账号创建后第一次调用 `/v1/me/*` 仍走普通真人路径，不写入 AI 标记。
 
 请求体：
 

@@ -101,10 +101,11 @@ Ghost (通用联赛引擎)
   `kind='human'`，`group_members.is_human` 全部为 human；账户 token 在
   `ai_channel/data/ai_accounts.db`（0600，Git-ignored）。
 - **迁移后 caveat**：旧 Channel ingest 仍为 Waka 保留，新建 `kind='ai'` 映射仍会
-  创建 AI player；旧 `kind` 分支与 human-only 门仍在代码里。live 服务未配置
-  provisioning token，`POST /v1/provisioning/accounts` 在运维补上 token 前返回
-  `503 service_token_not_configured`。`ai_channel/` 已有 token 与 CLI，但还没有
-  常驻 scheduler 或完整行为策略。Channel roster 刷新不会把已存在的 human 玩家
+  创建 AI player；旧 `kind` 分支与 human-only 门仍在代码里。live 服务已配置
+  provisioning token，`POST /v1/provisioning/accounts` 已启用并按 Bearer 鉴权；
+  token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），不打印、
+  不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074 个 adopted 账号，但还
+  没有常驻 scheduler 或完整行为策略。Channel roster 刷新不会把已存在的 human 玩家
   降级。详见 `docs/AI_ACCOUNTS.md`。
 - 新 Channel ingest 已落在 `channel_players` / `channel_events`，按 `(channel_id, player_ref)`
   映射身份，按全局 `event_id` 幂等；不读取 `sources` / `opponent_week_plan`，不调用

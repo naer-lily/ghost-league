@@ -32,11 +32,10 @@ Ghost accepts an optional separate provisioning credential:
 It never falls back to the owner, bootstrap or Channel token. The route
 compares with `hmac.compare_digest`.
 
-If no provisioning token is configured, the route returns
-`503 service_token_not_configured`. That is the current live state: the
-service has no provisioning token, so the live provisioning route stays
-unavailable until an operator supplies one. Missing or wrong credentials with
-a configured token return `401`.
+A missing provisioning token leaves the route disabled. The live service is
+configured: the route is enabled and authenticated. The token lives only in the
+service environment and `ai_channel/config.json` (both `0600`, untracked); it is
+never printed or committed. Missing or wrong credentials return `401`.
 
 ```http
 POST /v1/provisioning/accounts
@@ -233,9 +232,10 @@ Remaining cleanup:
   mappings, but the branches were not deleted.
 - Brand-new Channel mappings with `kind='ai'` still create AI players; the
   guard only protects existing adopted humans from being demoted.
-- The live service has no provisioning token configured, so
-  `/v1/provisioning/accounts` returns `503 service_token_not_configured` until
-  an operator supplies one.
+- Live provisioning is enabled: the token is configured in the service
+  environment and `ai_channel/config.json` (both `0600`, untracked), so
+  `ai_channel` can use the route and its token DB already holds the 1074
+  adopted accounts. Keep the token out of logs and Git.
 - `ai_channel/` has tokens and a CLI, but there is no resident scheduler or
   full behavior policy yet.
 - The adoption migration was a one-off administrative run; there is no

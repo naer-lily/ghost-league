@@ -29,8 +29,11 @@ Environment overrides:
 - `AI_CHANNEL_BASE_URL` overrides `base_url`.
 
 The setup requires Ghost to run with `GHOST_LEAGUE_PROVISIONING_TOKEN` (or
-`create_app(provisioning_token=...)`). A missing token makes provisioning
-return `503 service_token_not_configured`.
+`create_app(provisioning_token=...)`); without that token the route stays
+disabled. The live service is already configured and the route is enabled: the
+token is in the service environment and `ai_channel/config.json` (both `0600`,
+untracked). `ai_channel` can use the route, and its local token DB already holds
+the 1074 adopted accounts. Never print or commit the token.
 
 The example `state_db` path (`ai_channel/data/ai_accounts.db`) is relative to
 the repository root. If you run from another directory, adjust it or pass an

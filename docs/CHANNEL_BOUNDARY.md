@@ -222,10 +222,11 @@ python3 -m waka_channel.cli tick
 - 迁移时也把 1074 条 `channel_players.kind` 改成 `human`；后续 Waka roster
   刷新若再送 `kind='ai'`，已有 human 玩家不会被降级，映射也会保持 human。
 - 旧 Channel ingest 仍服务 Waka；新建的 `kind='ai'` 映射仍会创建 AI player，
-  旧 `kind` 分支、human-only 门和自动 backfill 尚未清理。live 服务未配置
-  provisioning token，`/v1/provisioning/accounts` 在运维补上 token 前返回
-  `503 service_token_not_configured`；`ai_channel/` 已有 token 和 CLI，但还没有
-  常驻 scheduler 或完整行为策略。见 [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
+  旧 `kind` 分支、human-only 门和自动 backfill 尚未清理。live 服务已配置
+  provisioning token，`/v1/provisioning/accounts` 已启用并鉴权；token 只在服务 env
+  与 `ai_channel/config.json`（均 0600、Git-ignored），不打印、不提交。`ai_channel/`
+  可用该路由，本地 token DB 已有 1074 个 adopted 账号，但还没有常驻 scheduler 或
+  完整行为策略。见 [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
 
 ## 历史归属
 

@@ -110,7 +110,9 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
 - **Legacy AI 迁移已完成**：2026-11-05 已把线上 1074 个 legacy `kind='ai'` 玩家原地
   adoption 为普通账号；当前 0 AI / 1076 human，1074 条 Channel 映射均为 `human`。
   旧 Channel ingest、`kind` 分支和 human-only 门仍为 Waka 保留；live provisioning
-  路由在配置 token 前返回 503，`ai_channel` 还没有常驻 scheduler。
+  路由已配置 token 并启用（token 只在服务 env 与 `ai_channel/config.json`，均 0600、
+  untracked，不打印、不提交），`ai_channel` 已有 1074 个 adopted 账号，但还没有
+  常驻 scheduler。
 
 ## API 与 PWA
 
