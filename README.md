@@ -67,12 +67,25 @@ python3 -m uvicorn ghost_league.pwa:app --host 127.0.0.1 --port 8096
 
 ### Waka 数据与 ai_channel
 
-Waka 的缓存和按周投影在 `waka_channel/`：只读本地榜单快照，复用
-`ghost_league/schedule.py` 的纯投影函数，产出与今天相同的 `event_id` / `seconds`。
-XP 传输由独立 `ai_channel/` 的 Waka 模式完成：它把每个 `player_ref` 映射到
-`ch-` + sha256(`ghost-channel-player-v1\0waka\0` + `player_ref`) 的普通账号，
-再用 `ai_accounts.db` 里的 token 调用 `POST /v1/me/increments`。Ghost 不注册
-Waka 调度任务，也不 import Channel 或 provider 客户端。
+Waka 是 source/projection 库，只由 `ai_channel` 的 Waka 模式使用。`waka_channel/`
+只读本地榜单快照 `data/cache/cn-978.json`，复用 `ghost_league/schedule.py` 的纯投影
+函数，产出与原来相同的 `event_id` / `seconds`。XP 传输由独立 `ai_channel/` 完成：
+它把每个 `player_ref` 映射到 `ch-` + sha256(`ghost-channel-player-v1\0waka\0` +
+`player_ref`) 的已有普通账号，再用 `ai_accounts.db` 里的 token 调用
+`POST /v1/me/increments`。Ghost 不注册 Waka/source 调度任务，也不 import Channel
+或 provider 客户端。
+
+Waka cutover 已于 2026-11-05 ~15:41 CST 在 live 执行，切流前备份在
+`/data/backups/ghost-league/pre-waka-cutover-20261105T154101`。生产传输是 systemd
+timer，不是 Ghost 后台任务：
+
+- `ai-channel-waka.timer` 每小时 `:01` 触发 oneshot `ai-channel-waka.service`，运行
+  `ai_channel tick --source waka`，读取缓存并逐个调用 `/v1/me/increments`。
+- `ai-channel-fetch.timer` 每周一 `00:02` 刷新 `data/cache/cn-978.json`。
+- `ai-channel-waka.service` 是由 timer 触发的 oneshot unit，不是常驻进程。
+- `ai-channel.service` 仍是 `serve --prefix sim-` 的 idle 通用常驻循环，不承载 Waka。
+
+手动/排查时仍可执行：
 
 ```bash
 export PYTHONPATH=/opt/ghost-league:/opt/ghost-league/ai_channel
@@ -86,10 +99,10 @@ python3 -m ai_channel tick --config ai_channel/config.json --source waka \
   --state data/cache/waka-channel-state.json
 ```
 
-缺 token 的 `player_ref` 只记录并跳过，不创建玩家或账号。传输不再走
-`/v1/channels/...`；历史 `channel_events` 行保留，前端和每日 XP resolver 不改。
-`ai_channel serve --source waka` 是常驻形式；`sim-` 通用模式保持不变。live
-`ai-channel.service` 仍运行 `--prefix sim-`，切流和重启不在本单执行。
+`ai_channel serve --source waka` 仍可手动运行，但不是 live 传输。缺 token 的
+`player_ref` 只记录并跳过，不创建玩家或账号。传输不走 `/v1/channels/...`；历史
+`channel_events` 行保留，新事件写入 `activity_events`，前端和每日 XP resolver 仍取
+两者较大值，所以现有前端 XP 不变。
 
 ### 进程内调度器
 
@@ -106,8 +119,9 @@ Ghost 调度器只注册通用游戏任务：
 - `rival-auto`：周二 00:00 为没有宿敌的真人自动匹配；本周内可补跑。
 - `daily-bets`：每天 10:30 结算日注；09:00 锁注，之后不能再下。
 
-Waka 缓存刷新、roster 和 XP push 是 Channel/运维侧工作，不在 Ghost 调度器里；
-历史 `job_runs` 中的旧任务行保留作审计，不删除。
+Waka 缓存刷新和 XP 传输由 `ai-channel-fetch.timer` / `ai-channel-waka.timer`
+负责，不在 Ghost 调度器里；Waka roster 也不再由 Ghost 调度。历史 `job_runs` 中的
+旧任务行保留作审计，不删除。
 
 结算只处理上一个本地周，不预建下一周；提前或重复运行会安全跳过。
 
@@ -138,13 +152,17 @@ Waka 缓存刷新、roster 和 XP push 是 Channel/运维侧工作，不在 Ghos
   新实例或演练：
   `PYTHONPATH=. python3 scripts/migrate_player_identity.py --db data/league/league.db`；
   已迁移库上幂等，不新增备份。回滚时停服务、恢复备份（连同需要的 `-wal` / `-shm`
-  状态）并回退代码。live provisioning 路由已配置 token 并启用（token 只在服务 env 与
-  `ai_channel/config.json`，均 0600、untracked，不打印、不提交），本地 token DB
-  保留 1074 个 Waka `ch-` 普通账号。`ai_channel serve` 常驻入口已存在；systemd
-  unit `ai-channel.service` 已于 2026-11-05 15:07 CST 安装并启用，当前 active，
-  仍运行 `serve --prefix sim-`。`sim-` 前缀目前匹配 0 个账号，服务处于 idle（日志
-  accounts=0，不发起 HTTP 请求）；它只处理 `sim-` 前缀，不加载也不使用 Waka
-  `ch-` token。`--source waka` 已实现，但本单不做 live 切流、不重启服务。
+  状态）并回退代码。
+- **live provisioning 与 Waka cutover**：live provisioning 路由已配置 token 并启用
+  （token 只在服务 env 与 `ai_channel/config.json`，均 0600、untracked，不打印、
+  不提交），本地 token DB 保留 1074 个 Waka `ch-` 普通账号。Waka cutover 已于
+  2026-11-05 ~15:41 CST 执行，切流前备份在
+  `/data/backups/ghost-league/pre-waka-cutover-20261105T154101`。生产传输由
+  `ai-channel-waka.timer` 每小时 `:01` 触发 oneshot `ai-channel-waka.service`；
+  `ai-channel-fetch.timer` 每周一 `00:02` 刷新缓存。`ai-channel.service` 仍是
+  `serve --prefix sim-` 的 idle 通用常驻循环（当前 0 个 `sim-` 账号，日志
+  accounts=0，不发起 HTTP 请求），不是 Waka tick，也不加载 `ch-` token。
+  `ai-channel-waka.service` 是 oneshot，不是常驻进程。
 - **Waka 作业退出 Ghost 调度器**：`waka-tick`、`waka-roster`、`source-fetch` 不再注册；
   历史 `job_runs` 行保留。Waka XP 切到 `ai_channel` 后写入 `activity_events`，
   历史 `channel_events` 行保留，前端不变，每日 XP resolver 仍取两者较大值。

@@ -22,10 +22,13 @@ token, then use the same public endpoints as everyone else.
   `source_key_hash`; those fields are provenance, not identity. There is no
   `SOURCE_AI`, no `players.kind` / `players.controller`, and no
   `channel_players.kind`.
-- Waka's XP transport is account-backed: `waka_channel` supplies the cache and
-  hourly projection, and `ai_channel --source waka` uses the existing 1074
-  ordinary `ch-` account tokens to call `POST /v1/me/increments`. Ghost has no
-  Waka scheduler job and imports no Channel/provider client.
+- Waka's production XP transport is account-backed and was cut over live on
+  2026-11-05 ~15:41 CST: `waka_channel` supplies the cache and hourly projection,
+  and `ai_channel tick --source waka`—triggered hourly at `:01` by
+  `ai-channel-waka.timer` as a oneshot `ai-channel-waka.service`—uses the
+  existing 1074 ordinary `ch-` account tokens to call `POST /v1/me/increments`.
+  `ai-channel-fetch.timer` refreshes the cache weekly on Monday at 00:02. Ghost
+  has no Waka scheduler job and imports no Channel/provider client.
 - `group_members.is_human` remains only for the existing UI contract. Every
   ordinary member is written with value `1`; it is not a new identity class.
 
@@ -243,13 +246,32 @@ python3 -m ai_channel serve --config ai_channel/config.json --source waka \
 
 ### Deployment status
 
-`ai-channel.service` was installed and enabled on 2026-11-05 15:07 CST and is
-active. It still runs `serve --prefix sim-` from `/opt/ghost-league/ai_channel`.
-The current local state DB has zero `sim-` accounts, so each cycle logs
-`accounts=0` and makes no HTTP request; the service is idle. It filters to
-`sim-` accounts, so it never loads or uses Waka `ch-` tokens. `--source waka`
-is implemented, but the live service is not switched and not restarted in this
-task. There is no timer; systemd starts the long-running service at boot.
+The Waka cutover was applied live on 2026-11-05 ~15:41 CST. The pre-cutover
+backup is `/data/backups/ghost-league/pre-waka-cutover-20261105T154101`
+(`league.db`, `ai_accounts.db`, Waka state and the then-current
+`ai-channel.service`).
+
+Production transport is a systemd timer, not a resident process:
+
+- `ai-channel-waka.timer` runs hourly at `:01` and activates the oneshot
+  `ai-channel-waka.service`, which executes `ai_channel tick --source waka`
+  with cache `/opt/ghost-league/data/cache/cn-978.json` and state
+  `/opt/ghost-league/data/cache/waka-channel-state.json`.
+- `ai-channel-fetch.timer` refreshes `data/cache/cn-978.json` weekly on Monday
+  at 00:02 through the oneshot `ai-channel-fetch.service`; it writes only the
+  cache.
+- `ai-channel-waka.service` is a oneshot unit activated by the timer, not a
+  resident process.
+- `ai-channel.service` remains the resident generic `serve --prefix sim-` loop.
+  Its local state has zero `sim-` accounts, so it stays idle (`accounts=0`, no
+  HTTP request); it is not the Waka tick and never loads or uses `ch-` tokens.
+
+Ghost's in-process scheduler registers only generic game jobs and no longer has
+`waka-tick`, `waka-roster` or `source-fetch`; historical `job_runs` rows remain
+for audit. Waka's existing `channel_events` rows also remain. New Waka XP writes
+`activity_events` through `/v1/me/increments`, and the daily XP resolver still
+takes the larger of the two, so frontend XP and historical channel events are
+preserved.
 
 ## Current scope and remaining cleanup
 
@@ -262,6 +284,10 @@ Implemented:
 - `ai_channel --source waka`: existing cache + `waka_channel.projection` sent
   per account through `POST /v1/me/increments`, with the existing Waka cursor,
   missing-token reporting and no Channel ingest.
+- Waka cutover applied live on 2026-11-05 ~15:41 CST: hourly
+  `ai-channel-waka.timer` oneshot for XP transport, weekly
+  `ai-channel-fetch.timer` for the cache, and `ai-channel.service` left as the
+  idle generic `sim-` loop.
 - Idempotent player-identity schema migration with automatic backup, applied
   live on 2026-11-05 14:53 CST.
 - Waka as a Channel whose leaderboard players are ordinary contestants; only
@@ -280,10 +306,11 @@ Remaining cleanup:
   environment and `ai_channel/config.json` (both `0600`, untracked), so
   `ai_channel` can use the route. The repository-root local token DB retains the
   1074 Waka `ch-` ordinary accounts. Keep the token out of logs and Git.
-- `ai_channel/` has tokens, one-shot commands and a resident `serve` loop, now
-  deployed as `ai-channel.service` (see Deployment status). The live service is
-  still on `--prefix sim-`; switching it to `--source waka`, disabling the old
-  jobs and restarting are separate cutover steps.
+- `ai_channel/` has tokens, one-shot commands and a resident `serve` loop.
+  Production Waka transport is now the `ai-channel-waka.timer` oneshot plus the
+  weekly `ai-channel-fetch.timer`; `ai-channel.service` is only the idle generic
+  `sim-` loop. The cutover was applied live on 2026-11-05 ~15:41 CST; do not
+  describe `ai-channel.service` as carrying Waka.
 - Waka's existing `channel_events` rows remain untouched. New Waka XP writes
   `activity_events`; the daily XP resolver still takes the larger of the two,
   so current frontend data is preserved and the frontend is unchanged.

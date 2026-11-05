@@ -13,9 +13,10 @@ Ghost (通用联赛引擎)
 ```
 
 - **Ghost 不 import Channel，不调用 Source，不出现 provider 名称。**
-- Waka 的缓存与按周投影是 `waka_channel/` 的 source/projection 库；生产 XP 由
-  `ai_channel --source waka` 映射到已有普通账号 token，再调用 `/v1/me/increments`。
-  Ghost 不注册 Waka/source 调度任务，也不 import `waka_channel` 或 provider 客户端。
+- Waka 是 source/projection 库，仅由 `ai_channel` 的 Waka 模式使用：`waka_channel/`
+  负责缓存与按周投影，`ai_channel tick --source waka` 把投影映射到已有普通账号 token，
+  再调用 `/v1/me/increments`。Ghost 不注册 Waka/source 调度任务，也不 import
+  `waka_channel` 或 provider 客户端。
 - Ghost 只接收匿名 `player_ref`、展示资料和 `{event_id, seconds, occurred_at}`。
   Ghost 没有 player identity class：每名玩家都是普通参赛者，不按 human / ai 分支。
 - Channel 可以有状态和生命周期：拉周快照、cursor、重试、心跳、补推。
@@ -41,13 +42,15 @@ Ghost (通用联赛引擎)
   账号第一次读取走既有 `ensure_human_player`，写普通 player 行。Ghost 不写 AI
   标记，也不为模拟器新增私有接口或数据库旁路。身份和策略只留在 `ai_channel/`
   自己的状态里；provisioning 不再提供 `adopt_existing_player`。
-- **Waka projection transport**：`ai_channel tick --source waka` / `serve --source waka`
-  读取 `data/cache/cn-978.json` 与 `waka_channel.projection`，把每个 `player_ref`
+- **Waka projection transport**：`ai_channel tick --source waka` 读取
+  `data/cache/cn-978.json` 与 `waka_channel.projection`，把每个 `player_ref`
   映射为 `ch-` + sha256(`ghost-channel-player-v1\0waka\0` + `player_ref`) 的普通
   账号，再逐个 `POST /v1/me/increments`；`event_id` / `seconds` / `occurred_at`
   沿用现有 Waka 投影。账号 token 来自 `ai_accounts.db`；缺 token 只报告并跳过，
   不创建玩家。cursor 复用 Waka 状态文件，重复 tick 不重复发送；通用 `sim-` 模式
-  不变。没有走 Channel ingest，也没有 Ghost 数据库写入。
+  不变。没有走 Channel ingest，也没有 Ghost 数据库写入。生产传输由
+  `ai-channel-waka.timer` 每小时 :01 触发 oneshot `ai-channel-waka.service` 执行
+  `tick --source waka`；`serve --source waka` 仍可手动/演练运行，但不是 live 传输。
 
 ## Widget Studio（图片模版编辑器）
 
@@ -124,12 +127,17 @@ Ghost (通用联赛引擎)
 - live 服务已配置 provisioning token，`POST /v1/provisioning/accounts` 已启用并按
   Bearer 鉴权；token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），
   不打印、不提交。`ai_channel/` 可用该路由，仓库根的本地 token DB 保留 1074 个
-  Waka `ch-` 普通账号。`ai_channel serve` 常驻入口已存在；systemd unit
-  `ai-channel.service` 已于 2026-11-05 15:07 CST 安装并启用，当前 active，仍运行
-  `serve --prefix sim-`。`sim-` 前缀目前匹配 0 个账号，服务因此处于 idle（日志
-  accounts=0，不发起 HTTP 请求）；它只处理 `sim-` 前缀，不会加载或使用 Waka
-  `ch-` token。Waka 模式的 `--source waka` 已实现，但本单不做 live 切流、不重启
-  服务；切流后同一批 `ch-` 账号才由 Waka 模式使用。完整行为策略
+  Waka `ch-` 普通账号。
+- **Waka cutover 已执行（2026-11-05 ~15:41 CST）**：生产传输由
+  `ai-channel-waka.timer` 每小时 :01 触发 oneshot `ai-channel-waka.service`，运行
+  `ai_channel tick --source waka` 读取 `data/cache/cn-978.json`，把 `player_ref`
+  映射到已有 `ch-` 普通账号并调用 `/v1/me/increments`。`ai-channel-fetch.timer`
+  每周一 00:02 刷新同一缓存。`ai-channel-waka.service` 是 oneshot，不是常驻进程；
+  `ai-channel.service` 仍是 `serve --prefix sim-` 的 idle 通用常驻循环（当前 0 个
+  `sim-` 账号，日志 accounts=0，不发起 HTTP 请求），不是 Waka tick，也不加载
+  `ch-` token。切流前备份在
+  `/data/backups/ghost-league/pre-waka-cutover-20261105T154101`（含 `league.db`、
+  `ai_accounts.db`、Waka state 和当时的 `ai-channel.service`）。完整行为策略
   （bets/tasks/rival/chests）仍是未来工作。Channel roster 刷新不会改变 provenance。
 - Ghost 进程内调度器已不再注册 `waka-tick`、`waka-roster` 或 `source-fetch`；
   `ghost_league/runtime_jobs.py` 只注册通用游戏任务，不 import Channel/provider。
@@ -187,12 +195,17 @@ npm test
 
 ## 定时任务
 
-- 所有周期任务由 API 进程内 `ghost_league/game/scheduler.py` 触发，FastAPI lifespan
-  启动/停止；不使用 systemd timer、cron、ifrule，也不新增 worker service。
+- Ghost 自己的周期任务由 API 进程内 `ghost_league/game/scheduler.py` 触发，FastAPI
+  lifespan 启动/停止；Ghost 不使用 systemd timer、cron、ifrule，也不新增 worker
+  service。Waka 传输是 `ai_channel` 的独立部署，不由 Ghost 调度器触发。
 - 任务注册在 `ghost_league/runtime_jobs.py`，只注册通用游戏任务
   （`weekly-settle`、`rival-auto`、`daily-bets`、`power`、`diamond-decay`）；
   不注册 Waka/source 任务，不 import Channel/Source/provider。`game/` 和 ingest
   路径仍不得 import Channel/Source。
+- Waka 的生产传输在 Ghost 之外：`ai-channel-waka.timer` 每小时 :01 触发 oneshot
+  `ai-channel-waka.service`（`tick --source waka`）；`ai-channel-fetch.timer` 每周一
+  00:02 刷新 `data/cache/cn-978.json`。`ai-channel.service` 只是 idle 的通用
+  `serve --prefix sim-` 常驻循环，不承载 Waka。
 - 历史 `job_runs` 里的 `waka-tick` / `waka-roster` / `source-fetch` 行保留作审计，
   不删除、不改写；新调度器不再产生这些名字。
 - 运行记录在 `league.db` 的 `job_runs`：`(name, period_key)` 唯一，带租约；多进程

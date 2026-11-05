@@ -87,6 +87,14 @@ python3 -m ai_channel serve --config ai_channel/config.json --source waka \
   --state data/cache/waka-channel-state.json
 ```
 
+Production does not run this manually or as a resident `serve`. The Waka cutover
+was applied live on 2026-11-05 ~15:41 CST (pre-cutover backup:
+`/data/backups/ghost-league/pre-waka-cutover-20261105T154101`).
+`ai-channel-waka.timer` runs the tick hourly at `:01` as the oneshot
+`ai-channel-waka.service`, and `ai-channel-fetch.timer` refreshes the cache
+weekly on Monday at 00:02. The resident `ai-channel.service` is a separate idle
+generic `sim-` loop and does not carry Waka.
+
 How it works:
 
 - The cache is read only; `waka_channel.projection` produces the same hourly
@@ -199,9 +207,9 @@ the existing Waka-backed rows use `ch-...` ids, while simulator accounts use
 
 ## systemd unit
 
-The unit source lives at
-[`deploy/ai-channel.service`](deploy/ai-channel.service). It runs the package
-from `/opt/ghost-league/ai_channel`:
+The repository template at
+[`deploy/ai-channel.service`](deploy/ai-channel.service) is the generic resident
+loop. It runs the package from `/opt/ghost-league/ai_channel`:
 
 ```ini
 [Service]
@@ -213,18 +221,29 @@ Restart=on-failure
 The unit contains no token. The token stays in `config.json` (mode `0600`, Git
 ignored) and is read by the process.
 
-`ai-channel.service` was installed and enabled on 2026-11-05 15:07 CST and is
-active. It still runs `serve --prefix sim-`. The configured local state DB
-currently has zero `sim-` accounts, so each cycle logs `accounts=0` and makes no
-HTTP request; the service is idle. It filters to `sim-` accounts, so it never
-loads or uses Waka `ch-` tokens. Waka mode (`--source waka`) is implemented, but
-the live service is not switched or restarted in this task. There is no timer;
-systemd starts the long-running service at boot.
+The live host runs the generic service plus two timer-driven oneshot units after
+the Waka cutover, which was applied on 2026-11-05 ~15:41 CST (pre-cutover backup:
+`/data/backups/ghost-league/pre-waka-cutover-20261105T154101`):
 
-A future cutover changes the unit to `--source waka --cache ... --state ...` and
-sets `PYTHONPATH` to include `/opt/ghost-league`, so the sibling
-`waka_channel`/`ghost_league` packages are importable from the unit's working
-directory.
+- `ai-channel.service` — the resident generic `Type=simple` loop above. It is
+  active but idle: the local state has zero `sim-` accounts, so it logs
+  `accounts=0` and makes no HTTP request. It is not the Waka tick and never loads
+  Waka `ch-` tokens.
+- `ai-channel-waka.service` — a `Type=oneshot` unit activated by
+  `ai-channel-waka.timer` hourly at `:01` (`Persistent=true`). It runs
+  `ai_channel tick --source waka` with cache
+  `/opt/ghost-league/data/cache/cn-978.json` and state
+  `/opt/ghost-league/data/cache/waka-channel-state.json`, with `PYTHONPATH`
+  including `/opt/ghost-league`, and exits after the tick. It is not a resident
+  process.
+- `ai-channel-fetch.service` — a `Type=oneshot` unit activated by
+  `ai-channel-fetch.timer` weekly on Monday at 00:02 (`Persistent=true`). It runs
+  `scripts/source_fetch.py` and writes only `data/cache/cn-978.json`.
+
+Ghost's scheduler no longer registers `waka-tick`, `waka-roster` or
+`source-fetch` and imports no Channel/provider client; historical `job_runs`
+rows remain. Existing Waka `channel_events` rows remain too, and new XP writes
+`activity_events`, so the daily XP resolver preserves frontend values.
 
 ## V1 scope
 

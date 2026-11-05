@@ -8,11 +8,16 @@ Ghost League 的定时任务已经收进 API 进程。FastAPI lifespan 启动
 因此：
 
 - 不再安装任何 `ghost-league-*.timer`。
-- Ghost 侧只有 API/PWA 两个常驻服务；Waka XP 的 `ai-channel.service` 是独立的
-  Channel 服务，见 `ai_channel/deploy/ai-channel.service`。
-- 不依赖外部 cron、systemd timer 或 ifrule。
+- Ghost 侧只有 API/PWA 两个常驻服务。
+- Waka 的 XP 传输和缓存刷新是 `ai_channel` 的独立 systemd timer：
+  `ai-channel-waka.timer` 每小时 `:01` 触发 oneshot `ai-channel-waka.service`，
+  `ai-channel-fetch.timer` 每周一 `00:02` 刷新缓存；两者都不是 Ghost 任务。
+- `ai-channel-waka.service` 是 oneshot，不是常驻进程；`ai-channel.service` 是独立的
+  idle 通用 `sim-` 常驻循环，不承载 Waka。见 `ai_channel/README.md`。
+- Ghost 不依赖外部 cron、systemd timer 或 ifrule；Waka timer 属于 `ai_channel` 部署。
 - 仓库只保留 API/PWA 部署模板：`deploy/ghost-league-api.service`、
-  `deploy/ghost-league-web.service`。
+  `deploy/ghost-league-web.service`；`ai_channel` 的通用常驻模板在
+  `ai_channel/deploy/ai-channel.service`。
 
 ## 调度任务
 
@@ -28,8 +33,30 @@ Ghost League 的定时任务已经收进 API 进程。FastAPI lifespan 启动
 
 Waka/source 任务已移出 Ghost 调度器：`waka-tick`、`waka-roster`、`source-fetch`
 不再注册，`runtime_jobs.py` 也不 import Channel/provider。历史 `job_runs` 行保留。
-Waka 缓存/投影与 `ch-` 账号的 XP 传输由独立 `ai_channel --source waka` 负责
+Waka 缓存/投影与 `ch-` 账号的 XP 传输由独立 `ai_channel` 负责
 （见 `ai_channel/README.md`），不是 Ghost 后台任务。
+
+## Waka 传输 timer
+
+Waka cutover 已于 2026-11-05 ~15:41 CST 在 live 执行，切流前备份在
+`/data/backups/ghost-league/pre-waka-cutover-20261105T154101`。生产链路是
+`ai_channel` 的两个 timer 加一个 idle 通用服务：
+
+- `ai-channel-waka.timer`：`OnCalendar=*-*-* *:01:00`，每小时 `:01` 触发 oneshot
+  `ai-channel-waka.service`，运行 `ai_channel tick --source waka`，读取
+  `data/cache/cn-978.json`，把 `player_ref` 映射到已有 `ch-` 普通账号并调用
+  `/v1/me/increments`。
+- `ai-channel-fetch.timer`：`OnCalendar=Mon *-*-* 00:02:00`，每周一 `00:02` 触发
+  oneshot `ai-channel-fetch.service`，运行 `scripts/source_fetch.py` 刷新同一缓存；
+  只写缓存，不写游戏库。
+- `ai-channel-waka.service` 是 `Type=oneshot`，不是常驻进程。
+- `ai-channel.service` 是 `Type=simple` 的 `serve --prefix sim-` 通用常驻循环，
+  active 但当前 0 个 `sim-` 账号（日志 `accounts=0`，不发起 HTTP 请求）；它不是
+  Waka tick，也不加载 `ch-` token。
+
+两个 timer 都设置 `Persistent=true`。Ghost 调度器只保留通用游戏任务，不注册
+Waka/source 任务；历史 `job_runs` 和已有 Waka `channel_events` 行保留。新 XP 写
+`activity_events`，每日 resolver 仍取两者较大值，所以前端 XP 不变。
 
 启动 catch-up 的行为：
 
@@ -58,8 +85,9 @@ Channel 使用该接口）；它不用于 Waka 的 account-backed XP 路径。
 多进程同时运行调度器是安全的；租约保证同一周期只有一个进程真正执行。
 
 游戏数据库默认位于 `/srv/ghost-league/data/league/league.db`。Waka 缓存
-`data/cache/cn-978.json` 只由 `scripts/source_fetch.py` 或 Channel/运维显式刷新，
-不会把榜单行写进 `league.db`。
+`data/cache/cn-978.json` 由 `ai-channel-fetch.timer` 每周一 `00:02` 通过
+`scripts/source_fetch.py` 刷新，也可手动显式刷新；它只写缓存，不会把榜单行写进
+`league.db`。
 
 ## 安装 API/PWA 服务
 
@@ -109,6 +137,14 @@ systemctl status ghost-league-api.service ghost-league-web.service
 journalctl -u ghost-league-api.service -u ghost-league-web.service -f
 ```
 
+Waka 传输不在 Ghost 服务里，检查 `ai_channel` 的 timer 和 oneshot：
+
+```bash
+systemctl status ai-channel.service ai-channel-waka.timer ai-channel-fetch.timer
+systemctl list-timers ai-channel-waka.timer ai-channel-fetch.timer
+journalctl -u ai-channel-waka.service -u ai-channel-fetch.service -n 50 --no-pager
+```
+
 查看运行记录（只读）：
 
 ```bash
@@ -128,7 +164,7 @@ python3 -m ghost_league.game.jobs rival-auto
 python3 -m ghost_league.game.jobs daily-bets
 ```
 
-Waka 缓存和 XP 由 Channel 侧显式执行：
+Waka 缓存和 XP 由 `ai_channel` 的 timer 自动执行；以下命令只用于手动排查或补跑：
 
 ```bash
 cd /opt/ghost-league
