@@ -2,7 +2,7 @@
   "server_url": "http://127.0.0.1:8096",
   "daemon_token": "replace-me",
   "printer_id": "home-80mm",
-  "printer_host": "192.168.123.100",
+  "printer_host": "192.0.2.10",
   "printer_port": 9100,
   "poll_seconds": 2.0,
   "lease_seconds": 60,
