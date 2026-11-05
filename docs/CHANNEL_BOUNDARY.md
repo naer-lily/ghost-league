@@ -192,6 +192,22 @@ python3 -m waka_channel.cli tick
 `sync-roster` 每次发送当前全量名单：新行加入，消失行本周不出现，回归行复用同一
 `player_ref`。`tick` 默认处理 `--at` 所在周，也可用 `--week-start` 显式补推上一周。
 
+## Account-backed channel (v1)
+
+新的模拟 AI 不走 Channel ingest，而是像普通客户端一样使用账号和公开 API：
+
+- Ghost 提供独立 provisioning token（`GHOST_LEAGUE_PROVISIONING_TOKEN` /
+  `create_app(provisioning_token=...)`）和 `POST /v1/provisioning/accounts`；
+  该 token 不能与 owner / bootstrap / Channel token 混用。
+- `ai_channel/` 是独立的 stdlib-only 模拟器：通过 provisioning API 创建普通账号、
+  在本地保存 token，然后调用 `/v1/me/increments`、`/v1/me/status` 和
+  `/v1/shop/purchase`；不写 Ghost 数据库，不调用私有接口。
+- 账号第一次调用 `/v1/me/*` 时走既有 `ensure_human_player` 路径，游戏行是
+  `kind='human'`；Ghost 不写 AI 标记。
+- 旧 Channel ingest（roster / increments）继续服务 Waka 等外部 Channel，**不是**
+  新模拟 AI 的目标路径。Waka 现有的 `kind='ai'` players 和 `channel_players` 未迁移；
+  完整迁移尚未完成，见 [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
+
 ## 历史归属
 
 - **Ghost**：`activity_events`、`weekly_scores`、`weekly_results`、`checkins`、

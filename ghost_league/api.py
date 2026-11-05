@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .accounts import (
     DEFAULT_ACCOUNTS_DB,
+    DEFAULT_ACTIVITY_LABEL,
     DEFAULT_SECRET_PATH,
     OWNER_USER_ID,
     AccountsStore,
@@ -130,6 +131,16 @@ class DrawingIncrementRequest(BaseModel):
     event_id: str = Field(min_length=1, max_length=200)
     seconds: int = Field(strict=True, gt=0)
     occurred_at: datetime | None = None
+
+
+class ProvisioningAccountRequest(BaseModel):
+    """Provision one ordinary account; the token is returned only once."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str = Field(min_length=1, max_length=64)
+    display_name: str = Field(min_length=1, max_length=80)
+    activity_label: str = Field(default=DEFAULT_ACTIVITY_LABEL)
 
 
 class ChannelProfileSnapshot(BaseModel):
@@ -562,6 +573,7 @@ class GameService:
         token: str | None = None,
         bootstrap_token: str | None = None,
         channel_token: str | None = None,
+        provisioning_token: str | None = None,
         secret_path: str | Path = DEFAULT_SECRET_PATH,
         now_fn: Callable[[], datetime] | None = None,
         game_now_fn: Callable[[], datetime] | None = None,
@@ -588,6 +600,13 @@ class GameService:
             channel_token
             if channel_token is not None
             else os.environ.get("GHOST_LEAGUE_CHANNEL_TOKEN")
+        ) or None
+        # Provisioning is a separate privilege.  It must never fall back to the
+        # owner/bootstrap or Channel tokens.
+        self.provisioning_token = (
+            provisioning_token
+            if provisioning_token is not None
+            else os.environ.get("GHOST_LEAGUE_PROVISIONING_TOKEN")
         ) or None
         self.store: GameStore | None = None
         self._week_iso: str | None = None
@@ -2120,6 +2139,43 @@ def _channel_auth_dependency(service: GameService):
     return dependency
 
 
+def _provisioning_auth_dependency(service: GameService):
+    """Separate bearer auth for account provisioning.
+
+    A missing configured token is an operator error (503), not an
+    authentication failure.  Account and Channel tokens never authorize this
+    route.
+    """
+
+    def dependency(authorization: str | None = Header(default=None)) -> str:
+        expected = service.provisioning_token
+        if not expected:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="service_token_not_configured",
+            )
+        if not authorization:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing provisioning token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        scheme, _, provided = authorization.partition(" ")
+        if (
+            scheme.lower() != "bearer"
+            or not provided
+            or not hmac.compare_digest(provided, expected)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing provisioning token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return provided
+
+    return dependency
+
+
 def create_app(
     *,
     state_path: str | Path | None = None,
@@ -2135,6 +2191,7 @@ def create_app(
     token: str | None = None,
     bootstrap_token: str | None = None,
     channel_token: str | None = None,
+    provisioning_token: str | None = None,
     secret_path: str | Path = DEFAULT_SECRET_PATH,
     now_fn: Callable[[], datetime] | None = None,
     game_db_path: str | Path | None = None,
@@ -2183,6 +2240,7 @@ def create_app(
         token=token,
         bootstrap_token=bootstrap_token,
         channel_token=channel_token,
+        provisioning_token=provisioning_token,
         secret_path=secret_path,
         now_fn=now_fn,
         game_now_fn=game_now_fn,
@@ -2261,6 +2319,7 @@ def create_app(
     app.state.scheduler = None
     auth = _auth_dependency(service)
     channel_auth = _channel_auth_dependency(service)
+    provisioning_auth = _provisioning_auth_dependency(service)
     app.include_router(
         build_widget_studio_router(
             store=widget_store,
@@ -2745,6 +2804,43 @@ def create_app(
             "today_xp": int(result.get("day_xp") or 0),
             "checkin": (result.get("checkin") or {}).get("source"),
         }
+
+    @app.post(
+        "/v1/provisioning/accounts",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def provision_account(
+        request: ProvisioningAccountRequest,
+        _provisioning_token: str = Depends(provisioning_auth),
+    ) -> dict[str, Any]:
+        """Create one ordinary account and return its token exactly once."""
+
+        service.initialize()
+        user_id = request.user_id
+        if SAFE_USER_ID.fullmatch(user_id) is None:
+            raise HTTPException(status_code=422, detail="invalid user_id")
+        if user_id == OWNER_USER_ID:
+            raise HTTPException(
+                status_code=422,
+                detail="cannot provision the owner account",
+            )
+        if not request.display_name.strip():
+            raise HTTPException(status_code=422, detail="display_name is required")
+        if service.accounts.get(user_id) is not None:
+            raise HTTPException(status_code=409, detail="account already exists")
+        try:
+            account, token = service.accounts.create(
+                user_id,
+                request.display_name,
+                activity_label=request.activity_label,
+            )
+        except ValueError as exc:
+            if service.accounts.get(user_id) is not None:
+                raise HTTPException(
+                    status_code=409, detail="account already exists"
+                ) from exc
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"account": account, "token": token}
 
     @app.post("/v1/channels/{channel_id}/roster")
     def channel_roster(

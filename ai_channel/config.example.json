@@ -1,0 +1,7 @@
+{
+  "base_url": "http://127.0.0.1:8095",
+  "provisioning_token": "replace-me",
+  "state_db": "ai_channel/data/ai_accounts.db",
+  "request_timeout_seconds": 15,
+  "default_seconds": 900
+}

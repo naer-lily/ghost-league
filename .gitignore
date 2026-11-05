@@ -31,6 +31,11 @@ data/widgets/*
 print-service/data/*
 !print-service/data/.gitkeep
 
+# Account-backed AI channel: local tokens/config are secrets, not source.
+ai_channel/config.json
+ai_channel/data/*
+!ai_channel/data/.gitkeep
+
 
 # Internal TLS leaf certificate and private key stay local.
 deploy/tls/
