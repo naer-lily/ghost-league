@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -23,14 +24,49 @@ from ..stars import (
     is_valid_palette,
 )
 
-SCHEMA_VERSION = "13"
+SCHEMA_VERSION = "14"
 ALGORITHM_VERSION = "phase1-v1"
 SHOP_ECONOMY_UPDATE_KEY = "shop_economy_update_2026_11"
 TASK_CHEST_CONFIG_UPDATE_KEY = "task_chest_config_update_2026_11"
 DEFAULT_DB_PATH = Path("data/league/league.db")
-SOURCE_AI = "wakatime_public_leaderboard"
+SOURCE_WAKA = "wakatime_public_leaderboard"
 SOURCE_HUMAN = "local_increment"
 SOURCE_CHANNEL = "channel_ingest"
+
+_PLAYERS_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS players (
+    id TEXT PRIMARY KEY,
+    source_kind TEXT NOT NULL,
+    source_key_hash TEXT,
+    display_name TEXT NOT NULL,
+    joined_week TEXT NOT NULL,
+    last_seen_week TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    power INTEGER,
+    power_percentile REAL,
+    power_week TEXT,
+    power_updated_at TEXT,
+    power_provisional INTEGER NOT NULL DEFAULT 1
+);
+"""
+
+_CHANNEL_PLAYERS_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS channel_players (
+    channel_id TEXT NOT NULL,
+    player_ref TEXT NOT NULL,
+    player_id TEXT NOT NULL UNIQUE,
+    profile_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (channel_id, player_ref)
+);
+"""
+
+_CHANNEL_PLAYERS_INDEX_DDL = """
+CREATE INDEX IF NOT EXISTS idx_channel_players_player
+    ON channel_players (player_id);
+"""
 
 _TASK_INSTANCES_TABLE_DDL = """
 CREATE TABLE IF NOT EXISTS task_instances (
@@ -105,8 +141,6 @@ CREATE TABLE IF NOT EXISTS epochs (
 
 CREATE TABLE IF NOT EXISTS players (
     id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind IN ('human', 'ai')),
-    controller TEXT NOT NULL CHECK (controller IN ('human', 'ai')),
     source_kind TEXT NOT NULL,
     source_key_hash TEXT,
     display_name TEXT NOT NULL,
@@ -164,7 +198,6 @@ CREATE TABLE IF NOT EXISTS channel_players (
     channel_id TEXT NOT NULL,
     player_ref TEXT NOT NULL,
     player_id TEXT NOT NULL UNIQUE,
-    kind TEXT NOT NULL CHECK (kind IN ('human', 'ai')),
     profile_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -691,6 +724,7 @@ class CoreMixin:
                 or self._table_count(conn, "weekly_results") > 0
             )
             conn.executescript(_SCHEMA)
+            self._migrate_player_identity(conn)
             self._migrate_tasks(conn)
             self._migrate_checkins(conn)
             self._migrate_sources(conn)
@@ -1025,11 +1059,113 @@ class CoreMixin:
                 "WHERE effective_seconds = 0"
             )
 
+    def _migrate_player_identity(self, conn: sqlite3.Connection) -> None:
+        """Rebuild player tables without the retired identity columns.
+
+        Older databases store ``players.kind`` / ``players.controller`` and
+        ``channel_players.kind``.  Those columns encoded an AI identity that
+        Ghost no longer has.  Dropping a CHECK-constrained column requires a
+        table rebuild, so copy every shared column into the current schema and
+        keep all ids, source keys, profiles, mappings and group rows intact.
+        A database backup is written before the first destructive step; the
+        whole pass is idempotent because a migrated database has none of the
+        removed columns.
+        """
+
+        player_columns = {
+            str(row["name"]) for row in conn.execute("PRAGMA table_info(players)")
+        }
+        channel_columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(channel_players)")
+        }
+        removed_player = {"kind", "controller"} & player_columns
+        removed_channel = {"kind"} & channel_columns
+        if not removed_player and not removed_channel:
+            return
+
+        backup_path = self._backup_before_identity_migration(conn)
+        logging.getLogger(__name__).info(
+            "rebuilding player tables without identity columns; backup at %s",
+            backup_path,
+        )
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if removed_player:
+                self._rebuild_player_table(
+                    conn, "players", _PLAYERS_TABLE_DDL
+                )
+            if removed_channel:
+                self._rebuild_player_table(
+                    conn,
+                    "channel_players",
+                    _CHANNEL_PLAYERS_TABLE_DDL,
+                    reconnect_index=_CHANNEL_PLAYERS_INDEX_DDL,
+                )
+            # Every player is an ordinary contestant now.  The column stays
+            # for the existing UI contract, but it no longer carries a class.
+            conn.execute("UPDATE group_members SET is_human = 1")
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def _backup_before_identity_migration(
+        self, conn: sqlite3.Connection
+    ) -> Path:
+        stamp = cal.now_local().strftime("%Y%m%dT%H%M%S%f")
+        backup_path = self.path.with_name(
+            f"{self.path.name}.backup-player-identity-{stamp}"
+        )
+        target = sqlite3.connect(backup_path)
+        try:
+            conn.backup(target)
+            target.execute("PRAGMA journal_mode = DELETE")
+        finally:
+            target.close()
+        for suffix in ("-wal", "-shm"):
+            sidecar = Path(f"{backup_path}{suffix}")
+            if sidecar.exists():
+                sidecar.unlink()
+        return backup_path
+
+    @staticmethod
+    def _rebuild_player_table(
+        conn: sqlite3.Connection,
+        table: str,
+        ddl: str,
+        *,
+        reconnect_index: str = "",
+    ) -> None:
+        legacy_table = f"{table}_legacy_identity"
+        conn.execute(f"DROP TABLE IF EXISTS {legacy_table}")
+        conn.execute(f"ALTER TABLE {table} RENAME TO {legacy_table}")
+        if table == "channel_players":
+            conn.execute("DROP INDEX IF EXISTS idx_channel_players_player")
+        conn.execute(ddl)
+        legacy_columns = {
+            str(row["name"])
+            for row in conn.execute(f"PRAGMA table_info({legacy_table})")
+        }
+        current_columns = [
+            str(row["name"])
+            for row in conn.execute(f"PRAGMA table_info({table})")
+        ]
+        shared = [name for name in current_columns if name in legacy_columns]
+        column_list = ", ".join(shared)
+        conn.execute(
+            f"INSERT INTO {table} ({column_list}) "
+            f"SELECT {column_list} FROM {legacy_table}"
+        )
+        conn.execute(f"DROP TABLE {legacy_table}")
+        if reconnect_index:
+            conn.execute(reconnect_index)
+
     @staticmethod
     def _migrate_players(conn: sqlite3.Connection) -> None:
         """Add roster freshness and power columns to an older database.
 
-        Existing AI players keep their history.  Their first ``last_seen_week``
+        Existing players keep their history.  Their first ``last_seen_week``
         is backfilled from the latest locked weekly plan, falling back to the
         week they joined when no plan exists.  Power columns start NULL with
         ``power_provisional = 1`` until the first refresh runs.
@@ -1546,11 +1682,11 @@ class CoreMixin:
 
     @staticmethod
     def _migrate_diamonds(conn: sqlite3.Connection, *, now: str) -> None:
-        """Add the soft cap columns and backfill legacy human wallets.
+        """Add the soft cap columns and backfill legacy player wallets.
 
         An existing wallet keeps its balance, receives the 1000 cap, and starts
-        its decay clock at migration time.  Human players that never had a
-        wallet row get the normal 1000 / 1000 starting wallet.
+        its decay clock at migration time.  Players that never had a wallet row
+        get the normal 1000 / 1000 starting wallet.
         """
 
         columns = {
@@ -1588,8 +1724,7 @@ class CoreMixin:
             "INSERT INTO diamond_balance "
             "(player_id, balance, diamond_cap, diamond_cap_level, "
             "last_decay_at, updated_at) "
-            "SELECT id, 1000, 1000, 0, ?, ? FROM players "
-            "WHERE kind = 'human' "
+            "SELECT id, 1000, 1000, 0, ?, ? FROM players WHERE 1 "
             "ON CONFLICT(player_id) DO NOTHING",
             (now, now),
         )

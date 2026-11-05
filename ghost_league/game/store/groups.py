@@ -15,11 +15,11 @@ from ..rules import (
     balanced_group_sizes,
     next_tier,
 )
-from .core import SOURCE_CHANNEL, _row_to_dict
+from .core import SOURCE_CHANNEL, SOURCE_WAKA, _row_to_dict
 
 
 def _group_order_key(week_iso: str, tier: str, player_id: str) -> bytes:
-    """Stable per-week AI order so groups rotate without unseeded randomness."""
+    """Stable per-week source order so groups rotate without randomness."""
 
     payload = f"ghost-league-groups-v1\x00{week_iso}\x00{tier}\x00{player_id}"
     return hashlib.blake2b(payload.encode("utf-8"), digest_size=16).digest()
@@ -57,8 +57,8 @@ class GroupsMixin:
         """Place one player in a current-week group without reusing opponents.
 
         This compatibility entry point delegates to :meth:`ensure_all_groups`,
-        so a late human either joins an existing human group with room or gets
-        a new group.  AI players are never copied into two groups in a week.
+        so a late player either joins an existing group with room or gets a new
+        group.  A player is never copied into two groups in a week.
         """
 
         del tier
@@ -100,7 +100,7 @@ class GroupsMixin:
         ]
         members: dict[int, list[dict[str, Any]]] = {}
         for row in conn.execute(
-            "SELECT gm.*, p.kind, p.display_name FROM group_members gm "
+            "SELECT gm.*, p.display_name FROM group_members gm "
             "JOIN players p ON p.id = gm.player_id "
             "JOIN groups g ON g.id = gm.group_id "
             "WHERE g.week_start = ? ORDER BY gm.group_id, gm.player_id",
@@ -121,18 +121,18 @@ class GroupsMixin:
         group_id: int,
         player_id: str,
         tier: str,
-        is_human: bool,
         now: datetime,
     ) -> None:
+        # ``is_human`` stays in the UI contract, but every player is now an
+        # ordinary contestant, so every membership row carries 1.
         conn.execute(
             "INSERT OR IGNORE INTO group_members "
             "(group_id, player_id, tier_at_start, is_human, joined_at) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, 1, ?)",
             (
                 group_id,
                 player_id,
                 tier,
-                1 if is_human else 0,
                 cal.iso_ts(now),
             ),
         )
@@ -145,7 +145,6 @@ class GroupsMixin:
         week_iso: str,
         tier: str,
         player_ids: list[str],
-        human_ids: set[str],
         now: datetime,
     ) -> dict[str, Any]:
         row = conn.execute(
@@ -167,7 +166,6 @@ class GroupsMixin:
                 group_id=group_id,
                 player_id=player_id,
                 tier=tier,
-                is_human=player_id in human_ids,
                 now=now,
             )
         group = dict(
@@ -192,14 +190,15 @@ class GroupsMixin:
         players form ``ceil(N / 15)`` groups with sizes ``base``/``base + 1``.
         A lone player is left unplaced instead of creating a one-person group.
 
-        Humans are placed first and AI then fill every group to its balanced
-        target.  By default humans are kept together until a group reaches its
-        target size, which keeps their group full and avoids stranding them in
-        a tail group.  ``spread_humans=True`` distributes them round-robin
-        across the larger groups instead.  In both modes every group still
-        gets its pre-computed balanced size.  AI order is rotated by a stable
-        per-week hash, so the same tier does not put the same AI together in
-        consecutive weeks.
+        Locally created account players are placed first and source-provenance
+        players fill every group to its balanced target.  By default local
+        players are kept together until a group reaches its target size, which
+        keeps their group full and avoids stranding them in a tail group.
+        ``spread_humans=True`` distributes them round-robin across the larger
+        groups instead.  In both modes every group still gets its pre-computed
+        balanced size.  Source order is rotated by a stable per-week hash, so
+        the same tier does not put the same sources together in consecutive
+        weeks.
 
         Repeating the call reconciles memberships in place.  Unchanged groups
         keep their ids; a player is never left in more than one group for the
@@ -218,28 +217,29 @@ class GroupsMixin:
                 return self._load_week_groups_with(conn, week_iso)
 
             # A player is eligible this week from exactly one of three
-            # sources: local human identity, the legacy opponent plan, or the
+            # sources: local account play, the legacy source plan, or the
             # Channel's current-week manifest.  Absence from the Channel
             # manifest is the only "not competing" signal; there is no
-            # dormant/absent state to clean up.
-            local_humans = [
+            # dormant/absent state to clean up.  Classification uses
+            # provenance, never a player identity column.
+            local_players = [
                 dict(row)
                 for row in conn.execute(
-                    "SELECT * FROM players WHERE kind = 'human' AND is_active = 1 "
-                    "AND source_kind != ? AND joined_week <= ? ORDER BY id",
-                    (SOURCE_CHANNEL, week_iso),
+                    "SELECT * FROM players WHERE is_active = 1 "
+                    "AND source_kind NOT IN (?, ?) AND joined_week <= ? "
+                    "ORDER BY id",
+                    (SOURCE_CHANNEL, SOURCE_WAKA, week_iso),
                 )
             ]
-            legacy_ai = [
+            planned_source_players = [
                 dict(row)
                 for row in conn.execute(
                     "SELECT p.* FROM players p "
                     "JOIN opponent_week_plan op ON op.player_id = p.id "
                     "AND op.week_start = ? "
-                    "WHERE p.kind = 'ai' AND p.is_active = 1 "
-                    "AND p.source_kind != ? "
+                    "WHERE p.source_kind = ? AND p.is_active = 1 "
                     "AND p.joined_week <= ? ORDER BY p.id",
-                    (week_iso, SOURCE_CHANNEL, week_iso),
+                    (week_iso, SOURCE_WAKA, week_iso),
                 )
             ]
             channel_players = [
@@ -253,23 +253,29 @@ class GroupsMixin:
                 )
             ]
             candidates: dict[str, dict[str, Any]] = {}
-            for player in (*local_humans, *legacy_ai, *channel_players):
+            for player in (
+                *local_players,
+                *planned_source_players,
+                *channel_players,
+            ):
                 candidates[str(player["id"])] = player
-            local_human_ids = {str(player["id"]) for player in local_humans}
-            humans = sorted(
-                (player for player in candidates.values() if player["kind"] == "human"),
-                # Local account humans occupy full groups first; Channel
-                # players are ordinary contestants and fill the remainder.
-                key=lambda player: (
-                    0 if str(player["id"]) in local_human_ids else 1,
-                    str(player["id"]),
+            local_player_ids = {str(player["id"]) for player in local_players}
+            priority_players = sorted(
+                (
+                    player
+                    for player in candidates.values()
+                    if str(player["id"]) in local_player_ids
                 ),
-            )
-            ai_players = sorted(
-                (player for player in candidates.values() if player["kind"] == "ai"),
                 key=lambda player: str(player["id"]),
             )
-            human_ids = {str(player["id"]) for player in humans}
+            source_players = sorted(
+                (
+                    player
+                    for player in candidates.values()
+                    if str(player["id"]) not in local_player_ids
+                ),
+                key=lambda player: str(player["id"]),
+            )
 
             tier_cache: dict[str, str] = {}
 
@@ -280,14 +286,14 @@ class GroupsMixin:
                     )
                 return tier_cache[player_id]
 
-            humans_by_tier: dict[str, list[str]] = {tier: [] for tier in TIERS}
-            ai_by_tier: dict[str, list[str]] = {tier: [] for tier in TIERS}
-            for player in humans:
+            priority_by_tier: dict[str, list[str]] = {tier: [] for tier in TIERS}
+            source_by_tier: dict[str, list[str]] = {tier: [] for tier in TIERS}
+            for player in priority_players:
                 player_id = str(player["id"])
-                humans_by_tier[tier_of(player_id)].append(player_id)
-            for player in ai_players:
+                priority_by_tier[tier_of(player_id)].append(player_id)
+            for player in source_players:
                 player_id = str(player["id"])
-                ai_by_tier[tier_of(player_id)].append(player_id)
+                source_by_tier[tier_of(player_id)].append(player_id)
 
             existing_groups = self._load_week_groups_with(conn, week_iso)
             existing_by_tier: dict[str, list[dict[str, Any]]] = {
@@ -298,39 +304,41 @@ class GroupsMixin:
             for tier_groups in existing_by_tier.values():
                 tier_groups.sort(key=lambda group: int(group["group_no"]))
 
-            # Decide all target rosters before touching the database.  Humans
-            # go first (together by default, or spread when requested), then
-            # AI fill each group to its pre-computed balanced size.
+            # Decide all target rosters before touching the database.  Local
+            # players go first (together by default, or spread when requested),
+            # then source players fill each group to its balanced size.
             desired_by_tier: dict[str, list[list[str]]] = {}
             for tier in TIERS:
-                tier_humans = humans_by_tier.get(tier, [])
-                tier_ai = sorted(
-                    ai_by_tier.get(tier, []),
+                tier_priority = priority_by_tier.get(tier, [])
+                tier_source = sorted(
+                    source_by_tier.get(tier, []),
                     key=lambda player_id: _group_order_key(
                         week_iso, tier, player_id
                     ),
                 )
-                sizes = balanced_group_sizes(len(tier_humans) + len(tier_ai))
+                sizes = balanced_group_sizes(
+                    len(tier_priority) + len(tier_source)
+                )
                 if not sizes:
                     desired_by_tier[tier] = []
                     continue
                 rosters: list[list[str]] = [[] for _ in sizes]
                 if spread_humans:
-                    for index, player_id in enumerate(tier_humans):
+                    for index, player_id in enumerate(tier_priority):
                         rosters[index % len(sizes)].append(player_id)
                 else:
-                    remaining_humans = iter(tier_humans)
+                    remaining_priority = iter(tier_priority)
                     for roster, size in zip(rosters, sizes, strict=True):
                         while len(roster) < size:
                             try:
-                                roster.append(next(remaining_humans))
+                                roster.append(next(remaining_priority))
                             except StopIteration:
                                 break
-                ai_iter = iter(tier_ai)
+                source_iter = iter(tier_source)
                 for roster, size in zip(rosters, sizes, strict=True):
                     while len(roster) < size:
                         try:
-                            roster.append(next(ai_iter))
+                            roster.append(next(source_iter))
                         except StopIteration:
                             break
                 desired_by_tier[tier] = rosters
@@ -394,7 +402,6 @@ class GroupsMixin:
                     group_id=group_id,
                     player_id=player_id,
                     tier=tier_of(player_id),
-                    is_human=player_id in human_ids,
                     now=local_now,
                 )
 
@@ -443,17 +450,15 @@ class GroupsMixin:
             )
             group_id = int(cursor.lastrowid)
             for player_id in player_ids:
-                player = self._get_player_with(conn, player_id)
-                is_human = 1 if player["kind"] == "human" else 0
+                self._get_player_with(conn, player_id)
                 conn.execute(
                     "INSERT OR IGNORE INTO group_members "
                     "(group_id, player_id, tier_at_start, is_human, joined_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, 1, ?)",
                     (
                         group_id,
                         player_id,
                         tier,
-                        is_human,
                         cal.iso_ts(local_now),
                     ),
                 )
@@ -482,7 +487,7 @@ class GroupsMixin:
     ) -> list[dict[str, Any]]:
         with self._reader() as conn:
             rows = conn.execute(
-                "SELECT gm.*, p.display_name, p.kind FROM group_members gm "
+                "SELECT gm.*, p.display_name FROM group_members gm "
                 "JOIN players p ON p.id = gm.player_id "
                 "WHERE gm.group_id = ? ORDER BY gm.player_id",
                 (group_id,),

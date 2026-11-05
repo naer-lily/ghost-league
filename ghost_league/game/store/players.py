@@ -1,4 +1,4 @@
-"""Players, human/AI identity, and legacy source/target plans."""
+"""Ordinary players and legacy source/target plans."""
 
 from __future__ import annotations
 
@@ -8,34 +8,29 @@ from typing import Any
 
 from .. import calendar as cal
 from ..rules import PlayerNotFound
-from .core import SOURCE_AI, SOURCE_HUMAN, _row_to_dict
+from .core import SOURCE_HUMAN, SOURCE_WAKA, _row_to_dict
 
 class PlayersMixin:
-    """Player identity and the legacy source/target plan tables."""
+    """Ordinary players and the legacy source/target plan tables."""
 
     def create_player(
         self,
         player_id: str,
         *,
-        kind: str,
         display_name: str | None = None,
         joined_week: date | datetime | str,
         last_seen_week: date | datetime | str | None = None,
         source_kind: str | None = None,
         source_key_hash: str | None = None,
-        controller: str | None = None,
         is_active: bool = True,
         now: datetime | None = None,
         conn: sqlite3.Connection | None = None,
     ) -> dict[str, Any]:
         if not player_id:
             raise ValueError("player_id must be non-empty")
-        if kind not in {"human", "ai"}:
-            raise ValueError("kind must be human or ai")
-        controller = controller or ("human" if kind == "human" else "ai")
-        if controller not in {"human", "ai"}:
-            raise ValueError("controller must be human or ai")
-        source_kind = source_kind or (SOURCE_HUMAN if kind == "human" else SOURCE_AI)
+        source_kind = source_kind or SOURCE_HUMAN
+        if not isinstance(source_kind, str) or not source_kind:
+            raise ValueError("source_kind must be a non-empty string")
         joined = cal.iso_date(cal.week_start(joined_week))
         seen = (
             cal.iso_date(cal.week_start(last_seen_week))
@@ -45,8 +40,6 @@ class PlayersMixin:
         created = cal.iso_ts(cal.parse_datetime(now) if now is not None else cal.now_local())
         values = (
             player_id,
-            kind,
-            controller,
             source_kind,
             source_key_hash,
             display_name or player_id,
@@ -77,9 +70,9 @@ class PlayersMixin:
     @staticmethod
     def _insert_player(conn: sqlite3.Connection, values: tuple[Any, ...]) -> None:
         conn.execute(
-            "INSERT INTO players (id, kind, controller, source_kind, source_key_hash, "
+            "INSERT INTO players (id, source_kind, source_key_hash, "
             "display_name, joined_week, last_seen_week, created_at, is_active) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO NOTHING",
             values,
         )
@@ -106,9 +99,8 @@ class PlayersMixin:
     ) -> dict[str, Any] | None:
         """Find the stable identity bound to one anonymous source key.
 
-        Legacy Waka identities start as ``kind='ai'`` but may later be adopted
-        into an ordinary account.  The source key belongs to the player, not
-        to its current kind, so lookup deliberately does not filter on kind.
+        The source key belongs to the player, not to any identity class, so
+        lookup intentionally returns the single row bound to that key.
         """
 
         sql = (
@@ -122,46 +114,52 @@ class PlayersMixin:
             row = reader.execute(sql, (source_key_hash,)).fetchone()
             return _row_to_dict(row)
 
-    def upsert_ai_player(
+    def upsert_source_player(
         self,
         source_key_hash: str,
         *,
         display_name: str,
         joined_week: date | datetime | str,
         last_seen_week: date | datetime | str,
+        source_kind: str = SOURCE_WAKA,
+        id_prefix: str = "waka",
         now: datetime | None = None,
         conn: sqlite3.Connection | None = None,
     ) -> tuple[dict[str, Any], bool]:
-        """Create or refresh one AI player keyed only by ``source_key_hash``.
+        """Create or refresh one ordinary player keyed by ``source_key_hash``.
 
-        Returns ``(player, created)``.  An AI that reappears after a missing
-        week keeps its original player id and history; only the freshness
-        marker moves forward.
+        Returns ``(player, created)``.  A source row that reappears after a
+        missing week keeps its original player id and history; only the
+        freshness marker moves forward.
         """
 
         seen = cal.iso_date(cal.week_start(last_seen_week))
         joined = cal.iso_date(cal.week_start(joined_week))
         local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
         if conn is not None:
-            return self._upsert_ai_player_with(
+            return self._upsert_source_player_with(
                 conn,
                 source_key_hash,
                 display_name=display_name,
                 joined_week=joined,
                 last_seen_week=seen,
+                source_kind=source_kind,
+                id_prefix=id_prefix,
                 now=local_now,
             )
         with self.transaction() as tx:
-            return self._upsert_ai_player_with(
+            return self._upsert_source_player_with(
                 tx,
                 source_key_hash,
                 display_name=display_name,
                 joined_week=joined,
                 last_seen_week=seen,
+                source_kind=source_kind,
+                id_prefix=id_prefix,
                 now=local_now,
             )
 
-    def _upsert_ai_player_with(
+    def _upsert_source_player_with(
         self,
         conn: sqlite3.Connection,
         source_key_hash: str,
@@ -169,11 +167,12 @@ class PlayersMixin:
         display_name: str,
         joined_week: str,
         last_seen_week: str,
+        source_kind: str,
+        id_prefix: str,
         now: datetime,
     ) -> tuple[dict[str, Any], bool]:
-        # Adopted legacy AI rows are ordinary humans now.  Match the source
-        # key regardless of kind so weekly roster sync refreshes that player
-        # instead of creating a duplicate AI identity beside it.
+        # Match the source key regardless of provenance so weekly roster sync
+        # refreshes that player instead of creating a duplicate beside it.
         row = conn.execute(
             "SELECT * FROM players WHERE source_key_hash = ? "
             "ORDER BY id LIMIT 1",
@@ -187,16 +186,16 @@ class PlayersMixin:
                 (display_name, last_seen_week, player_id),
             )
             return self._get_player_with(conn, player_id), False
-        player_id = f"ai-{source_key_hash[:12]}"
+        player_id = f"{id_prefix}-{source_key_hash[:12]}"
         conn.execute(
             "INSERT INTO players "
-            "(id, kind, controller, source_kind, source_key_hash, display_name, "
+            "(id, source_kind, source_key_hash, display_name, "
             "joined_week, last_seen_week, created_at, is_active) "
-            "VALUES (?, 'ai', 'ai', ?, ?, ?, ?, ?, ?, 1) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 1) "
             "ON CONFLICT(id) DO NOTHING",
             (
                 player_id,
-                SOURCE_AI,
+                source_kind,
                 source_key_hash,
                 display_name,
                 joined_week,
@@ -204,20 +203,20 @@ class PlayersMixin:
                 cal.iso_ts(now),
             ),
         )
-        # A hash-prefix collision must never make two sources share one AI.
+        # A hash-prefix collision must never make two sources share one player.
         stored = conn.execute(
             "SELECT * FROM players WHERE id = ?", (player_id,)
         ).fetchone()
         if stored is not None and stored["source_key_hash"] != source_key_hash:
-            player_id = f"ai-{source_key_hash}"
+            player_id = f"{id_prefix}-{source_key_hash}"
             conn.execute(
                 "INSERT INTO players "
-                "(id, kind, controller, source_kind, source_key_hash, display_name, "
+                "(id, source_kind, source_key_hash, display_name, "
                 "joined_week, last_seen_week, created_at, is_active) "
-                "VALUES (?, 'ai', 'ai', ?, ?, ?, ?, ?, ?, 1)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
                 (
                     player_id,
-                    SOURCE_AI,
+                    source_kind,
                     source_key_hash,
                     display_name,
                     joined_week,
@@ -228,13 +227,13 @@ class PlayersMixin:
         return self._get_player_with(conn, player_id), True
 
     def list_players(
-        self, *, kind: str | None = None, active_only: bool = True
+        self, *, source_kind: str | None = None, active_only: bool = True
     ) -> list[dict[str, Any]]:
         sql = "SELECT * FROM players WHERE 1 = 1"
         params: list[Any] = []
-        if kind is not None:
-            sql += " AND kind = ?"
-            params.append(kind)
+        if source_kind is not None:
+            sql += " AND source_kind = ?"
+            params.append(source_kind)
         if active_only:
             sql += " AND is_active = 1"
         sql += " ORDER BY id"
@@ -248,41 +247,22 @@ class PlayersMixin:
                 (1 if active else 0, player_id),
             )
 
-    def adopt_ai_player(
+    def ensure_player(
         self,
         player_id: str,
         *,
+        display_name: str,
+        joined_week: date | datetime | str,
         now: datetime | None = None,
     ) -> dict[str, Any]:
-        """Promote one legacy AI player in place into a human game identity.
+        """Create or refresh one ordinary player; no identity parameters."""
 
-        The player id, source key, week markers, created_at, XP/history and
-        group/channel mappings are preserved; only kind, controller,
-        source_kind and is_active change.  The wallet is created in the same
-        transaction so an adopted player can use the normal human economy.
-        """
-
-        local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
-        with self.transaction() as conn:
-            row = conn.execute(
-                "SELECT * FROM players WHERE id = ?", (player_id,)
-            ).fetchone()
-            if row is None:
-                raise PlayerNotFound(player_id)
-            if str(row["kind"]) != "ai":
-                raise ValueError("player is not an ai")
-            conn.execute(
-                "UPDATE players SET kind = 'human', controller = 'human', "
-                "source_kind = ?, is_active = 1 WHERE id = ?",
-                (SOURCE_HUMAN, player_id),
-            )
-            self._ensure_wallet_with(
-                conn,
-                player_id,
-                now=local_now,
-                create_for_unknown=False,
-            )
-            return self._get_player_with(conn, player_id)
+        return self.ensure_human_player(
+            player_id,
+            display_name=display_name,
+            joined_week=joined_week,
+            now=now,
+        )
 
     def ensure_human_player(
         self,
@@ -292,11 +272,11 @@ class PlayersMixin:
         joined_week: date | datetime | str,
         now: datetime | None = None,
     ) -> dict[str, Any]:
-        """Create or refresh the human player bound to one account.
+        """Create or refresh the ordinary player bound to one account.
 
         Account rows are the identity source.  The game row only mirrors the
         public display name and stays active so a restart or a late account
-        creation always produces a groupable human.
+        creation always produces a groupable player.
         """
 
         joined = cal.iso_date(cal.week_start(joined_week))
@@ -308,9 +288,9 @@ class PlayersMixin:
             if row is None:
                 conn.execute(
                     "INSERT INTO players "
-                    "(id, kind, controller, source_kind, source_key_hash, "
+                    "(id, source_kind, source_key_hash, "
                     "display_name, joined_week, last_seen_week, created_at, is_active) "
-                    "VALUES (?, 'human', 'human', ?, NULL, ?, ?, ?, ?, 1)",
+                    "VALUES (?, ?, NULL, ?, ?, ?, ?, 1)",
                     (
                         player_id,
                         SOURCE_HUMAN,
@@ -323,7 +303,7 @@ class PlayersMixin:
             else:
                 conn.execute(
                     "UPDATE players SET display_name = ?, last_seen_week = ?, "
-                    "is_active = 1 WHERE id = ? AND kind = 'human'",
+                    "is_active = 1 WHERE id = ?",
                     (display_name, joined, player_id),
                 )
             self._ensure_wallet_with(
@@ -410,7 +390,7 @@ class PlayersMixin:
             return _row_to_dict(row)
 
     # ------------------------------------------------------------------
-    # AI weekly target plans
+    # Legacy weekly target plans
     # ------------------------------------------------------------------
     def upsert_opponent_week_plan(
         self,
@@ -430,7 +410,7 @@ class PlayersMixin:
 
         Re-running the deterministic seed for the same week keeps the first
         plan.  A plan is never silently rewritten from a later anchor refresh,
-        so the AI target is locked when the week is created.
+        so the source target is locked when the week is created.
         """
 
         if isinstance(anchor_seconds, bool) or anchor_seconds < 0:

@@ -9,7 +9,6 @@ from ghost_league.game.store import GameStore
 def new_player(store: GameStore, player_id: str, week: str = "2026-10-05") -> str:
     store.create_player(
         player_id,
-        kind="human",
         joined_week=week,
         now=f"{week}T00:00:00+08:00",
     )

@@ -1,7 +1,7 @@
 """Deterministic in-group feed events, reactions, and tags.
 
 The feed never invents activity: callers only write an event after a real
-check-in or a settled ``weekly_results`` row exists.  AI reactions are a pure
+check-in or a settled ``weekly_results`` row exists.  Reactions are a pure
 function of ``event_id + actor_id`` plus the event's own evidence, so replaying
 the same data always produces the same emoji/tag without an LLM.
 """
@@ -84,8 +84,8 @@ def _digest(event_id: int | str, actor_id: str) -> bytes:
     return hashlib.sha256(f"{event_id}{actor_id}".encode("utf-8")).digest()
 
 
-def ai_actor_rank(event_id: int | str, actor_id: str) -> int:
-    """Stable ordering key used to pick at most three AI responders."""
+def reaction_actor_rank(event_id: int | str, actor_id: str) -> int:
+    """Stable ordering key used to pick at most three responders."""
 
     return int.from_bytes(_digest(event_id, actor_id)[:8], "big")
 
@@ -138,7 +138,7 @@ __all__ = [
     "FEED_PROMOTED",
     "FEED_TAGS",
     "TIER_LABELS",
-    "ai_actor_rank",
+    "reaction_actor_rank",
     "allowed_tags",
     "champion_body",
     "checkin_body",

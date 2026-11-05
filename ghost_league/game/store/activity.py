@@ -194,8 +194,7 @@ class ActivityMixin:
             after_lifetime_xp = self._lifetime_xp_with(conn, player_id)
             milestone = after_lifetime_xp // 10
             milestone_delta = milestone - before_lifetime_xp // 10
-            # Diamonds are a human wallet; AI ghosts keep their XP-only rows.
-            if milestone_delta > 0 and str(player["kind"]) == "human":
+            if milestone_delta > 0:
                 self._credit_diamonds_with(  # type: ignore[attr-defined]
                     conn,
                     player_id=player_id,

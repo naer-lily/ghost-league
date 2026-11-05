@@ -52,15 +52,12 @@ class ChannelMixin:
         *,
         channel_id: str,
         player_ref: str,
-        kind: str,
         profile: dict[str, Any] | None,
     ) -> str:
         display_name = (profile or {}).get("display_name")
         if isinstance(display_name, str) and display_name.strip():
             return display_name.strip()
         digest = _channel_player_id(channel_id, player_ref).removeprefix("ch-")
-        if kind == "ai":
-            return f"AI-{digest[:8].upper()}"
         return f"Player-{digest[:8]}"
 
     def upsert_channel_player(
@@ -68,7 +65,6 @@ class ChannelMixin:
         channel_id: str,
         player_ref: str,
         *,
-        kind: str,
         profile: dict[str, Any] | None = None,
         joined_week: date | datetime | str | None = None,
         now: datetime | None = None,
@@ -85,8 +81,6 @@ class ChannelMixin:
             raise ValueError("channel_id must be a non-empty string")
         if not isinstance(player_ref, str) or not player_ref:
             raise ValueError("player_ref must be a non-empty string")
-        if kind not in {"human", "ai"}:
-            raise ValueError("kind must be human or ai")
         if profile is not None and not isinstance(profile, dict):
             raise ValueError("profile must be an object or null")
         local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
@@ -100,7 +94,6 @@ class ChannelMixin:
                 conn,
                 channel_id=channel_id,
                 player_ref=player_ref,
-                kind=kind,
                 profile=profile,
                 joined_week=joined,
                 now=local_now,
@@ -110,7 +103,6 @@ class ChannelMixin:
                 tx,
                 channel_id=channel_id,
                 player_ref=player_ref,
-                kind=kind,
                 profile=profile,
                 joined_week=joined,
                 now=local_now,
@@ -122,7 +114,6 @@ class ChannelMixin:
         *,
         channel_id: str,
         player_ref: str,
-        kind: str,
         profile: dict[str, Any] | None,
         joined_week: str,
         now: datetime,
@@ -132,10 +123,8 @@ class ChannelMixin:
         display_name = self._channel_display_name(
             channel_id=channel_id,
             player_ref=player_ref,
-            kind=kind,
             profile=profile,
         )
-        controller = "human" if kind == "human" else "ai"
         mapping = conn.execute(
             "SELECT * FROM channel_players "
             "WHERE channel_id = ? AND player_ref = ?",
@@ -146,14 +135,12 @@ class ChannelMixin:
             player_id = self._channel_player_id(channel_id, player_ref)
             conn.execute(
                 "INSERT INTO players "
-                "(id, kind, controller, source_kind, source_key_hash, "
+                "(id, source_kind, source_key_hash, "
                 "display_name, joined_week, last_seen_week, created_at, is_active) "
-                "VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, 1) "
+                "VALUES (?, ?, NULL, ?, ?, ?, ?, 1) "
                 "ON CONFLICT(id) DO NOTHING",
                 (
                     player_id,
-                    kind,
-                    controller,
                     SOURCE_CHANNEL,
                     display_name,
                     joined_week,
@@ -163,13 +150,12 @@ class ChannelMixin:
             )
             conn.execute(
                 "INSERT INTO channel_players "
-                "(channel_id, player_ref, player_id, kind, profile_json, "
-                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(channel_id, player_ref, player_id, profile_json, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     channel_id,
                     player_ref,
                     player_id,
-                    kind,
                     profile_json,
                     updated_at,
                     updated_at,
@@ -179,14 +165,12 @@ class ChannelMixin:
             player_id = str(mapping["player_id"])
             conn.execute(
                 "INSERT INTO players "
-                "(id, kind, controller, source_kind, source_key_hash, "
+                "(id, source_kind, source_key_hash, "
                 "display_name, joined_week, last_seen_week, created_at, is_active) "
-                "VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, 1) "
+                "VALUES (?, ?, NULL, ?, ?, ?, ?, 1) "
                 "ON CONFLICT(id) DO NOTHING",
                 (
                     player_id,
-                    kind,
-                    controller,
                     SOURCE_CHANNEL,
                     display_name,
                     joined_week,
@@ -194,29 +178,15 @@ class ChannelMixin:
                     updated_at,
                 ),
             )
-            current = conn.execute(
-                "SELECT kind FROM players WHERE id = ?", (player_id,)
-            ).fetchone()
-            # Adoption is deliberate and permanent: an older Channel payload
-            # may refresh display/freshness but must not demote the human.
-            protected_human = current is not None and str(current["kind"]) == "human"
-            effective_kind = "human" if protected_human else kind
-            effective_controller = "human" if effective_kind == "human" else "ai"
             conn.execute(
-                "UPDATE players SET kind = ?, controller = ?, display_name = ?, "
+                "UPDATE players SET display_name = ?, "
                 "last_seen_week = ?, is_active = 1 WHERE id = ?",
-                (
-                    effective_kind,
-                    effective_controller,
-                    display_name,
-                    joined_week,
-                    player_id,
-                ),
+                (display_name, joined_week, player_id),
             )
             conn.execute(
-                "UPDATE channel_players SET kind = ?, profile_json = ?, "
+                "UPDATE channel_players SET profile_json = ?, "
                 "updated_at = ? WHERE channel_id = ? AND player_ref = ?",
-                (effective_kind, profile_json, updated_at, channel_id, player_ref),
+                (profile_json, updated_at, channel_id, player_ref),
             )
         return self._get_player_with(conn, player_id), created
 
@@ -429,7 +399,7 @@ class ChannelMixin:
     ) -> list[dict[str, Any]]:
         sql = (
             "SELECT r.week_start, r.channel_id, r.player_ref, r.player_id, "
-            "r.first_seen_at, p.kind, p.display_name "
+            "r.first_seen_at, p.display_name "
             "FROM channel_week_roster r JOIN players p ON p.id = r.player_id "
             "WHERE r.week_start = ?"
         )

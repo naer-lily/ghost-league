@@ -18,7 +18,6 @@ def seeded_group(tmp_path: Path) -> GameStore:
     for player_id in players:
         store.create_player(
             player_id,
-            kind="human",
             joined_week=WEEK,
             now=f"{WEEK}T00:00:00+08:00",
         )
@@ -102,7 +101,6 @@ def test_small_group_ranks_and_movements(tmp_path) -> None:
     for player_id in players:
         store.create_player(
             player_id,
-            kind="human",
             joined_week=WEEK,
             now=f"{WEEK}T00:00:00+08:00",
         )

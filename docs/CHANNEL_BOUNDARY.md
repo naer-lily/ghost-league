@@ -31,10 +31,10 @@ Adapter 听起来像无状态翻译器，但 Channel 有自己的生命周期：
 
 ## Ghost 的输入契约
 
-Ghost 只认识 `channel_id`、`player_ref`、展示 profile 和事件。Ghost 的 Channel 边界
-没有 AI 标识，也不接收、存储或分支 `kind`/AI 身份；`channel_id` 是路由/认证用的
-不透明标识，Ghost 不按它分支，也不从中推断 provider。AI 只存在于 Channel 自己的
-状态里。
+Ghost 只认识 `channel_id`、`player_ref`、展示 profile 和事件。Ghost 没有 player
+identity class，也不接收、存储或分支 human / ai 身份；`channel_id` 是路由/认证用的
+不透明标识，Ghost 不按它分支，也不从中推断 provider。Channel 可以知道自己的来源，
+但只能以 `source_kind` / `source_key_hash` 的形式留下 provenance。
 
 契约类型在 `ghost_league/channels/contract.py`：
 
@@ -75,20 +75,21 @@ POST /v1/channels/{channel_id}/roster
 
 - roster 是**本周名单**，以 `(week_start, channel_id)` 为键全量替换；
 - 按 `(channel_id, player_ref)` 幂等创建/更新；重复 roster 不创建新 player；
-- 新建和刷新映射一律是普通 player；Ghost 不接受 `kind` 或任何 AI 标记，旧字段
-  作为未知字段返回 `422`，且不会产生部分写入；
-- 已有 `channel_players` 映射的玩家保持普通身份；已 adoption 的 human 不会被刷新
-  降级；
+- 新建和刷新映射一律是普通 player；Ghost 不接受 `kind` 字段，旧字段作为未知字段
+  返回 `422`，且不会产生部分写入；
+- 已有 `channel_players` 映射的玩家保持普通身份，刷新只更新展示名、profile、
+  `last_seen_week` 和活跃状态；
 - 同一 `player_ref` 在不同 `channel_id` 下是两个不同的 Ghost player；
 - Ghost 内部 `player_id` 由 `(channel_id, player_ref)` 稳定派生，不随 profile 改变；
 - 本周不在 roster 的 player 只是不参赛；不删身份、不写 dormant/absent 状态；
-- 名单到达后调用一次 `ensure_all_groups`，与本地真人一起按 tier 分组；
+- 名单到达后调用一次 `ensure_all_groups`，与本地账号玩家一起按 tier 分组；
 - 响应包含 `channel_id`、`week_start`、`count`、`created`、`existing` 和 `players`
   （`updated` 为兼容字段）。
 
 `profile` 只作展示快照存储，不进入 `activity_events`、分数或打卡；更新 profile
-不改 `player_id`，也不改历史分数。`players.kind` 只是内部 legacy 列，Channel 路径
-永远写入普通身份，不把它当作 AI 分支。
+不改 `player_id`，也不改历史分数。`players` 没有 `kind` / `controller` 列，
+`channel_players` 没有 `kind` 列；`source_kind` / `source_key_hash` 只是 Channel
+provenance，不是身份分类。
 
 ### Increments
 
@@ -111,7 +112,7 @@ POST /v1/channels/{channel_id}/increments
 - 找不到 `(channel_id, player_ref)` roster 时返回 `404`，**不自动猜 player**；
 - 同一 `event_id` 被另一个 player/channel 使用时返回 `409`；
 - Ghost 不知道 provider、周总量、anchor 或排行榜页面；
-- 所有 Channel 参赛者走同一条 ingest 路径；AI 只存在于 Channel 自己的状态里。
+- 所有 Channel 参赛者走同一条 ingest 路径；来源身份只留在 Channel 自己的状态里。
 
 响应字段：`accepted`、`duplicate`、`channel_id`、`player_ref`、`player_id`、
 `event_id`、`week_start`、`seconds`、`week_seconds`、`week_xp`、`today_seconds`、
@@ -200,7 +201,7 @@ python3 -m waka_channel.cli tick
 
 ## Account-backed channel (v1)
 
-新的模拟 AI 不走 Channel ingest，而是像普通客户端一样使用账号和公开 API：
+新的模拟客户端不走 Channel ingest，而是像普通客户端一样使用账号和公开 API：
 
 - Ghost 提供独立 provisioning token（`GHOST_LEAGUE_PROVISIONING_TOKEN` /
   `create_app(provisioning_token=...)`）和 `POST /v1/provisioning/accounts`；
@@ -208,33 +209,41 @@ python3 -m waka_channel.cli tick
 - `ai_channel/` 是独立的 stdlib-only 模拟器：通过 provisioning API 创建普通账号、
   在本地保存 token，然后调用 `/v1/me/increments`、`/v1/me/status` 和
   `/v1/shop/purchase`；不写 Ghost 数据库，不调用私有接口。
-- 账号第一次调用 `/v1/me/*` 时走既有 `ensure_human_player` 路径，游戏行是
-  `kind='human'`；Ghost 不写 AI 标记。
-- 旧 Waka 的 `kind='ai'` 玩家可以通过 provisioning 的
-  `adopt_existing_player=true` 原地 adoption 成普通账号：player id、`source_key_hash`、
-  XP/历史、小组关系和 `channel_players` 映射都保留，只把 `kind` / `controller` /
-  `source_kind` 改为 human 并补建钱包。该接口一次处理一个玩家；2026-11-05 的线上
-  迁移就是逐个调用它完成全部 1074 个 legacy 玩家，不删除或重建 player，也不改
-  `channel_players`。
-- adoption 后 Waka 身份查询按 `source_key_hash` 匹配、不按 `kind` 过滤；周 roster
-  同步会刷新同一个玩家，不会重新造一个 AI 行。
-- 已 adoption 的 human 不会被后续 Channel roster 刷新降级：
-  `upsert_channel_player` 刷新已存在映射时，若 `players.kind='human'`，只更新展示名、
-  `last_seen_week` 和活跃状态，保持 `kind='human'` / `controller='human'` 与原
-  `source_kind`，并把 `channel_players.kind` 改为 `human`。Channel roster 路径本身
-  总是传入普通身份，旧 payload 不能再把 deliberate adoption 改回 AI。
-- 迁移后线上 `players` 为 0 AI / 1076 human，`diamond_balance` 为 1076 个钱包；
-  player id、`source_key_hash`、XP/历史、小组关系和 `channel_players` 映射均保留。
-- 迁移时也把 1074 条 `channel_players.kind` 改成 `human`；后续 Waka roster
-  刷新仍保持 human，映射不会被降级。
-- 旧 Channel ingest 仍服务 Waka；Channel roster 只创建/刷新普通 player，不接受
-  AI 标识，也没有部署开关。`players.kind` 列作为内部 legacy 保留，但该路径永远不会
-  写入 `ai`。Waka 仍是 Channel，其排行榜玩家是普通参赛者，不是 Ghost 级 AI 类。
-  live 服务已配置 provisioning token，`/v1/provisioning/accounts` 已启用并鉴权；
+- 账号第一次调用 `/v1/me/*` 时走既有 `ensure_human_player` 路径，写普通 player 行；
+  Ghost 没有 player identity 列，也不写 AI 标记。provisioning 不提供
+  `adopt_existing_player`。
+- Waka 仍是 Channel，其排行榜玩家是普通参赛者，不是 Ghost 级 AI 类。Waka 的
+  provenance 常量是 `SOURCE_WAKA`（值仍为 `wakatime_public_leaderboard`），
+  不存在 `SOURCE_AI`。
+- live 服务已配置 provisioning token，`/v1/provisioning/accounts` 已启用并鉴权；
   token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），不打印、
-  不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074 个 adopted 账号，但还
-  没有常驻 scheduler 或完整行为策略。见
-  [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
+  不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074 个普通账号，但还没有
+  常驻 scheduler 或完整行为策略。见 [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
+
+## Player identity live migration
+
+schema 14 删除 `players.kind` / `players.controller` 和 `channel_players.kind`。
+迁移是幂等的，由 `GameStore.initialize()` 在打开旧库时执行：
+
+1. 检测三列中任意一条仍存在；
+2. 用 SQLite backup API 在数据库旁写
+   `league.db.backup-player-identity-<timestamp>`；
+3. 在同一个事务内重建 `players` 和 `channel_players`，只复制共享列；
+4. 保留 player id、`source_kind` / `source_key_hash`、`channel_players.profile_json`
+   映射、XP、`weekly_scores`、小组关系和钱包；不删除任何玩家行；
+5. 把 `group_members.is_human` 统一设为 1（旧 UI 兼容值，不再代表身份分类）。
+
+执行（先停 API/Web）：
+
+```bash
+cd /opt/ghost-league
+PYTHONPATH=. python3 scripts/migrate_player_identity.py --db data/league/league.db
+```
+
+脚本打印 `integrity_check`、`players`、`channel_players`、`group_members` 计数和
+备份路径。重复运行不会再次迁移，也不会新增备份。回滚：停服务，恢复最近的
+`league.db.backup-player-identity-*`（连同需要的 `-wal` / `-shm` 状态），再回退到
+schema 13 代码；不要在服务运行时覆盖数据库文件。
 
 ## 历史归属
 

@@ -19,7 +19,6 @@ def make_store(tmp_path: Path) -> GameStore:
 def make_player(store: GameStore, player_id: str = "xp-player") -> str:
     store.create_player(
         player_id,
-        kind="human",
         joined_week=WEEK,
         now=NOW,
     )
@@ -204,20 +203,21 @@ def test_backfill_credits_105_for_1056_xp_once(tmp_path: Path) -> None:
     assert ledger[1]["idempotency_key"] == f"xp-diamond:{player_id}:120"
 
 
-def test_backfill_skips_ai_players(tmp_path: Path) -> None:
+def test_backfill_credits_every_ordinary_player(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    store.create_player("ai-xp", kind="ai", joined_week=WEEK, now=NOW)
+    store.create_player("source-xp", joined_week=WEEK, now=NOW)
     with store.transaction() as conn:
         conn.execute(
             "INSERT INTO weekly_scores "
             "(week_start, player_id, seconds, xp) VALUES (?, ?, ?, ?)",
-            (WEEK, "ai-xp", 600, 100),
+            (WEEK, "source-xp", 600, 100),
         )
 
     backfill = load_backfill_module()
     result = backfill.backfill_xp_diamonds(store, now=NOW)
 
-    assert result["credited"] == 0
-    assert result["results"][0]["status"] == "skipped_non_human"
-    assert store.get_diamond_wallet("ai-xp", now=NOW)["balance"] == 0
-    assert store.diamond_ledger("ai-xp") == []
+    assert result["credited"] == 10
+    assert result["results"][0]["status"] == "credited"
+    assert "kind" not in result["results"][0]
+    assert store.get_diamond_wallet("source-xp", now=NOW)["balance"] == 1010
+    assert len(store.diamond_ledger("source-xp")) == 1

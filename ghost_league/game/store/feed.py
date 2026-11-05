@@ -14,7 +14,7 @@ from ..feed import (
     FEED_EMOJIS,
     FEED_PROMOTED,
     FEED_TAGS,
-    ai_actor_rank,
+    reaction_actor_rank,
     champion_body,
     checkin_body,
     promoted_body,
@@ -60,7 +60,7 @@ class FeedMixin:
         if cursor.rowcount == 0:
             return None
         event_id = int(cursor.lastrowid)
-        self._generate_feed_ai_with(conn, event_id, now=now)
+        self._generate_feed_reactions_with(conn, event_id, now=now)
         return _row_to_dict(
             conn.execute(
                 "SELECT * FROM feed_events WHERE id = ?", (event_id,)
@@ -138,7 +138,7 @@ class FeedMixin:
                     now=now,
                 )
 
-    def _generate_feed_ai_with(
+    def _generate_feed_reactions_with(
         self,
         conn: sqlite3.Connection,
         event_id: int,
@@ -165,15 +165,13 @@ class FeedMixin:
             for row in conn.execute(
                 "SELECT p.id FROM group_members gm "
                 "JOIN players p ON p.id = gm.player_id "
-                "WHERE gm.group_id = ? AND p.id != ? "
-                "AND (p.kind = 'ai' OR EXISTS ("
-                "SELECT 1 FROM channel_players cp WHERE cp.player_id = p.id))",
+                "WHERE gm.group_id = ? AND p.id != ?",
                 (int(group["group_id"]), author_id),
             )
         ]
         ranked = sorted(
             candidates,
-            key=lambda actor_id: (-ai_actor_rank(event_id, actor_id), actor_id),
+            key=lambda actor_id: (-reaction_actor_rank(event_id, actor_id), actor_id),
         )[:3]
         if not ranked:
             return
@@ -256,7 +254,7 @@ class FeedMixin:
     ) -> dict[str, Any]:
         event_id = int(row["id"])
         author = conn.execute(
-            "SELECT p.id, p.display_name, p.kind, "
+            "SELECT p.id, p.display_name, "
             "ct.name AS title_name, cf.name AS frame_name "
             "FROM players p "
             "LEFT JOIN loadouts l ON l.player_id = p.id "
@@ -318,9 +316,6 @@ class FeedMixin:
                 ),
                 "frame": (
                     author["frame_name"] if author is not None else None
-                ),
-                "is_ai": bool(
-                    author is not None and str(author["kind"]) == "ai"
                 ),
             },
             "reactions": reactions,

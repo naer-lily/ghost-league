@@ -18,9 +18,10 @@ Channel (waka-channel / duolingo-channel / krita-channel / ...)
 Ghost (SQLite + FastAPI + PWA)
 ```
 
-Ghost 不 import Channel，不调用 Source，也不在业务逻辑里判断 provider。Ghost 的
-Channel 边界没有 AI 标识：所有 Channel player 都按普通参赛者创建/刷新，AI 只存在于
-Channel 自己的状态里。公开 API 和 PWA 不返回 `is_ai` / `kind`。
+Ghost 不 import Channel，不调用 Source，也不在业务逻辑里判断 provider。Ghost 没有
+player identity class：所有 Channel player 都按普通参赛者创建/刷新；Waka 是 Channel，
+Ghost 只保存 `source_kind` / `source_key_hash` 作为 provenance。公开 API 和 PWA 不返回
+`is_ai` / player `kind`。
 
 ## 快速开始
 
@@ -108,14 +109,18 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
 - **余烬补签**：已完成自然日 D 结束后 7 天内可补（D-1 到 D-7）；每次消耗 1 枚余烬，
   只恢复打卡/连胜与历史标记，不增加周 XP、不改变名次或升降级。
 - **XP**：`XP = floor(seconds / 6)`；周榜按 XP 排名。
-- **所有参赛者同规则**：计分、打卡、分组、升降级、称号和边框完全一致；公开响应和
-  前端不暴露 AI 身份。AI 只存在于 Channel 状态里，不是 Ghost 的玩家类别。
-- **Legacy AI 迁移已完成**：2026-11-05 已把线上 1074 个 legacy `kind='ai'` 玩家原地
-  adoption 为普通账号；当前 0 AI / 1076 human，1074 条 Channel 映射均为 `human`。
-  旧 Channel ingest 仍为 Waka 保留，但 roster 现在只创建/刷新普通 player，不接受
-  AI 标识；`players.kind` 仅作为内部 legacy 列保留。live provisioning 路由已配置
-  token 并启用（token 只在服务 env 与 `ai_channel/config.json`，均 0600、untracked，
-  不打印、不提交），`ai_channel` 已有 1074 个 adopted 账号，但还没有常驻 scheduler。
+- **所有参赛者同规则**：计分、打卡、分组、升降级、称号和边框完全一致；Ghost 不保存
+  player identity class，公开响应和前端不暴露 `kind` / `is_ai`。
+- **Player identity 列移除**：schema 14 起 `players` 没有 `kind` / `controller`，
+  `channel_players` 没有 `kind`；`group_members.is_human` 仅为旧 UI 保留并统一写 1。
+  现有玩家、XP、profile、source key、Channel 映射和小组关系都保留。
+- **live 迁移尚未执行**：先停服务并备份，再运行
+  `PYTHONPATH=. python3 scripts/migrate_player_identity.py --db data/league/league.db`。
+  脚本幂等，旧库会自动生成 `league.db.backup-player-identity-<timestamp>`；确认
+  `integrity_check=ok` 和玩家/映射/小组计数后启动服务。回滚时停服务、恢复备份并回退
+  代码。live provisioning 路由已配置 token 并启用（token 只在服务 env 与
+  `ai_channel/config.json`，均 0600、untracked，不打印、不提交），`ai_channel`
+  已有 1074 个普通账号，但还没有常驻 scheduler。
 
 ## API 与 PWA
 
@@ -127,7 +132,7 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
 - [`docs/DAILY_TASKS.md`](docs/DAILY_TASKS.md)：每日手动、补断联、周末与周连续任务，以及宝箱和 API 契约。
 - [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md)：webhook 事件、签名、重试和 CLI。
 - [`docs/AI_ACCOUNTS.md`](docs/AI_ACCOUNTS.md)：account-backed AI、provisioning API、
-  `ai_channel` 模拟器、legacy AI 迁移结果与剩余清理。
+  `ai_channel` 模拟器、普通玩家模型与 player identity 迁移。
 - PWA：`web/` 是旧的移动优先静态应用，`ghost_league/pwa.py` 先注册 API 路由，再挂载
   静态根；`/v1/...`、`/avatars/...` 始终走 API。当前生产通过
   `GHOST_LEAGUE_WEB_ROOT=/opt/ghost-league/web-next` 挂载新构建，SPA 深链回退到

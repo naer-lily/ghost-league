@@ -19,7 +19,7 @@ class RosterPlayer:
 
     ``player_ref`` is only unique inside the Channel namespace.  ``profile`` is
     a display snapshot, not game state; Ghost derives an ordinary player
-    identity and does not accept any AI marker from a Channel.
+    identity and does not accept any identity marker from a Channel.
     """
 
     player_ref: str

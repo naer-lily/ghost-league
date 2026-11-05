@@ -476,7 +476,7 @@ class HistoryTests(GameAPITestBase):
         store = GameStore(self.game_db_path)
         channel_ids = [
             player["id"]
-            for player in store.list_players(kind="human")
+            for player in store.list_players()
             if player["id"] != "owner"
         ]
         store.create_group(

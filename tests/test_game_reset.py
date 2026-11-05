@@ -18,7 +18,6 @@ def test_dry_run_does_not_create_or_write(tmp_path) -> None:
     store = GameStore(target, epoch_reason="seed")
     store.create_player(
         "human-1",
-        kind="human",
         joined_week="2026-10-26",
         now="2026-10-26T00:00:00+08:00",
     )

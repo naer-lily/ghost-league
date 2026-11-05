@@ -1,7 +1,8 @@
-"""Anonymous WakaTime leaderboard rows -> stable AI players.
+"""Anonymous WakaTime leaderboard rows -> ordinary players with provenance.
 
 Only the public row ``id`` is used for the source key.  Names, cities, avatars
-and profile pages never reach the database.
+and profile pages never reach the database.  Waka is a Channel; its rows are
+ordinary contestants whose only Ghost-level marker is ``source_kind``.
 
 External rows are normalized once at the source layer.  The raw weekly total is
 kept in ``sources.anchor_seconds`` for audit, while the effective value feeds the
@@ -20,8 +21,8 @@ from typing import Any, Final
 
 from ..source.normalize import NORMALIZATION_VERSION, normalize_seconds
 from . import calendar as cal
-from .rules import OPPONENT_COUNT, PlayerNotFound
-from .store import SOURCE_AI, SOURCE_CHANNEL, GameStore
+from .rules import OPPONENT_COUNT
+from .store import SOURCE_WAKA, GameStore
 
 DEFAULT_CACHE_PATH: Final = Path("data/cache/cn-978.json")
 DEFAULT_SOURCE_SALT: Final = "ghost-league-source-v1"
@@ -46,7 +47,7 @@ def normalize_anchor_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     The full snapshot is normalized before any roster decision, so the p75
     threshold does not move with the number of players.  Duplicate source ids
     are collapsed by first occurrence so one stable source cannot become two
-    AI.
+    players.
     """
 
     if not isinstance(rows, list):
@@ -151,7 +152,7 @@ def build_opponent_week_plan(
     normalization_version: str = NORMALIZATION_VERSION,
     tier: str | None = None,
 ) -> dict[str, Any]:
-    """Build the pure, deterministic target plan for one AI/week.
+    """Build the pure, deterministic target plan for one source player/week.
 
     ``anchor_seconds`` is the raw source value for audit.  ``target_seconds`` is
     always the source-normalized effective value; no tier band or week factor
@@ -211,7 +212,7 @@ def seed_roster(
     salt: str | None = None,
     tier: str | None = None,
 ) -> dict[str, Any]:
-    """Create the current week's AI roster and lock each AI's target.
+    """Create the current week's source roster and lock each target.
 
     Every external row stores both its raw and effective value.  The effective
     value is the default target; the returned ``target_seconds`` is always the
@@ -245,19 +246,16 @@ def seed_roster(
             anchor_week=week_date,
             fetched_at=local_at,
         )
-        player_id = f"ai-{key_hash[:12]}"
-        try:
-            store.get_player(player_id)
-            known = True
-        except PlayerNotFound:
-            known = False
+        existing = store.get_player_by_source_key_hash(key_hash)
+        known = existing is not None
+        player_id = (
+            str(existing["id"]) if existing is not None else f"waka-{key_hash[:12]}"
+        )
         player = store.create_player(
             player_id,
-            kind="ai",
-            controller="ai",
-            source_kind=SOURCE_AI,
+            source_kind=SOURCE_WAKA,
             source_key_hash=key_hash,
-            display_name=f"AI-{index:02d}",
+            display_name=f"Player-{index:02d}",
             joined_week=week_date,
             now=local_at,
         )
@@ -318,12 +316,12 @@ def sync_week_roster(
     at: datetime | str | None = None,
     salt: str | None = None,
 ) -> dict[str, Any]:
-    """Bind the complete anonymous source snapshot to stable AI players.
+    """Bind the complete anonymous source snapshot to stable ordinary players.
 
-    Every row in ``cache`` becomes an AI identity keyed by ``source_key_hash``;
-    there is no top-14 selection.  A row that is present this week always gets
-    a current-week plan, including a zero-second row (target ``0``).  An AI
-    that is absent keeps its player row and historical plans but loses the
+    Every row in ``cache`` becomes a player keyed by ``source_key_hash``; there
+    is no top-14 selection.  A row that is present this week always gets a
+    current-week plan, including a zero-second row (target ``0``).  A player
+    that is absent keeps its row and historical plans but loses the
     current-week plan, so it cannot be placed in this week's groups.
     """
 
@@ -363,11 +361,13 @@ def sync_week_roster(
                 fetched_at=local_at,
                 conn=conn,
             )
-            player, was_created = store.upsert_ai_player(
+            player, was_created = store.upsert_source_player(
                 key_hash,
-                display_name=f"AI-{key_hash[:8].upper()}",
+                display_name=f"Player-{key_hash[:8].upper()}",
                 joined_week=week_date,
                 last_seen_week=week_date,
+                source_kind=SOURCE_WAKA,
+                id_prefix="waka",
                 now=local_at,
                 conn=conn,
             )
@@ -409,8 +409,9 @@ def sync_week_roster(
                 }
             )
 
-        # Any AI with a stale current-week plan is unavailable this week.  The
-        # plan is withdrawn instead of reusing an old target or group slot.
+        # Any source player with a stale current-week plan is unavailable this
+        # week.  The plan is withdrawn instead of reusing an old target or
+        # group slot.
         stale_with_plan = prior_plan_ids - current_ids
         for player_id in stale_with_plan:
             conn.execute(
@@ -435,10 +436,9 @@ def sync_week_roster(
         disappeared_ids = {
             str(row["id"])
             for row in conn.execute(
-                "SELECT id FROM players WHERE kind = 'ai' "
-                "AND source_kind != ? "
+                "SELECT id FROM players WHERE source_kind = ? "
                 "AND last_seen_week = ? AND is_active = 1",
-                (SOURCE_CHANNEL, previous_week),
+                (SOURCE_WAKA, previous_week),
             )
             if str(row["id"]) not in current_ids
         }
@@ -468,7 +468,7 @@ def ensure_all_groups(
     now: datetime | None = None,
     spread_humans: bool = False,
 ) -> list[dict[str, Any]]:
-    """Materialize all current-week groups for humans and planned AI."""
+    """Materialize all current-week groups for local and source players."""
 
     return store.ensure_all_groups(
         week, now=now, spread_humans=spread_humans

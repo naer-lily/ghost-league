@@ -461,8 +461,6 @@ class BetsMixin:
 
         with self.transaction() as conn:
             player = self._get_player_with(conn, player_id)  # type: ignore[attr-defined]
-            if str(player["kind"]) != "human":
-                raise BetRejected("human_only", "只有真人可以下注")
 
             if kind == "group":
                 if target_margin not in (None, 0):

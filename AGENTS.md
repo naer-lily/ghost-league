@@ -14,12 +14,16 @@ Ghost (通用联赛引擎)
 
 - **Ghost 不 import Channel，不调用 Source，不出现 provider 名称。**
 - Ghost 只接收匿名 `player_ref`、展示资料和 `{event_id, seconds, occurred_at}`。
-  Ghost 的 Channel 边界没有 AI 标识；AI 只存在于 Channel 自己的状态里。
+  Ghost 没有 player identity class：每名玩家都是普通参赛者，不按 human / ai 分支。
 - Channel 可以有状态和生命周期：拉周快照、cursor、重试、心跳、补推。
 - Channel 可以是模块，也可以独立部署；这是部署选择，不改变边界。
 - `channel_id` 是认证/路由用的不透明标识；Ghost 不按它分支。
-- Channel roster 一律创建/刷新普通 player，不接收、存储或分支 AI 身份。
-  `players.kind` 仅作为内部 legacy 列保留，Channel 路径永远不写 `ai`。
+- Channel roster 一律创建/刷新普通 player；`players` 没有 `kind` / `controller`
+  列，`channel_players` 没有 `kind` 列。`source_kind` / `source_key_hash` 只是
+  Channel provenance，不是身份。
+- `SOURCE_WAKA` 是 Waka 的 provenance 常量（值仍为
+  `wakatime_public_leaderboard`）；不存在 `SOURCE_AI`。Waka 是 Channel，其排行榜
+  玩家是普通参赛者。
 - Ghost 的 Channel ingest：`POST /v1/channels/{channel_id}/roster` 与
   `POST /v1/channels/{channel_id}/increments`；契约在
   `ghost_league/channels/contract.py`。
@@ -27,21 +31,13 @@ Ghost (通用联赛引擎)
   不能复用普通账号 token。
 - 请求字段固定为 roster 的 `player_ref` / `profile` 和 increment 的
   `player_ref` / `event_id` / `seconds` / `occurred_at`；未知字段（含旧 `kind`）422。
-- 没有 AI roster 开关；Channel roster 的新玩家和已有映射都保持普通身份。Waka 仍是
-  Channel，其排行榜玩家是普通参赛者，不是 Ghost 级 AI 类。
+- `group_members.is_human` 仅为兼容旧 UI 保留，所有普通成员都写 1；不得用它恢复
+  新的身份分类或分支。
 - **Account-backed AI（v1）**：新模拟 AI 是普通账号，由独立 `ai_channel/` 通过
   `POST /v1/provisioning/accounts` 创建，之后只调用 `/v1/me/*` 与 `/v1/shop*`；
-  账号第一次读取走既有 `ensure_human_player`，游戏行是 `kind='human'`。Ghost 不写
-  AI 标记，也不为模拟器新增私有接口或数据库旁路。
-- 新模拟 AI 不得新增 Ghost 级 `kind` 分支或新的内部身份体系；身份和策略留在
-  `ai_channel/` 自己的状态里。旧 Waka `kind='ai'` 玩家可用 provisioning 的
-  `adopt_existing_player=true` **原地** adoption 成普通账号：保留 player id、
-  `source_key_hash`、XP/历史、小组关系和 `channel_players` 映射，只改
-  `kind` / `controller` / `source_kind` 并补建钱包；不删除/重建 player，不改
-  `channel_players`。2026-11-05 已用该原语完成线上全量迁移（结果见“当前数据/迁移
-  状态”）。adoption 后 Waka 查询与周同步按 `source_key_hash` 匹配、不按 `kind`
-  过滤，避免重新造 AI 行。live legacy player id 是 `ch-` 加 64 位 hex（67 字符），
-  在 provisioning 的 80 字符 user-id 限制内。
+  账号第一次读取走既有 `ensure_human_player`，写普通 player 行。Ghost 不写 AI
+  标记，也不为模拟器新增私有接口或数据库旁路。身份和策略只留在 `ai_channel/`
+  自己的状态里；provisioning 不再提供 `adopt_existing_player`。
 
 ## Widget Studio（图片模版编辑器）
 
@@ -92,7 +88,7 @@ Ghost (通用联赛引擎)
 - 旧逻辑的缺口只有：`N=1` 会造单人组、incomplete group 仍按前 3 全升、人类没有优先占满组；在这些点上补规则，不要重写均衡本身。
 - 每组最多 15 人；先定组数 `ceil(N/15)`，再均分，不要先装满再丢尾组。
 - 每组至少 2 人；只有 1 人时不建单人组，标记 unplaced。
-- 人类先占组；该 tier 有 15 人以上时，用户必须进满 15 人组。
+- 本地账号玩家先占组；该 tier 有 15 人以上时，用户必须进满 15 人组。
 - 不足 15 人时才允许小组，且尽量均分。
 - 升段/降段按 tier 汇总配额，不机械按每个组前 3/后 3；尾组按比例，避免 3 人组全员升降。
 
@@ -100,17 +96,20 @@ Ghost (通用联赛引擎)
 
 - 旧 `data/league/state.json`、`data/api/membership.json`、旧 `events.db` 只作历史留档，不再作为联赛真相源。
 - 新游戏状态在 `data/league/league.db`（GameStore）。
-- **Legacy AI 迁移已完成（2026-11-05）**：`players` 为 0 AI / 1076 human，
-  `diamond_balance` 为 1076 个钱包，1074 条 `channel_players` 映射全部
-  `kind='human'`，`group_members.is_human` 全部为 human；账户 token 在
-  `ai_channel/data/ai_accounts.db`（0600，Git-ignored）。
-- **迁移后 caveat**：旧 Channel ingest 仍为 Waka 保留，但 Channel roster 只创建/刷新
-  普通 player，不接受 AI 标识；没有 live switch，`players.kind` 仅作为内部 legacy 列
-  保留。live 服务已配置 provisioning token，`POST /v1/provisioning/accounts` 已启用
-  并按 Bearer 鉴权；token 只在服务 env 与 `ai_channel/config.json`（均 0600、
-  Git-ignored），不打印、不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074
-  个 adopted 账号，但还没有常驻 scheduler 或完整行为策略。Channel roster 刷新不会把
-  已存在的 human 玩家降级。详见 `docs/AI_ACCOUNTS.md`。
+- **Player identity 列移除**：schema 14 起 `players` 没有 `kind` / `controller`，
+  `channel_players` 没有 `kind`。游戏状态仍是 `data/league/league.db`；现有 1076 名
+  普通玩家、1074 条 Channel 映射、XP、小组与 source key 都会在迁移中原样保留，
+  `group_members.is_human` 统一回填为 1。
+- **live 迁移尚未执行**：代码内 `GameStore.initialize()` 对旧库是幂等的，会先备份
+  `league.db.backup-player-identity-<timestamp>` 再重建两张表；上线前先停服务，
+  跑 `PYTHONPATH=. python3 scripts/migrate_player_identity.py --db data/league/league.db`
+  （脚本只初始化并打印校验结果），确认 `PRAGMA integrity_check` 与玩家/映射/小组计数，
+  再启动服务。回滚时停服务、恢复备份文件后回退代码。详见 `docs/CHANNEL_BOUNDARY.md`
+  与 `docs/AI_ACCOUNTS.md`。
+- live 服务已配置 provisioning token，`POST /v1/provisioning/accounts` 已启用并按
+  Bearer 鉴权；token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），
+  不打印、不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074 个普通账号，但
+  还没有常驻 scheduler 或完整行为策略。Channel roster 刷新不会改变 provenance。
 - 新 Channel ingest 已落在 `channel_players` / `channel_events`，按 `(channel_id, player_ref)`
   映射身份，按全局 `event_id` 幂等；不读取 `sources` / `opponent_week_plan`，不调用
   `projection.tick`。旧 source 分组也暂时排除 `source_kind=channel_ingest` 的 player。

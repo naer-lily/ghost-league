@@ -174,7 +174,6 @@ class FeedAPITests(GameAPITestBase):
             store = service.store
             store.create_player(
                 "outside-human",
-                kind="human",
                 joined_week=WEEK_START,
                 now="2026-10-26T10:00:00+08:00",
             )

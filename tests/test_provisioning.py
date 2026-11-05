@@ -112,7 +112,7 @@ def test_create_returns_account_and_working_token(tmp_path: Path) -> None:
 
         with sqlite3.connect(game_db) as connection:
             player = connection.execute(
-                "SELECT kind FROM players WHERE id = ?", ("sim-0001",)
+                "SELECT source_kind FROM players WHERE id = ?", ("sim-0001",)
             ).fetchone()
             wallet = connection.execute(
                 "SELECT balance FROM diamond_balance WHERE player_id = ?",
@@ -121,7 +121,7 @@ def test_create_returns_account_and_working_token(tmp_path: Path) -> None:
             channel_players = connection.execute(
                 "SELECT COUNT(*) FROM channel_players"
             ).fetchone()[0]
-        assert player is not None and player[0] == "human"
+        assert player is not None and player[0] == "local_increment"
         assert wallet is not None
         assert channel_players == 0
 
@@ -261,7 +261,7 @@ def test_increment_uses_existing_human_path(tmp_path: Path) -> None:
         after = client.get("/v1/me/status", headers=_headers(token)).json()
         assert after["xp"] > before["xp"]
         with sqlite3.connect(game_db) as connection:
-            kind = connection.execute(
-                "SELECT kind FROM players WHERE id = ?", ("sim-0001",)
+            source_kind = connection.execute(
+                "SELECT source_kind FROM players WHERE id = ?", ("sim-0001",)
             ).fetchone()[0]
-        assert kind == "human"
+        assert source_kind == "local_increment"

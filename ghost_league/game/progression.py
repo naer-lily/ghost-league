@@ -2,7 +2,7 @@
 
 Titles and cosmetics are display-only.  Nothing here changes XP, ranking,
 grouping, or settlement; the same milestones and the same award function are
-used for local humans and Channel-provided AI players.
+used for source-provenance players.
 """
 
 from __future__ import annotations

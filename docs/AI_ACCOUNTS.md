@@ -1,28 +1,34 @@
 # Account-backed AI channel (v1)
 
-This document describes the first vertical slice of the symmetric-league
-design: simulated players act through Ghost's public API using ordinary
-accounts, exactly like a human client.
+This document describes the account-backed simulator and the Ghost player model
+it relies on. Simulated clients act through Ghost's public API using ordinary
+accounts, exactly like any other client.
 
-## Why account-backed AI
+## Why account-backed clients
 
-Ghost is a Duolingo-like league. Its game path should not need an "AI" branch
-to produce XP, check-ins, stars, ranks or settlements. The cleanest way to test
-that property is to let the simulator own a normal account and a normal token,
-then use the same public endpoints as everyone else.
+Ghost has no player identity class. Its game path does not need a human / ai
+branch to produce XP, check-ins, stars, ranks or settlements. The cleanest way
+to test that property is to let the simulator own a normal account and a normal
+token, then use the same public endpoints as everyone else.
 
-- Ghost stores only a normal account and normal game state.
+- Ghost stores only ordinary players and ordinary game state.
 - The simulator owns identity, token storage and behavior policy.
 - Ghost does not import the simulator, does not know which accounts are
   simulated, and writes no AI marker into `players` or `channel_players`.
-- The account's first authenticated `/v1/me/*` call follows the existing human
-  path (`ensure_human_player`), so the game row is `kind='human'`.
+- The account's first authenticated `/v1/me/*` call follows
+  `ensure_human_player`, which writes an ordinary player row.
+- Waka is a Channel. Its leaderboard rows become ordinary contestants with
+  `source_kind = SOURCE_WAKA` (`wakatime_public_leaderboard`) and an optional
+  `source_key_hash`; those fields are provenance, not identity. There is no
+  `SOURCE_AI`, no `players.kind` / `players.controller`, and no
+  `channel_players.kind`.
+- `group_members.is_human` remains only for the existing UI contract. Every
+  ordinary member is written with value `1`; it is not a new identity class.
 
-This is intentionally different from the legacy Waka Channel. Ghost's Channel
-roster boundary has no AI identity: every roster player is created or refreshed
-as an ordinary player, and an old `kind` field is rejected as an unknown field.
-Waka remains a Channel and can know its own source internally, but Ghost does
-not receive or store that identity. AI state lives only in Channel state.
+Ghost's Channel roster boundary has no identity flag: every roster player is
+created or refreshed as an ordinary player, and an old `kind` field is rejected
+as an unknown field. Channel-local state may still distinguish clients for its
+own purposes, but none of that reaches Ghost.
 
 ## Provisioning API
 
@@ -55,101 +61,53 @@ Rules:
 
 - `user_id` must match Ghost's `SAFE_USER_ID` pattern (1-80 characters, leading
   letter or digit, then letters/digits/dot/underscore/dash) and must not be the
-  owner. Live legacy AI ids are `ch-` plus a 64-hex source key, 67 characters,
-  so they fit the provisioning limit.
+  owner.
 - Duplicate ids return `409`; malformed or unknown fields return `422`.
 - `display_name` is non-empty and at most 80 characters.
 - The response is `201 {"account": {...}, "token": "..."}`.
 - The plaintext token is returned exactly once; Ghost stores only its hash.
-- Only an account is created. No `players` row, wallet or AI marker is written
-  until the account makes its first authenticated `/v1/me/*` call.
+- Only an account is created. No `players` row, wallet or identity marker is
+  written until the account makes its first authenticated `/v1/me/*` call.
+- There is no `adopt_existing_player` field or endpoint. Accounts are always
+  created fresh; existing players are never converted by provisioning.
 
 The provisioning token is only for account creation. It cannot call
 `/v1/me/*`, and an ordinary account token cannot call the provisioning route.
 
-### Adopting one legacy AI player
+Waka roster sync looks players up by `source_key_hash` only. A row that returns
+after a missing week refreshes the same player id and never creates a duplicate
+identity beside it.
 
-`adopt_existing_player` promotes one existing Waka `players.id` that is still
-`kind='ai'` into an ordinary account without changing its player id:
+## Player identity live migration
 
-```http
-POST /v1/provisioning/accounts
-Authorization: Bearer <provisioning-token>
-Content-Type: application/json
+Schema 14 removes the retired identity columns from the game database. The
+migration is idempotent and runs from `GameStore.initialize()`:
 
-{
-  "user_id": "ai-0123456789ab",
-  "display_name": "Adopted player",
-  "activity_label": "练习",
-  "adopt_existing_player": true
-}
+1. Detect any remaining `players.kind` / `players.controller` /
+   `channel_players.kind` column.
+2. Back up the database with the SQLite backup API to
+   `league.db.backup-player-identity-<timestamp>` beside the live file.
+3. Rebuild `players` and `channel_players` in one transaction, copying only
+   shared columns.
+4. Preserve player ids, `source_kind` / `source_key_hash`, channel profile
+   snapshots and mappings, XP, weekly scores, group memberships and wallets.
+   No player row is deleted.
+5. Set `group_members.is_human = 1` for all existing memberships.
+
+Apply it with the API and Web stopped:
+
+```bash
+cd /opt/ghost-league
+PYTHONPATH=. python3 scripts/migrate_player_identity.py --db data/league/league.db
 ```
 
-Adoption rules:
-
-- `adopt_existing_player` defaults to `false`; the default path creates a new
-  account exactly as v1 does.
-- `user_id` must be an existing `players.id` with `kind='ai'`. A missing player
-  returns `404`; an already-human player returns `409` with
-  `player already human`; the owner is still rejected with `422`.
-- An account is created only if that id has none. A duplicate adoption or any
-  other existing account returns `409`.
-- The player row is promoted in one league transaction to `kind='human'`,
-  `controller='human'`, `source_kind='local_increment'` and `is_active=1`.
-- `source_key_hash`, `joined_week`, `last_seen_week`, `created_at`, XP/history
-  and group membership are preserved. The player row is updated in place, never
-  deleted or recreated, and `channel_players` rows are not touched.
-- A normal diamond wallet is created in the same transaction.
-- The returned token is an ordinary account token. The first `/v1/me/*` call
-  follows the normal human path.
-
-After adoption, Waka identity lookup is kind-independent: both
-`get_player_by_source_key_hash()` and the weekly `upsert_ai_player()` match on
-`source_key_hash` alone. A later Waka roster sync therefore refreshes the
-adopted human's display name and `last_seen_week` and returns `created=False`
-instead of inserting a duplicate AI row.
-
-Adoption is also protected from Channel refreshes. When
-`upsert_channel_player()` refreshes an existing mapping whose player is already
-`kind='human'`, it keeps `kind='human'` and `controller='human'`, leaves
-`source_kind` untouched, and marks the mapping row `kind='human'`; only the
-display name, `last_seen_week` and active flag are refreshed. The Channel roster
-path itself always writes an ordinary identity, and an old `kind` field is
-rejected, so a later Channel refresh cannot demote an adopted human.
-
-The adoption primitive was designed for one player at a time. On 2026-11-05 the
-live migration was run for every legacy AI player by invoking it repeatedly,
-so the full migration is complete.
-
-## Live legacy adoption (2026-11-05)
-
-The live `data/league/league.db` was backed up while the API/Web were stopped,
-then all 1074 legacy `kind='ai'` players were adopted in place through the
-provisioning endpoint. The result:
-
-- `players`: `1074 -> 0` AI and `2 -> 1076` human; player ids, XP, weekly
-  history, group memberships and `source_key_hash` are preserved.
-- `diamond_balance`: 1076 wallets (one for every human, including the owner).
-- `channel_players`: 1074 mappings preserved and their `kind` values were
-  changed to `human` after adoption; the mapping is now an ordinary channel
-  identity, not an AI marker.
-- `group_members.is_human`: all human members are marked human, so settlement
-  rewards use the human rule.
-- `ai_channel/data/ai_accounts.db`: 1074 ordinary account tokens, file mode
-  `0600`, Git-ignored.
-- A sample adopted account returns `200` from `/v1/me/status` with its existing
-  XP.
-
-Rollback copies:
-
-- pre-migration: `/data/backups/ghost-league/pre-legacy-adoption-20261105T132352`
-- post-migration: `/data/backups/ghost-league/post-legacy-adoption-20261105T132510`
-
-The migration did not remove the `channel_players` rows or the legacy Channel
-ingest endpoints. `players.kind` remains an internal legacy column for old data,
-but the Channel roster path never writes `ai`; new simulated accounts and all
-adopted players, as well as new Channel players, behave as ordinary players in
-the game path.
+The script prints `integrity_check`, `players`, `channel_players`,
+`group_members` counts and the backup path. Re-running it on an already
+migrated database is a no-op and creates no second backup. Roll back by
+stopping the service, restoring the most recent
+`league.db.backup-player-identity-*` (plus any needed `-wal` / `-shm` state),
+then returning to the schema 13 code. Never overwrite a live database while the
+service is running.
 
 ## ai_channel package
 
@@ -216,33 +174,24 @@ V1 policy:
 Implemented:
 
 - Separate provisioning token and `/v1/provisioning/accounts`.
-- Ordinary accounts that enter the normal human game path.
+- Ordinary accounts that enter the normal player path; no Ghost identity field.
 - `ai_channel/` provisioning, local token state, XP ticks and optional star
   purchases through public API calls.
-- In-place legacy adoption via `adopt_existing_player`, preserving id, history,
-  group membership and channel mapping.
-- Live adoption of all 1074 legacy AI players on 2026-11-05; `players` is now
-  0 AI / 1076 human, `diamond_balance` has 1076 wallets, and all 1074
-  `channel_players` mappings are `kind='human'`.
-- Existing human players are protected from Channel refresh demotion.
+- Idempotent player-identity schema migration with automatic backup.
+- Waka as a Channel whose leaderboard players are ordinary contestants; only
+  `source_kind` / `source_key_hash` record provenance.
 
 Remaining cleanup:
 
 - The legacy Channel ingest endpoints remain for Waka / external Channels.
-  Channel roster always creates or refreshes ordinary players; Waka's
-  leaderboard players are ordinary contestants, not a Ghost-level AI class.
-- Some legacy source/projection code still reads old `kind` rows for historical
-  compatibility, but the Channel boundary has no AI flag or AI branch and never
-  writes `players.kind='ai'`.
-- Existing adopted humans are still protected from Channel refresh demotion.
+- Legacy source/projection code remains for historical compatibility, but it
+  must not write a player identity column or branch on one.
 - Live provisioning is enabled: the token is configured in the service
   environment and `ai_channel/config.json` (both `0600`, untracked), so
   `ai_channel` can use the route and its token DB already holds the 1074
-  adopted accounts. Keep the token out of logs and Git.
+  ordinary accounts. Keep the token out of logs and Git.
 - `ai_channel/` has tokens and a CLI, but there is no resident scheduler or
   full behavior policy yet.
-- The adoption migration was a one-off administrative run; there is no
-  automatic backfill or scheduled reconciliation for future legacy rows.
 
 The long-term design remains in the `ghost-league` skill reference
 `references/agent-symmetry.md`.

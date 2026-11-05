@@ -128,7 +128,7 @@ class ShopMixin:
         *,
         now: datetime | str | None = None,
     ) -> dict[str, Any]:
-        """Return wallet fields, creating/backfilling a human wallet on read."""
+        """Return wallet fields, creating/backfilling a player wallet on read."""
 
         local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
         with self.transaction() as conn:
@@ -233,7 +233,6 @@ class ShopMixin:
         local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
 
         with self.transaction() as conn:
-            self._ensure_diamond_owner_with(conn, player_id)
             return self._credit_diamonds_with(
                 conn,
                 player_id=player_id,
@@ -330,7 +329,6 @@ class ShopMixin:
         local_now = cal.parse_datetime(now) if now is not None else cal.now_local()
 
         with self.transaction() as conn:
-            self._ensure_diamond_owner_with(conn, player_id)
             return self._debit_diamonds_with(
                 conn,
                 player_id=player_id,
@@ -355,17 +353,6 @@ class ShopMixin:
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError("reason must be non-empty")
 
-    def _ensure_diamond_owner_with(
-        self, conn: sqlite3.Connection, player_id: str
-    ) -> None:
-        """Diamonds belong to humans; unknown local-test ids are allowed."""
-
-        row = conn.execute(
-            "SELECT kind FROM players WHERE id = ?", (player_id,)
-        ).fetchone()
-        if row is not None and str(row["kind"]) != "human":
-            raise ShopNotAllowed("diamonds are only available to human players")
-
     @staticmethod
     def _wallet_row_with(
         conn: sqlite3.Connection, player_id: str
@@ -383,19 +370,16 @@ class ShopMixin:
         now: datetime,
         create_for_unknown: bool,
     ) -> sqlite3.Row | None:
-        """Create the 1000/1000 wallet for a human if it does not exist yet."""
+        """Create the 1000/1000 wallet for a player if it does not exist yet."""
 
         row = self._wallet_row_with(conn, player_id)
         if row is not None:
             return row
 
         player = conn.execute(
-            "SELECT kind FROM players WHERE id = ?", (player_id,)
+            "SELECT 1 FROM players WHERE id = ?", (player_id,)
         ).fetchone()
-        if player is not None:
-            if str(player["kind"]) != "human":
-                return None
-        elif not create_for_unknown:
+        if player is None and not create_for_unknown:
             return None
 
         created_at = cal.iso_ts(now)
@@ -977,8 +961,6 @@ class ShopMixin:
                 payload = json.loads(str(prior["result_json"]))
                 payload["replayed"] = True
                 return payload
-
-            self._ensure_diamond_owner_with(conn, player_id)
 
             if self._is_boost_item(item_id):
                 return self._purchase_diamond_boost_with(

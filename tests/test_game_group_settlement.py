@@ -55,7 +55,6 @@ def seed_group(
     for index, player_id in enumerate(player_ids):
         store.create_player(
             player_id,
-            kind="human" if index == 0 else "ai",
             joined_week="2026-10-05",
             now="2026-10-05T00:00:00+08:00",
         )

@@ -18,7 +18,6 @@ def build_week(
     for player_id in player_ids:
         store.create_player(
             player_id,
-            kind="human" if player_ids.index(player_id) == 0 else "ai",
             joined_week="2026-10-05",
             now="2026-10-05T00:00:00+08:00",
         )
@@ -100,7 +99,6 @@ def test_silver_demotes_bottom_four_and_diamond_never_promotes(tmp_path) -> None
     for player_id in players:
         store.create_player(
             player_id,
-            kind="human" if player_id == "p01" else "ai",
             joined_week="2026-10-05",
             now="2026-10-05T00:00:00+08:00",
         )

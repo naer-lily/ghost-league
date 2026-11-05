@@ -27,7 +27,6 @@ def add_players(store: GameStore, player_ids: list[str], *, week: str = WEEK) ->
     for player_id in player_ids:
         store.create_player(
             player_id,
-            kind="human" if player_id.endswith("human") else "ai",
             joined_week="2026-10-05",
             now="2026-10-05T00:00:00+08:00",
         )
@@ -86,8 +85,7 @@ def test_checkin_feed_event_is_written_once(tmp_path) -> None:
     assert item["day"] == WEEK
     assert item["body"] == "今天点着了 1,340 XP"
     assert item["author"]["id"] == "human"
-    assert item["author"]["is_ai"] is False
-    assert set(item["author"]) == {"id", "name", "title", "frame", "is_ai"}
+    assert set(item["author"]) == {"id", "name", "title", "frame"}
     assert 1 <= len(item["reactions"]) <= 3
     assert all(reaction["emoji"] in FEED_EMOJIS for reaction in item["reactions"])
     assert all(tag["tag"] in FEED_TAGS for tag in item["tags"])
@@ -180,15 +178,15 @@ def test_ai_reactions_are_at_most_three_and_tags_match_event_evidence(tmp_path) 
     with store.transaction() as conn:
         conn.execute(
             "INSERT INTO players "
-            "(id, kind, controller, source_kind, display_name, joined_week, "
+            "(id, source_kind, display_name, joined_week, "
             "last_seen_week, created_at, is_active) "
-            "VALUES ('ai-new', 'ai', 'ai', 'channel_ingest', 'ai-new', ?, ?, ?, 1)",
+            "VALUES ('ai-new', 'channel_ingest', 'ai-new', ?, ?, ?, 1)",
             (WEEK, WEEK, "2026-10-26T13:00:00+08:00"),
         )
         conn.execute(
             "INSERT INTO group_members "
             "(group_id, player_id, tier_at_start, is_human, joined_at) "
-            "VALUES (1, 'ai-new', 'Bronze', 0, ?)",
+            "VALUES (1, 'ai-new', 'Bronze', 1, ?)",
             ("2026-10-26T13:00:00+08:00",),
         )
     assert len(store.feed_for("human")[0]["reactions"]) <= 3
@@ -248,13 +246,11 @@ def test_feed_visibility_is_group_follows_and_self_only(tmp_path) -> None:
     lonely = make_store(tmp_path / "lonely")
     lonely.create_player(
         "solo",
-        kind="human",
         joined_week=WEEK,
         now=f"{WEEK}T00:00:00+08:00",
     )
     lonely.create_player(
         "other",
-        kind="human",
         joined_week=WEEK,
         now=f"{WEEK}T00:00:00+08:00",
     )
@@ -276,8 +272,8 @@ def test_human_and_ai_feed_items_share_the_same_public_shape(tmp_path) -> None:
 
     feed = store.feed_for("human")
     assert len(feed) == 2
-    human_item = next(item for item in feed if not item["author"]["is_ai"])
-    ai_item = next(item for item in feed if item["author"]["is_ai"])
+    human_item = next(item for item in feed if item["author"]["id"] == "human")
+    ai_item = next(item for item in feed if item["author"]["id"] == "ai-1")
     assert set(human_item) == set(ai_item)
     assert set(human_item["author"]) == set(ai_item["author"])
     assert set(human_item["reactions"][0]) == set(ai_item["reactions"][0])

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from ghost_league.game.store import GameStore
+from ghost_league.game.store import SOURCE_WAKA, GameStore
 
 WEEK = "2026-10-19"
 NEXT_WEEK = "2026-10-26"
@@ -22,12 +22,12 @@ def make_player(
     store: GameStore,
     player_id: str,
     *,
-    kind: str = "human",
+    source_kind: str | None = None,
     joined_week: str = WEEK,
 ) -> None:
     store.create_player(
         player_id,
-        kind=kind,
+        source_kind=source_kind,
         joined_week=joined_week,
         now=f"{joined_week}T00:00:00+08:00",
     )
@@ -132,7 +132,7 @@ def test_weekly_rank_top3_champion_and_promotion_are_idempotent(tmp_path) -> Non
     store = make_store(tmp_path)
     players = ["p01", "p02", "p03", "p04", "p05"]
     for player_id in players:
-        make_player(store, player_id, kind="ai" if player_id == "p02" else "human")
+        make_player(store, player_id)
     store.create_group(
         WEEK,
         tier="Bronze",
@@ -163,20 +163,24 @@ def test_weekly_rank_top3_champion_and_promotion_are_idempotent(tmp_path) -> Non
     assert {player: len(store.awarded_milestones(player)) for player in players} == before
 
 
-def test_ai_and_humans_use_the_same_awards_and_ai_taste_is_unlocked(tmp_path) -> None:
+def test_local_and_source_players_use_same_awards_and_source_taste_unlocks(
+    tmp_path,
+) -> None:
     store = make_store(tmp_path)
     make_player(store, "human-1")
-    make_player(store, "ai-1", kind="ai")
-    for player_id in ("human-1", "ai-1"):
+    make_player(store, "source-1", source_kind=SOURCE_WAKA)
+    for player_id in ("human-1", "source-1"):
         checkin(store, player_id, "2026-10-19")
-    assert milestone_ids(store, "ai-1") == milestone_ids(store, "human-1")
-    assert "title_ignition" in [row["id"] for row in store.collection("ai-1")["titles"]]
+    assert milestone_ids(store, "source-1") == milestone_ids(store, "human-1")
+    assert "title_ignition" in [
+        row["id"] for row in store.collection("source-1")["titles"]
+    ]
 
-    first = store.loadout_view("ai-1")
-    second = store.loadout_view("ai-1")
+    first = store.loadout_view("source-1")
+    second = store.loadout_view("source-1")
     assert first == second
-    unlocked_titles = {row["id"] for row in store.collection("ai-1")["titles"]}
-    unlocked_items = {row["id"] for row in store.collection("ai-1")["items"]}
+    unlocked_titles = {row["id"] for row in store.collection("source-1")["titles"]}
+    unlocked_items = {row["id"] for row in store.collection("source-1")["items"]}
     assert first["title_id"] in unlocked_titles
     for field in ("frame_id", "backdrop_id", "badge_accent_id"):
         assert first[field] is None or first[field] in unlocked_items

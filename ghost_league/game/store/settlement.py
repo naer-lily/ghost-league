@@ -37,7 +37,7 @@ class SettlementMixin:
                     return []
                 group_id = int(row["id"])
             rows = conn.execute(
-                "SELECT gm.player_id, gm.is_human, p.kind, p.display_name, "
+                "SELECT gm.player_id, p.display_name, "
                 "p.power AS power, "
                 "COALESCE(ws.seconds, 0) AS seconds, COALESCE(ws.xp, 0) AS xp "
                 "FROM group_members gm JOIN players p ON p.id = gm.player_id "
@@ -77,8 +77,6 @@ class SettlementMixin:
                         "rank": rank_by_player[player_id],
                         "player_id": player_id,
                         "display_name": str(row["display_name"]),
-                        "kind": str(row["kind"]),
-                        "is_ai": str(row["kind"]) == "ai",
                         "seconds": int(row["seconds"]),
                         "xp": int(row["xp"]),
                         "power": (

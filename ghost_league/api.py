@@ -56,7 +56,6 @@ from .game.rules import (
     DuplicateIdempotencyKey,
     GameError,
     InsufficientDiamonds,
-    PlayerNotFound,
     RepairRejected,
     ShopCooldown,
     ShopNotAllowed,
@@ -142,7 +141,6 @@ class ProvisioningAccountRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=80)
     display_name: str = Field(min_length=1, max_length=80)
     activity_label: str = Field(default=DEFAULT_ACTIVITY_LABEL)
-    adopt_existing_player: bool = False
 
 
 class ChannelProfileSnapshot(BaseModel):
@@ -648,7 +646,7 @@ class GameService:
         self._infrastructure_ready = True
 
     def _initialize_channels(self) -> None:
-        """Prepare only the generic store; no accounts, roster or AI work."""
+        """Prepare only the generic store; no accounts or roster work."""
 
         with self._lock:
             if self.store is None:
@@ -672,10 +670,10 @@ class GameService:
     def _bootstrap_week(self, now: datetime) -> None:
         """Create the week and ensure the configured owner only.
 
-        Rosters, AI and groups are owned by Channel ingest.  Starting the API
-        must never read the leaderboard cache, project AI activity, place
+        Rosters and groups are owned by Channel ingest.  Starting the API must
+        never read the leaderboard cache, project source activity, place
         players before a Channel announces who is competing, or turn every
-        local account into a league human.
+        local account into a league player.
         """
 
         assert self.store is not None
@@ -802,9 +800,6 @@ class GameService:
         if isinstance(author, dict):
             player_id = str(author.get("id") or "")
             author["avatar_url"] = self._avatar_for_player(player_id)
-            # ``kind`` is an internal identity/audit field.  It must never be
-            # visible in the public feed payload.
-            author.pop("is_ai", None)
         return item
 
     def _status_payload(
@@ -888,7 +883,7 @@ class GameService:
         Public badges are addressable by any player id, not only accounts.
         Channel players have no account row, so their display snapshot comes
         from ``channel_players`` while scoring/loadout still come from the
-        normal game store.  ``kind`` stays internal and is never projected.
+        normal game store.  Player identity fields are never projected.
         """
 
         account = self.accounts.get(user_id)
@@ -1319,7 +1314,6 @@ class GameService:
                 player, created = self.store.upsert_channel_player(
                     channel_id,
                     player_ref,
-                    kind="human",
                     profile=profile,
                     joined_week=week,
                     now=now,
@@ -2818,16 +2812,6 @@ def create_app(
             raise HTTPException(status_code=422, detail="display_name is required")
         if service.accounts.get(user_id) is not None:
             raise HTTPException(status_code=409, detail="account already exists")
-        if request.adopt_existing_player:
-            assert service.store is not None
-            try:
-                player = service.store.get_player(user_id)
-            except PlayerNotFound as exc:
-                raise HTTPException(status_code=404, detail="player not found") from exc
-            if str(player["kind"]) == "human":
-                raise HTTPException(status_code=409, detail="player already human")
-            if str(player["kind"]) != "ai":
-                raise HTTPException(status_code=422, detail="player is not an ai")
         try:
             account, token = service.accounts.create(
                 user_id,
@@ -2840,16 +2824,6 @@ def create_app(
                     status_code=409, detail="account already exists"
                 ) from exc
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        if request.adopt_existing_player:
-            assert service.store is not None
-            try:
-                service.store.adopt_ai_player(user_id, now=service.now())
-            except PlayerNotFound as exc:
-                raise HTTPException(
-                    status_code=404, detail="player not found"
-                ) from exc
-            except ValueError as exc:
-                raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"account": account, "token": token}
 
     @app.post("/v1/channels/{channel_id}/roster")

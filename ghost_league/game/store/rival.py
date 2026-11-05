@@ -1,6 +1,6 @@
 """Weekly rival selection, deterministic auto matching, and settlement.
 
-Rivals are a per-week, per-human pairing across groups.  They never feed the
+Rivals are a per-week pairing across groups.  They never feed the
 group ranking: the week is still settled by :meth:`SettlementMixin.settle_week`,
 which calls into this module so a single transaction owns the week, the rival
 result, and any diamond rewards.
@@ -72,7 +72,7 @@ class RivalMixin:
         day_iso: str,
     ) -> dict[str, Any]:
         row = conn.execute(
-            "SELECT p.id AS user_id, p.display_name, p.power, p.kind, "
+            "SELECT p.id AS user_id, p.display_name, p.power, "
             "COALESCE(ws.xp, 0) AS week_xp, "
             "COALESCE(ws.seconds, 0) AS week_seconds, "
             "grp.group_id AS group_id, grp.group_no AS group_no, "
@@ -107,7 +107,6 @@ class RivalMixin:
             "_group_id": (
                 int(row["group_id"]) if row["group_id"] is not None else None
             ),
-            "_kind": str(row["kind"]),
         }
 
     def _candidate_rows_with(
@@ -119,7 +118,7 @@ class RivalMixin:
         day_iso: str,
     ) -> list[dict[str, Any]]:
         rows = conn.execute(
-            "SELECT p.id AS user_id, p.display_name, p.power, p.kind, "
+            "SELECT p.id AS user_id, p.display_name, p.power, "
             "ws.xp AS week_xp, ws.seconds AS week_seconds, "
             "grp.group_id AS group_id, grp.group_no AS group_no, "
             "grp.tier AS tier "
@@ -169,7 +168,6 @@ class RivalMixin:
                     "week_xp": int(row["week_xp"]),
                     "today_xp": int(daily["xp"]),
                     "_group_id": group_id,
-                    "_kind": str(row["kind"]),
                 }
             )
         my_power = self._my_power_with(
@@ -520,10 +518,6 @@ class RivalMixin:
             me = self._rival_player_row_with(
                 conn, week_iso, player_id, day_iso
             )
-            if me["_kind"] != "human":
-                raise RivalSelectionRejected(
-                    "human_only", "只有真人可以选择宿敌"
-                )
             if rival_id == player_id:
                 raise RivalSelectionRejected(
                     "cannot_select_self", "不能选择自己"
@@ -593,7 +587,7 @@ class RivalMixin:
         week: date | datetime | str,
         now: datetime | str | None = None,
     ) -> dict[str, Any]:
-        """Match every human without a rival, starting Tuesday 00:00.
+        """Match every active player without a rival, starting Tuesday 00:00.
 
         The pass is deterministic: candidate preference is (power band,
         avoid last week's rival, nearest gap, player id).  A player with no
@@ -657,12 +651,11 @@ class RivalMixin:
                 )
             }
 
-            humans = conn.execute(
-                "SELECT id FROM players WHERE kind = 'human' "
-                "AND is_active = 1 ORDER BY id"
+            players = conn.execute(
+                "SELECT id FROM players WHERE is_active = 1 ORDER BY id"
             ).fetchall()
-            for human in humans:
-                player_id = str(human["id"])
+            for player in players:
+                player_id = str(player["id"])
                 if self._assignment_with(conn, week_iso, player_id) is not None:
                     already += 1
                     continue
@@ -743,7 +736,7 @@ class RivalMixin:
         *,
         conn: sqlite3.Connection | None = None,
     ) -> dict[str, Any]:
-        """Write this week's rival results and pay human rewards once."""
+        """Write this week's rival results and pay rewards once."""
 
         week_date = cal.week_start(week)
         week_iso = week_date.isoformat()
@@ -769,11 +762,10 @@ class RivalMixin:
     ) -> dict[str, Any]:
         settled_at = cal.iso_ts(local_now)
         rows = conn.execute(
-            "SELECT a.player_id, a.rival_id, p.kind, "
+            "SELECT a.player_id, a.rival_id, "
             "COALESCE(mine.xp, 0) AS my_xp, "
             "COALESCE(theirs.xp, 0) AS rival_xp "
             "FROM rival_assignments a "
-            "JOIN players p ON p.id = a.player_id "
             "LEFT JOIN weekly_scores mine "
             "ON mine.week_start = a.week_start AND mine.player_id = a.player_id "
             "LEFT JOIN weekly_scores theirs "
@@ -796,7 +788,7 @@ class RivalMixin:
             my_xp = int(row["my_xp"])
             rival_xp = int(row["rival_xp"])
             outcome = rival_outcome(my_xp, rival_xp)
-            reward = rival_reward(outcome, is_human=str(row["kind"]) == "human")
+            reward = rival_reward(outcome)
             cursor = conn.execute(
                 "INSERT OR IGNORE INTO rival_results "
                 "(week_start, player_id, rival_id, my_xp, rival_xp, outcome, "

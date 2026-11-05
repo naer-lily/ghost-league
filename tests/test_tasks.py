@@ -107,7 +107,7 @@ class TaskStoreBase(unittest.TestCase):
         self.store = GameStore(Path(self.temp.name) / "league.db")
         self.now = datetime(2026, 11, 4, 12, 0, 0, tzinfo=TZ)
         self.store.create_player(
-            "u", kind="human", display_name="U", joined_week="2026-10-19", now=self.now
+            "u", display_name="U", joined_week="2026-10-19", now=self.now
         )
         # Keep most lifecycle tests independent of the balance pools.  Pool
         # sampling itself is covered by the dedicated chest-pool tests.

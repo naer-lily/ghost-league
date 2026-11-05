@@ -1,4 +1,4 @@
-"""Milestones, collection, loadouts, and deterministic AI taste."""
+"""Milestones, collection, loadouts, and deterministic source taste."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from ..progression import (
     milestone_payload,
 )
 from ..rules import CHECKIN_XP
+from .core import SOURCE_HUMAN
 
 PROGRESSION_START_META = "progression_started_at"
 _EPOCH_FLOOR = "1970-01-01T00:00:00+08:00"
@@ -200,7 +201,7 @@ class ProgressionMixin:
             conn, player_id, now=now
         )
         if any(award["new"] for award in awards):
-            self._refresh_ai_loadout_with(conn, player_id, now=now)
+            self._refresh_source_loadout_with(conn, player_id, now=now)
         return awards
 
     def _apply_weekly_progression_with(
@@ -221,7 +222,7 @@ class ProgressionMixin:
             )
         }
         for player_id in sorted(player_ids):
-            self._refresh_ai_loadout_with(conn, player_id, now=now)
+            self._refresh_source_loadout_with(conn, player_id, now=now)
         return awards
 
     def _evaluate_weekly_milestones_with(
@@ -295,7 +296,7 @@ class ProgressionMixin:
                 )
         return awards
 
-    def _refresh_ai_loadout_with(
+    def _refresh_source_loadout_with(
         self,
         conn: sqlite3.Connection,
         player_id: str,
@@ -303,13 +304,10 @@ class ProgressionMixin:
         now: datetime,
     ) -> dict[str, Any] | None:
         player = self._get_player_with(conn, player_id)
-        if str(player["kind"]) != "ai":
-            is_channel_player = conn.execute(
-                "SELECT 1 FROM channel_players WHERE player_id = ? LIMIT 1",
-                (player_id,),
-            ).fetchone()
-            if is_channel_player is None:
-                return None
+        # Account players own their loadout choice.  Source-provenance players
+        # are dressed deterministically because no browser edits their look.
+        if str(player["source_kind"]) == SOURCE_HUMAN:
+            return None
         title_rows = conn.execute(
             "SELECT pt.title_id FROM player_titles pt "
             "JOIN catalog_titles ct ON ct.id = pt.title_id "
@@ -351,10 +349,10 @@ class ProgressionMixin:
         )
         return self._loadout_view_with(conn, player_id)
 
-    def refresh_ai_loadout(self, player_id: str) -> dict[str, Any] | None:
+    def refresh_source_loadout(self, player_id: str) -> dict[str, Any] | None:
         now = cal.now_local()
         with self.transaction() as conn:
-            return self._refresh_ai_loadout_with(conn, player_id, now=now)
+            return self._refresh_source_loadout_with(conn, player_id, now=now)
 
     # -- read models ---------------------------------------------------
     def awarded_milestones(self, player_id: str) -> list[dict[str, Any]]:

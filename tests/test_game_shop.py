@@ -16,7 +16,6 @@ from ghost_league.accounts import AccountsStore
 from ghost_league.api import create_app
 from ghost_league.game.jobs import run_diamond_decay
 from ghost_league.game.rules import (
-    ShopNotAllowed,
     ShopNotAvailable,
     ShopQuantityRejected,
 )
@@ -52,19 +51,8 @@ def make_human(
 ) -> str:
     store.create_player(
         player_id,
-        kind="human",
         joined_week=WEEK_START,
         now=now,
-    )
-    return player_id
-
-
-def make_ai(store: GameStore, player_id: str = "ai-1") -> str:
-    store.create_player(
-        player_id,
-        kind="ai",
-        joined_week=WEEK_START,
-        now=f"{WEEK_START}T00:00:00+08:00",
     )
     return player_id
 
@@ -141,25 +129,6 @@ def test_new_human_wallet_and_catalog(tmp_path) -> None:
     assert items["diamond_cap_1"]["required_cap_level"] == 0
     assert items["diamond_cap_1"]["price_diamonds"] == 500
     assert items["diamond_cap_1"]["available"] is True
-
-
-def test_ai_has_no_wallet_inventory_or_stars(tmp_path) -> None:
-    store = make_store(tmp_path)
-    ai = make_ai(store)
-
-    assert store.get_diamond_wallet(ai, now=NOW)["balance"] == 0
-    assert store.get_diamond_wallet(ai, now=NOW)["diamond_cap"] == 0
-    assert store.get_inventory(ai) == {"star": 0, "seasonal_star": 0}
-    assert store.list_player_stars(ai) == []
-    with pytest.raises(ShopNotAllowed):
-        store.purchase_shop_item(ai, "star", 1, "ai-star", name="AI", now=NOW)
-    with sqlite3.connect(tmp_path / "league.db") as connection:
-        assert connection.execute(
-            "SELECT COUNT(*) FROM diamond_balance WHERE player_id = ?", (ai,)
-        ).fetchone()[0] == 0
-        assert connection.execute(
-            "SELECT COUNT(*) FROM player_stars WHERE player_id = ?", (ai,)
-        ).fetchone()[0] == 0
 
 
 def test_credit_adds_uncapped_and_one_hour_decay_is_idempotent(tmp_path) -> None:

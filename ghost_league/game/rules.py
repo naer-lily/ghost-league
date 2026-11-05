@@ -59,7 +59,7 @@ TARGET_ALGORITHM_VERSION: Final = "p75-soft-0.2-v1"
 
 @dataclass(frozen=True, slots=True)
 class TierBand:
-    """Weekly AI target band for one tier (XP and internal seconds)."""
+    """Weekly source target band for one tier (XP and internal seconds)."""
 
     xp_floor: int
     xp_cap: int
@@ -92,7 +92,7 @@ TIER_BANDS: Final[dict[str, TierBand]] = {
     "Diamond": _band(50_000, 80_000),
 }
 
-# Fixed, no-replacement percentile slots for the 14 AI in a 15-person group.
+# Fixed, no-replacement percentile slots for the 14 source players in a group.
 OPPONENT_PERCENTILE_SLOTS: Final[tuple[int, ...]] = (
     8,
     14,

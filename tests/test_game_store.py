@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from ghost_league.game.store import GameStore
+from ghost_league.game.store import SOURCE_WAKA, GameStore
 
 
 def make_store(tmp_path) -> GameStore:
@@ -53,11 +53,26 @@ def test_schema_meta_and_epoch(tmp_path) -> None:
         "diamond_boosts",
     } <= tables
     meta = store.meta_snapshot()
-    assert meta["schema_version"] == "13"
+    assert meta["schema_version"] == "14"
     assert meta["algorithm_version"] == "phase1-v1"
     assert meta["epoch_id"]
     assert store.active_epoch()["status"] == "active"
     assert store.integrity_check() == "ok"
+
+
+def test_fresh_database_has_no_player_identity_columns(tmp_path) -> None:
+    store = make_store(tmp_path)
+    with store._reader() as conn:
+        player_columns = {
+            str(row["name"]) for row in conn.execute("PRAGMA table_info(players)")
+        }
+        channel_columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(channel_players)")
+        }
+    assert "kind" not in player_columns
+    assert "controller" not in player_columns
+    assert "kind" not in channel_columns
 
 
 def test_transaction_rolls_back_on_error(tmp_path) -> None:
@@ -81,7 +96,6 @@ def test_activity_event_is_idempotent_and_updates_one_score(tmp_path) -> None:
     week = "2026-10-26"
     store.create_player(
         "human-1",
-        kind="human",
         joined_week=week,
         now="2026-10-26T00:00:00+08:00",
     )
@@ -116,7 +130,6 @@ def test_channel_seconds_between_aggregates_local_days(tmp_path) -> None:
     week = "2026-10-26"
     store.create_player(
         "ai-1",
-        kind="ai",
         joined_week=week,
         now="2026-10-26T00:00:00+08:00",
     )
@@ -187,7 +200,6 @@ def test_source_upsert_is_unique_and_players_cannot_duplicate(tmp_path) -> None:
     assert source["normalization_version"] == "p75-soft-0.2-v1"
     store.create_player(
         "ai-1",
-        kind="ai",
         source_kind="wakatime_public_leaderboard",
         source_key_hash="hash-a",
         joined_week=week,
@@ -195,12 +207,11 @@ def test_source_upsert_is_unique_and_players_cannot_duplicate(tmp_path) -> None:
     )
     store.create_player(
         "ai-1",
-        kind="ai",
         display_name="ignored duplicate",
         joined_week=week,
         now="2026-10-26T00:00:00+08:00",
     )
-    assert len(store.list_players(kind="ai")) == 1
+    assert len(store.list_players(source_kind=SOURCE_WAKA)) == 1
 
 
 def test_database_constraints_reject_negative_balance(tmp_path) -> None:
@@ -223,7 +234,7 @@ def test_humans_are_placed_first_and_groups_stay_balanced(tmp_path) -> None:
         ai_ids.append(player_id)
         store.create_player(
             player_id,
-            kind="ai",
+            source_kind=SOURCE_WAKA,
             joined_week=week,
             now=at,
         )
@@ -240,30 +251,33 @@ def test_humans_are_placed_first_and_groups_stay_balanced(tmp_path) -> None:
     for name in ("human-a", "human-b"):
         store.create_player(
             name,
-            kind="human",
             joined_week=week,
             now=at,
         )
     groups = store.ensure_current_group(week, now=f"{week}T01:00:00+08:00")
     assert len(groups) == 2
     assert sorted(group["member_count"] for group in groups) == [8, 8]
-    human_groups = [
+    human_group = next(
         group
         for group in groups
-        if any(member["is_human"] for member in group["members"])
-    ]
-    assert len(human_groups) == 1
-    human_group = human_groups[0]
+        if any(
+            member["player_id"] in {"human-a", "human-b"}
+            for member in group["members"]
+        )
+    )
     assert human_group["member_count"] == 8
-    assert sum(
-        1 for member in human_group["members"] if member["is_human"]
-    ) == 2
+    assert {
+        member["player_id"]
+        for member in human_group["members"]
+        if member["player_id"].startswith("human-")
+    } == {"human-a", "human-b"}
+    # The retained UI column marks every ordinary contestant as human=1.
+    assert all(member["is_human"] == 1 for group in groups for member in group["members"])
 
     # A later human joins the same human-first group; the balanced seat
     # allocation grows from 8/8 to 9/8 without creating a tail group.
     store.create_player(
         "human-c",
-        kind="human",
         joined_week=week,
         now=f"{week}T02:00:00+08:00",
     )

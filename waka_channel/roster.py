@@ -92,7 +92,7 @@ def rows_from_cache(cache: Any) -> list[SourceRow]:
     """Normalize all cache rows and attach stable player refs.
 
     Duplicate source ids are collapsed to their first occurrence.  Zero-second
-    rows are kept: being on the board is what makes an AI a participant.
+    rows are kept: being on the board is what makes a source row a participant.
     """
 
     users = _users_from(cache)

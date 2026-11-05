@@ -178,15 +178,23 @@ class TestChannelIngest:
             assert "kind" not in response.json()["players"][0]
 
         with sqlite3.connect(self.game_db_path) as connection:
-            row = connection.execute(
-                "SELECT kind, controller FROM players WHERE id = ?", (player_id,)
-            ).fetchone()
-            mapping_kind = connection.execute(
-                "SELECT kind FROM channel_players WHERE player_id = ?",
-                (player_id,),
+            player_columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(players)")
+            }
+            channel_columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(channel_players)"
+                )
+            }
+            source_kind = connection.execute(
+                "SELECT source_kind FROM players WHERE id = ?", (player_id,)
             ).fetchone()[0]
-        assert row == ("human", "human")
-        assert mapping_kind == "human"
+        assert source_kind == "channel_ingest"
+        assert "kind" not in player_columns
+        assert "controller" not in player_columns
+        assert "kind" not in channel_columns
 
     def test_legacy_kind_field_is_rejected_before_any_write(self) -> None:
         with self.client() as client:
@@ -198,9 +206,8 @@ class TestChannelIngest:
         assert self.scalar(
             "SELECT COUNT(*) FROM channel_players WHERE player_ref = 'legacy-ai'"
         ) == 0
-        assert self.scalar("SELECT COUNT(*) FROM players WHERE kind = 'ai'") == 0
 
-    def test_existing_human_channel_player_stays_human_on_refresh(self) -> None:
+    def test_existing_channel_player_refresh_keeps_ordinary_provenance(self) -> None:
         with self.client() as client:
             seeded = self.post_roster(client, [PLAYERS[2]])
             assert seeded.status_code == 200, seeded.text
@@ -219,15 +226,10 @@ class TestChannelIngest:
 
         with sqlite3.connect(self.game_db_path) as connection:
             player = connection.execute(
-                "SELECT kind, controller, display_name FROM players WHERE id = ?",
+                "SELECT source_kind, display_name FROM players WHERE id = ?",
                 (player_id,),
             ).fetchone()
-            mapping_kind = connection.execute(
-                "SELECT kind FROM channel_players WHERE player_id = ?",
-                (player_id,),
-            ).fetchone()[0]
-        assert player == ("human", "human", "Still Human")
-        assert mapping_kind == "human"
+        assert player == ("channel_ingest", "Still Human")
 
     def test_same_player_ref_in_different_channels_does_not_conflict(self) -> None:
         player = {"player_ref": "shared-ref"}

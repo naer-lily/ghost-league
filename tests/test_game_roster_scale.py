@@ -10,7 +10,7 @@ from ghost_league.game.roster import (
     source_key_hash,
     sync_week_roster,
 )
-from ghost_league.game.store import GameStore
+from ghost_league.game.store import SOURCE_WAKA, GameStore
 
 WEEK_1 = "2026-10-26"
 WEEK_2 = "2026-11-02"
@@ -82,7 +82,7 @@ def test_1000_row_snapshot_creates_every_ai_idempotently(tmp_path) -> None:
     assert first["created"] == 1000
     assert first["existing"] == 0
 
-    players = store.list_players(kind="ai")
+    players = store.list_players(source_kind=SOURCE_WAKA)
     assert len(players) == 1000
     assert len({player["source_key_hash"] for player in players}) == 1000
     assert len(store.list_opponent_week_plans(WEEK_1)) == 1000
@@ -92,7 +92,7 @@ def test_1000_row_snapshot_creates_every_ai_idempotently(tmp_path) -> None:
     assert replay["created"] == 0
     assert replay["existing"] == 1000
     assert replay["count"] == 1000
-    assert {str(player["id"]) for player in store.list_players(kind="ai")} == original_ids
+    assert {str(player["id"]) for player in store.list_players(source_kind=SOURCE_WAKA)} == original_ids
     assert len(store.list_opponent_week_plans(WEEK_1)) == 1000
 
 
@@ -107,19 +107,19 @@ def test_one_human_gets_a_full_human_group_and_all_ai_are_conserved(tmp_path) ->
     assert human_group is not None
     members = store.group_members(int(human_group["id"]))
     assert len(members) == 15
-    assert sum(1 for member in members if member["kind"] == "human") == 1
-    assert sum(1 for member in members if member["kind"] == "ai") == 14
+    assert sum(1 for member in members if member["player_id"] == "human-1") == 1
+    assert sum(1 for member in members if member["player_id"] != "human-1") == 14
 
     sizes = group_sizes(groups)
     assert len(groups) == 67
     assert sizes == [15] * 63 + [14] * 4
-    ai_members = [
+    source_members = [
         member
         for group in groups
         for member in group["members"]
-        if member["kind"] == "ai"
+        if member["player_id"] != "human-1"
     ]
-    assert len(ai_members) == 1000
+    assert len(source_members) == 1000
     assert len(flat_members(groups)) == 1001
     assert len(set(flat_members(groups))) == 1001
     assert all(size <= 15 for size in sizes)
@@ -153,7 +153,7 @@ def test_second_week_disappeared_and_new_ai_are_reconciled(tmp_path) -> None:
 
     assert result["source_count"] == 35
     assert result["disappeared"] == 10
-    assert len(store.list_players(kind="ai")) == 45
+    assert len(store.list_players(source_kind=SOURCE_WAKA)) == 45
     assert len(store.list_opponent_week_plans(WEEK_1)) == 40
     assert len(store.list_opponent_week_plans(WEEK_2)) == 35
 
@@ -183,7 +183,7 @@ def test_second_week_disappeared_and_new_ai_are_reconciled(tmp_path) -> None:
     replay = sync(store, WEEK_2, current, at=AT_2)
     assert replay["created"] == 0
     assert replay["existing"] == 35
-    assert len(store.list_players(kind="ai")) == 45
+    assert len(store.list_players(source_kind=SOURCE_WAKA)) == 45
     assert len(store.list_opponent_week_plans(WEEK_2)) == 35
 
 
@@ -226,7 +226,7 @@ def test_ai_returning_after_a_missing_week_reuses_player_id_and_history(tmp_path
     assert player["joined_week"] == WEEK_1
     assert player["last_seen_week"] == WEEK_3
     assert store.get_opponent_week_plan(original_id, WEEK_3) is not None
-    assert len(store.list_players(kind="ai")) == 3
+    assert len(store.list_players(source_kind=SOURCE_WAKA)) == 3
 
 
 def test_multiple_humans_stay_together_and_no_player_crosses_groups(tmp_path) -> None:
@@ -243,7 +243,7 @@ def test_multiple_humans_stay_together_and_no_player_crosses_groups(tmp_path) ->
         int(group["id"])
         for group in groups
         for member in group["members"]
-        if member["kind"] == "human"
+        if member["player_id"].startswith("human-")
     }
     assert len(human_groups) == 1
     human_group_id = next(iter(human_groups))
@@ -253,8 +253,12 @@ def test_multiple_humans_stay_together_and_no_player_crosses_groups(tmp_path) ->
         if int(group["id"]) == human_group_id
         for member in group["members"]
     ]
-    assert sum(1 for member in human_members if member["kind"] == "human") == 3
-    assert sum(1 for member in human_members if member["kind"] == "ai") == 9
+    assert sum(
+        1 for member in human_members if member["player_id"].startswith("human-")
+    ) == 3
+    assert sum(
+        1 for member in human_members if not member["player_id"].startswith("human-")
+    ) == 9
 
     membership_counts: Counter[str] = Counter()
     with store.transaction() as conn:
@@ -347,7 +351,7 @@ def test_weekly_ai_order_is_stable_within_a_week_and_rotates_next_week(
             sorted(
                 member["player_id"]
                 for member in human_group["members"]
-                if member["kind"] == "ai"
+                if member["player_id"] != "human-1"
             )
         )
 

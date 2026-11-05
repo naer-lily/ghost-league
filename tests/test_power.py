@@ -33,7 +33,6 @@ def add_players(store: GameStore, player_ids: list[str], *, week: str) -> None:
     for player_id in player_ids:
         store.create_player(
             player_id,
-            kind="human",
             joined_week=week,
             now=f"{week}T00:00:00+08:00",
         )

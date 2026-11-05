@@ -6,7 +6,7 @@
 > 当前产品是 Channel-fed 的 SQLite 联赛，`public/` 静态 demo、旧 CLI 和旧
 > `projection.tick` 已删除。分组、身份和 ingest 规则请直接看 `docs/CHANNEL_BOUNDARY.md`。
 
-# 游戏循环重设计：从预生成周榜到 AI 对手联赛
+# 游戏循环重设计：从预生成周榜到 来源玩家联赛
 
 > 状态：设计稿，2026-10-28。本文只描述目标与迁移方案，不实现、不修改线上数据。
 >
@@ -18,13 +18,13 @@
 
 ## 0. 结论先行
 
-**推荐循环：每日打卡 + AI 对手动态 + 周榜升降级。**
+**推荐循环：每日打卡 + 来源玩家动态 + 周榜升降级。**
 
-- 每天回来的理由：**今天还差多少 XP 才能打卡、AI 对手今天做了什么、我现在第几名、昨天能不能补签。**
+- 每天回来的理由：**今天还差多少 XP 才能打卡、来源玩家今天做了什么、我现在第几名、昨天能不能补签。**
 - 每周在意的理由：**本周 tier 内的晋级/降级名额、周一早上看到上周名次、称号和新小组。**
-- 不做赛季通行证、不做付费货币、不做 52 周预生成。当前后端钻石商店含普通星抽卡、季节星抽卡、余烬和阶梯仓库上限；新真人钱包初始 1000/1000，超出软上限的部分按小时复利损耗，钻石正式来源后续接；所有 AI 对手只在当前周、当前小组内生成；过去只保留真实结算过的周。
+- 不做赛季通行证、不做付费货币、不做 52 周预生成。当前后端钻石商店含普通星抽卡、季节星抽卡、余烬和阶梯仓库上限；新真人钱包初始 1000/1000，超出软上限的部分按小时复利损耗，钻石正式来源后续接；所有 来源玩家只在当前周、当前小组内生成；过去只保留真实结算过的周。
 - 修复资源叫 **余烬（Ember）**，只用于补签，不能买外观、不能交易、不能换数值。
-- AI 的原始锚点只用 WakaTime 的**公开周总量**；对手是 AI 角色，不是那个 WakaTime 用户，UI 始终标明“AI 对手”。
+- Waka Channel 的原始锚点只用 WakaTime 的**公开周总量**；Ghost 里是普通参赛者，不是那个 WakaTime 用户，UI 不显示来源身份标签。
 
 一句话版本：
 
@@ -67,12 +67,12 @@
 | `ghost_league/leaderboard.py` | 只读的“已结算周”内存视图 | **可删除/降级为测试工具** | 不再作为生产数据入口 |
 | `ghost_league/report.py` | 52 周封闭内测报告 | **删除/归档** | 不进入产品 |
 | `ghost_league/league_cli.py` | `bootstrap` / `report` / `join` | **替换命令** | `reset`、`settle-week`、`seed-anchors`、`audit` |
-| `ghost_league/schedule.py` | BLAKE2b 确定性 168 小时分配、`projected_seconds` | **保留数学，改语义** | 作为 AI 日节奏/日内展示的纯函数；不再声称是真人逐小时数据 |
-| `ghost_league/wakatime.py` | 公开资料缓存（bio/city/社交链接） | **保留缓存，限制使用** | 只作为人工核验；AI 行为只用匿名化公开周总量，bio/city 不进入游戏或前端 |
+| `ghost_league/schedule.py` | BLAKE2b 确定性 168 小时分配、`projected_seconds` | **保留数学，改语义** | 作为 来源玩家 日节奏/日内展示的纯函数；不再声称是真人逐小时数据 |
+| `ghost_league/wakatime.py` | 公开资料缓存（bio/city/社交链接） | **保留缓存，限制使用** | 只作为人工核验；来源行为只用匿名化公开周总量，bio/city 不进入游戏或前端 |
 | `ghost_league/fetch.py` | 抓公开榜，保留公开 `name` / `avatar_url` | **保留抓取，展示资料只走 Channel profile** | 缓存留 `id`/`rank`/`seconds`/`name`/`avatar_url`；Ghost 只存 Channel profile 快照，不存 raw 周总量 |
-| `ghost_league/api.py` | 2219 行单体；加载 52 周 state；`ghost_seconds`/`ghost_names`/`ghost_tiers`/`ghost_avatar_urls`；按整点投影 ghost（751–766 行） | **拆分为路由 + 游戏服务，重写游戏部分** | 新 API 只读自己的 `league.db`；AI 状态持久化；XP 对外 |
+| `ghost_league/api.py` | 2219 行单体；加载 52 周 state；`ghost_seconds`/`ghost_names`/`ghost_tiers`/`ghost_avatar_urls`；按整点投影 ghost（751–766 行） | **拆分为路由 + 游戏服务，重写游戏部分** | 新 API 只读自己的 `league.db`；来源状态持久化；XP 对外 |
 | `ghost_league/accounts.py` | 账号、token 哈希、资料、头像 | **保留** | 身份/鉴权不变 |
-| `ghost_league/badge.py` | SVG 状态卡，显示 tier/rank/XP/打卡 | **保留渲染，换数据源** | 显示称号/余烬；不显示秒/分钟；AI 不出现在个人 badge |
+| `ghost_league/badge.py` | SVG 状态卡，显示 tier/rank/XP/打卡 | **保留渲染，换数据源** | 显示称号/余烬；不显示秒/分钟；来源玩家不出现在个人 badge |
 | `ghost_league/webhooks.py` | 签名、重试、`STREAK_MILESTONES` | **保留** | 增加 `checkin.repaired`；不改签名协议 |
 | `ghost_league/social.py` | 关注关系 | **冻结，不扩展** | 本轮不做多用户社交；保留表但不出现在新循环 |
 | `ghost_league/pwa.py` | 挂载 `web/` | **保留** | 只换前端资源与 API |
@@ -83,12 +83,12 @@
 | `data/api/events.db` | 真实增量事件 | **备份后归档旧库，新建空库** | 新 epoch 从零开始；旧数据可回滚 |
 | `data/api/accounts.db` | 账号/token 哈希/资料 | **保留** | 不因 reset 丢账号 |
 | `data/cache/cn-978.json` | 公开榜缓存，可能含展示名 | **只保留匿名锚点字段** | 重建 `anchor_pool`；不保留姓名 |
-| `data/cache/wakatime-profiles.json` | 公开资料缓存，含 bio/city | **不进入 AI 模型；可保留作人工核验** | 不向其他用户暴露 |
+| `data/cache/wakatime-profiles.json` | 公开资料缓存，含 bio/city | **不进入 来源模型；可保留作人工核验** | 不向其他用户暴露 |
 | `public/` | 旧静态 demo | **归档/下线** | 产品入口只保留 `web/` PWA |
-| `web/app.js`、`web/index.html`、`web/style.css`、`web/sw.js` | 当前 PWA，已有 XP/无 ghost 文案 | **改 UI/缓存版本** | AI 标识、每日动态、补签、称号、收藏 |
-| `tests/test_league.py`、`tests/test_core.py` | 52 周/8 周合成历史断言 | **重写** | 新测试针对真实周、AI、补签、reset |
+| `web/app.js`、`web/index.html`、`web/style.css`、`web/sw.js` | 当前 PWA，已有 XP/无 ghost 文案 | **改 UI/缓存版本** | 身份标识、每日动态、补签、称号、收藏 |
+| `tests/test_league.py`、`tests/test_core.py` | 52 周/8 周合成历史断言 | **重写** | 新测试针对真实周、来源玩家、补签、reset |
 | `tests/test_api.py` | 52 周 state 启动 API | **改 fixture** | 新库 fixture；旧测试保留迁移覆盖 |
-| `tests/test_pwa.py` | 已断言 UI 不含“幽灵/synthetic/模拟/伪实时” | **保留这类断言，扩展** | 增加“AI 对手必须可见”“不出现分钟” |
+| `tests/test_pwa.py` | 已断言 UI 不含“幽灵/synthetic/模拟/伪实时” | **保留这类断言，扩展** | 增加“来源玩家必须可见”“不出现分钟” |
 | `README.md`、`docs/API.md` | 旧 demo/52 周说明 | **重写产品段** | README 可保留技术沿革；API 以 XP 为准 |
 | `reports/closed-beta-52w.md` | 52 周报告 | **归档** | 不作为产品证据 |
 
@@ -136,31 +136,31 @@
 
 ### 2.1 一句话
 
-> **每天为 100 XP 打卡、AI 对手的今日动作和名次回来；每周为 tier 内的晋级/降级名额和一条可展示的周战绩留下。**
+> **每天为 100 XP 打卡、来源玩家的今日动作和名次回来；每周为 tier 内的晋级/降级名额和一条可展示的周战绩留下。**
 
 **MDA 对照**
 
 | 层 | 本设计 |
 | --- | --- |
-| Mechanics | 增量换 XP、100 XP 打卡、15 人组、每组比例配额升降、余烬补签、AI 日行动、周结算 |
-| Dynamics | 每天追赶 AI、周末冲榜、资源取舍、补签/干净连胜、晋级后的更强对手 |
+| Mechanics | 增量换 XP、100 XP 打卡、15 人组、每组比例配额升降、余烬补签、来源玩家日行动、周结算 |
+| Dynamics | 每天追赶 来源玩家、周末冲榜、资源取舍、补签/干净连胜、晋级后的更强对手 |
 | Aesthetics | 紧张（名次）、竞争（他者对比）、掌控（自己的节奏）、收集（称号/物品）、归属（固定小组） |
 
 ### 2.2 日循环
 
-| 时点（Asia/Shanghai） | 玩家动作 | AI 动作 | 反馈 |
+| 时点（Asia/Shanghai） | 玩家动作 | 来源玩家动作 | 反馈 |
 | --- | --- | --- | --- |
-| 00:00–00:05 | 新一天开始；看到昨日结算 | 日切：结算昨日、生成今日计划（只生成今天） | 昨日回顾：“你 320 XP，1 个 AI 超过你” |
-| 09:00 / 14:00 / 21:00 | 同步增量、看今日 XP | 按当日节奏执行 2–4 段行动 | 小程序/页面显示 AI 今日行动与排名变化 |
+| 00:00–00:05 | 新一天开始；看到昨日结算 | 日切：结算昨日、生成今日计划（只生成今天） | 昨日回顾：“你 320 XP，1 个 来源玩家 超过你” |
+| 09:00 / 14:00 / 21:00 | 同步增量、看今日 XP | 按当日节奏执行 2–4 段行动 | 小程序/页面显示 今日行动与排名变化 |
 | 任意时刻达到 100 XP | 自动打卡，火焰 +1 | 达到 100 XP 时同样自动打卡 | 即时 XP 增量、打卡动画、连胜 |
-| 任意时刻 | 用余烬补签 T-1 到 T-7 | AI 按同一规则、同一余额决定是否补签 | “补签成功，连胜恢复；本周历史标记 repaired” |
-| 任意时刻 | 查看小组动态、换称号/边框 | AI 装备自己已获得的称号 | 名次/称号即时可见 |
+| 任意时刻 | 用余烬补签 T-1 到 T-7 | 来源玩家 按同一规则、同一余额决定是否补签 | “补签成功，连胜恢复；本周历史标记 repaired” |
+| 任意时刻 | 查看小组动态、换称号/边框 | 来源玩家 装备自己已获得的称号 | 名次/称号即时可见 |
 | 23:59 前 | 最后冲一次 | 最后一段行动 | 今日 XP、排名、次日目标 |
 
 **日循环的设计意图**
 
 - 即时反馈来自真实增量，不是“点一下领奖励”。
-- AI 的今日动作是可见的，不是只给一个分数。
+- 来源玩家的今日动作是可见的，不是只给一个分数。
 - 补签是唯一的追溯入口，且有资源上限，不能无限补。
 - 不设置“必须登录才保留 XP”的惩罚；不登录只是不产生新 XP。
 
@@ -170,13 +170,13 @@
 | --- | --- |
 | 周一 00:00 | 上周分数锁定；不再接受会改变上周名次的事件 |
 | 周一 00:05 | 结算：每个组内成员按 seconds 降序、`player_id` 升序排名；`quota = max(1, round_half_up(group_size * 0.2))`，组内前 `quota` 晋级、后 `quota` 降级；Bronze 不降、Diamond 不升；每组独立结算并写入 `weekly_results` |
-| 周一 00:10 | 新一周分组；每个真人最多与 14 个 AI 同组；生成当前周 AI 计划 |
+| 周一 00:10 | 新一周分组；每个真人最多与 14 个 来源玩家 同组；生成当前周 来源计划 |
 | 周一全天 | 周回顾卡：上周名次、升降级、获得称号、下周对手 |
 | 周日 24:00 前 | 最后冲榜；周冠军/前三/保级是本周的主要外部压力 |
 
 **周循环的设计意图**
 
-- 周榜不是“伪实时投影”，而是本周真实增量 + 本周 AI 行为的共同结果。
+- 周榜不是“伪实时投影”，而是本周真实增量 + 本周 来源行为的共同结果。
 - 升降级是外部可见的代价；不靠扣资源/惩罚连胜来制造压力。
 - 周结算后不回放、不重算、不补造；只追加真实结果。
 
@@ -192,7 +192,7 @@
 - **周分数锁**：周一 00:00。`occurred_at` 属于上一周、但在锁后到达的事件只进审计流水，不改变已锁周名次。
 - **日锁**：每日 00:05。日锁后到达的昨日事件不追溯打卡；补签是唯一追溯手段。
 - **补签窗**：错过日 D 结束后 7 天内（D+8 00:00 前），即 D-1 到 D-7 可补，且 D 有 1–599 秒真实记录。周日补签发生在周一结算后，只恢复连胜/历史标记，不改上周名次。
-- **AI 结算**：与真人同一日锁/周锁；AI 不接受“补算未来周”。
+- **来源玩家结算**：与真人同一日锁/周锁；来源玩家不接受“补算未来周”。
 
 ---
 
@@ -200,14 +200,14 @@
 
 ### 备选 A：每日 1v1 对决
 
-**形态**：每天随机/匹配 1 个 AI，今日 XP 高者获胜；赢一场得星，集星升段；每天 00:00 重置。
+**形态**：每天随机/匹配 1 个 来源玩家，今日 XP 高者获胜；赢一场得星，集星升段；每天 00:00 重置。
 
 **适合**：需要极强即时反馈、用户每天只愿意投入 100–300 XP 的轻量产品。
 
 **为什么不选**：
 
 - 每日二值胜负会把“今天状态不好”放大成失败，容易产生逃避。
-- 1v1 必须针对用户调 AI，天然走向“刚好压你”的 rubber-banding；这与“不能永远刚好压用户”冲突。
+- 1v1 必须针对用户调 来源玩家，天然走向“刚好压你”的 rubber-banding；这与“不能永远刚好压用户”冲突。
 - 没有 15 人组的他者对比，也没有周榜的“保级/晋级”叙事。
 - 段位变成每日重置的星数，长期积累感弱。
 
@@ -224,7 +224,7 @@
 - 它不能替代核心循环：如果每日/每周不好玩，通行证只是把问题延后 8 周。
 - 用户明确说“不做大而全的赛季系统”。
 
-**结论**：先做“周联赛 + 日打卡 + AI 行为”，把收集/称号作为**额外解锁**，等核心循环验证后再考虑赛季外观层。
+**结论**：先做“周联赛 + 日打卡 + 来源行为”，把收集/称号作为**额外解锁**，等核心循环验证后再考虑赛季外观层。
 
 ---
 
@@ -298,7 +298,7 @@ granted_this_week += added
 - 每个自然日最多补 1 次；一周最多消耗 3 枚（持有上限），不是无限补。
 - 0 XP、未来日期、今天、超窗、已打卡、已补签全部拒绝。
 - 不退款、不撤销；补签是最终状态。
-- AI 使用完全相同公式、上限、窗口、条件；没有隐藏补贴。
+- 来源玩家使用完全相同公式、上限、窗口、条件；没有隐藏补贴。
 
 ### 4.6 具体算例
 
@@ -324,22 +324,22 @@ granted_this_week += added
 
 > 注意：周 XP 是 `floor(61,260/6)=10,210`；日 XP 是逐日 floor。逐日相加可能与周 XP 相差最多 6 XP。**名次和结算永远用 seconds；展示用各自范围的 floor。** 不要在 UI 里把日 XP 相加当周 XP。
 
-### 4.7 AI 如何使用同一资源
+### 4.7 来源玩家 如何使用同一资源
 
-- AI 的 `week_xp` 来自它本周已结算的模拟 seconds，同样 `min(2, week_xp//2000)`、上限 3。
-- AI 在日结算时检查昨日：
+- 来源玩家的 `week_xp` 来自它本周已结算的模拟 seconds，同样 `min(2, week_xp//2000)`、上限 3。
+- 来源玩家在日结算时检查昨日：
   - 若昨日 `1 <= seconds < 600`、余额 ≥ 1、且 `hash(seed, date, "repair") % 100 < threshold`，则花 1 枚补签。
-  - `threshold = 45`（当前连胜 ≥3）否则 `20`；即 AI 也会经常不补，避免“AI 永远完美”。
-- AI 补签同样标记 `source=repaired`，同样进入连胜/称号判定，同样显示在动态里。
-- AI 不获得任何人类没有的资源；其模拟 XP 只用于同一公式。
+  - `threshold = 45`（当前连胜 ≥3）否则 `20`；即 来源玩家也会经常不补，避免“来源玩家 永远完美”。
+- 来源玩家 补签同样标记 `source=repaired`，同样进入连胜/称号判定，同样显示在动态里。
+- 来源玩家不获得任何人类没有的资源；其模拟 XP 只用于同一公式。
 
 ---
 
-## 5. AI 对手模型
+## 5. 来源玩家模型
 
 ### 5.1 定位与披露
 
-- 对手内部仍是 AI 参赛者，但不是 WakaTime 用户，不是“幽灵”，不是“真人”；公开 UI 不显示 AI 标签，统一展示昵称、称号和边框。
+- 来源玩家是普通参赛者，但不是 WakaTime 用户；公开 UI 不显示来源身份标签，统一展示昵称、称号和边框。
 - 详情页说明：“对手行为是游戏模拟；其强度锚定公开周总量，不代表任何人的真实逐小时活动。”
 - 不读取 bio、city、社交账号；公开 `name` / `avatar_url` 只作为 Channel profile 展示快照，不参与计分、分组或行为生成。
 - 不用 ghost 这个词做产品名；内部字段用 `opponent`。
@@ -355,14 +355,14 @@ granted_this_week += added
 | `fetched_at` | 抓取时间 |
 | `stale_weeks` | 没有新公开数据时累计；仅用于降低置信度，不造历史 |
 
-- 只取公开周总量；公开资料缓存（`data/cache/wakatime-profiles.json`）不进入 AI 模型，也不向其他用户展示。
+- 只取公开周总量；公开资料缓存（`data/cache/wakatime-profiles.json`）不进入 来源模型，也不向其他用户展示。
 - `deployment_salt` 放在部署环境/未跟踪 secret 中，不写死进仓库；更换 salt 只影响 future anchor 匹配。
 - 每周可选刷新一次 anchor；没有新数据就沿用旧 anchor，并增加 `stale_weeks`。不因为“缺数据”合成过去周。
-- 一个 anchor 可以被多个 AI 角色复用；AI 角色 ID 独立，不暴露 anchor 对应关系。
+- 一个 anchor 可以被多个 来源玩家复用；来源玩家 ID 独立，不暴露 anchor 对应关系。
 
 ### 5.3 段位强度带
 
-AI 的绝对强度由段位带控制，anchor 只决定“在同段位里偏强还是偏弱”，避免 Bronze 出现 147 小时对手。
+来源玩家的绝对强度由段位带控制，anchor 只决定“在同段位里偏强还是偏弱”，避免 Bronze 出现 147 小时对手。
 
 | 段位 | 周 XP 下限 | 周 XP 上限 | 内部 seconds 范围 |
 | --- | ---: | ---: | ---: |
@@ -382,10 +382,10 @@ AI 的绝对强度由段位带控制，anchor 只决定“在同段位里偏强�
 - `base_target = floor + (cap - floor) * anchor_percentile`，`anchor_percentile` 是该 anchor 在匿名 anchor 池中的分位。
 - `anchor_seconds` 原值保留用于分位计算和审计；**不直接当 target**，否则 Bronze 会直接出现 147 小时对手。
 - 周因子：普通周 `w = 0.90 + (hash(seed, week, "week") % 21) / 100`（0.90–1.10）；约 1/12 概率为低产周 `w = 0.55–0.75`。
-- 普通周 `target = clamp(base_target * w, floor, cap)`；低产周允许低于段位下限，但仍 `>= 0` 且不超过 cap。这样 AI 会有真实低谷，而不是每周都贴着段位带。
-- 每个 15 人组的 14 个 AI 使用**无放回分位**，例如 `8, 14, 22, 30, 38, 46, 54, 62, 70, 76, 82, 86, 90, 93` 百分位，再按 `hash(group_id, seed)` 稳定打乱。
-- 保证每组至少 1 个 AI 在 30 分位以下、至少 1 个在 80 分位以上：既可爬，也有压力。
-- 上限保证“不是无法战胜”：Bronze 最高 5,000 XP；用户做到 5,100 XP 就能压过最强 AI。下限保证“不是永远刚好压你”：AI 目标在周初就固定，不读取用户当前 XP/名次。
+- 普通周 `target = clamp(base_target * w, floor, cap)`；低产周允许低于段位下限，但仍 `>= 0` 且不超过 cap。这样 来源玩家会有真实低谷，而不是每周都贴着段位带。
+- 每个 15 人组的 14 个 来源玩家使用**无放回分位**，例如 `8, 14, 22, 30, 38, 46, 54, 62, 70, 76, 82, 86, 90, 93` 百分位，再按 `hash(group_id, seed)` 稳定打乱。
+- 保证每组至少 1 个 来源玩家在 30 分位以下、至少 1 个在 80 分位以上：既可爬，也有压力。
+- 上限保证“不是无法战胜”：Bronze 最高 5,000 XP；用户做到 5,100 XP 就能压过最强 来源玩家。下限保证“不是永远刚好压你”：来源玩家 目标在周初就固定，不读取用户当前 XP/名次。
 
 ### 5.4 行为维度
 
@@ -402,10 +402,10 @@ AI 的绝对强度由段位带控制，anchor 只决定“在同段位里偏强�
 
 **明确不做**：
 
-- 不读取用户当前 rank/XP 来调 AI 今日目标。
+- 不读取用户当前 rank/XP 来调 来源玩家今日目标。
 - 不因为用户快追上就临时加速。
 - 不预言未来周；不模拟加入前的周。
-- 不把 AI 的 24 小时切片说成 WakaTime 逐小时数据。
+- 不把来源玩家的 24 小时切片说成 WakaTime 逐小时数据。
 
 ### 5.5 每周计划
 
@@ -425,8 +425,8 @@ for each opponent in group:
 ```
 
 - 只生成当前周，不生成未来周。
-- 没有 anchor 的对手不允许创建；宁可少一个 AI，也不凭空造能力值。
-- 周中新建的小组按剩余天数等比缩减周目标，避免“周三加入却面对整周满额 AI”；真人只计加入时刻之后的增量；双方都不补算过去几天。
+- 没有 anchor 的对手不允许创建；宁可少一个 来源玩家，也不凭空造能力值。
+- 周中新建的小组按剩余天数等比缩减周目标，避免“周三加入却面对整周满额 来源玩家”；真人只计加入时刻之后的增量；双方都不补算过去几天。
 - `algorithm_version` 写入记录；以后改模型不重算旧周。
 
 ### 5.6 每日计划与状态机
@@ -477,7 +477,7 @@ def advance_opponent(opponent, now):
 
 - 每天 2–4 段，固定本地时段（如 09:00、14:00、20:30），由 archetype + pace 决定。
 - 段内每秒推进；对外只显示“已发生”的累计，不显示未来目标。
-- 段不是 WakaTime 采样；UI 文案为“AI 今日行动”。
+- 段不是 WakaTime 采样；UI 文案为“今日行动”。
 
 ### 5.7 可复现与持久化
 
@@ -489,21 +489,21 @@ def advance_opponent(opponent, now):
 
 ### 5.8 避免假历史
 
-- 新 AI 的 `joined_week = 当前周`，`weekly_results` 为空；详情页只显示“第 1 周”。
-- 所有已建立的组（包括 AI-only 组）都按同一周循环结算；不会因为没有真人而跳过，也不预生成未发生的过去周。
+- 新 来源玩家的 `joined_week = 当前周`，`weekly_results` 为空；详情页只显示“第 1 周”。
+- 所有已建立的组（包括 source-only 组）都按同一周循环结算；不会因为没有真人而跳过，也不预生成未发生的过去周。
 - 没有 `opponent_week_plan` 的过去周不生成；没有 `weekly_results` 的周不展示。
-- AI 的称号只来自它真实参与并结算的周，不预置“周冠”。
-- AI 的 anchor 只用于当前/未来周强度，不倒推过去。
-- 详情页明确“AI 对手 · 游戏行为模拟”；只展示 Channel roster 带来的公开显示名/头像，不显示城市、bio 或社交账号。
+- 来源玩家的称号只来自它真实参与并结算的周，不预置“周冠”。
+- 来源玩家的 anchor 只用于当前/未来周强度，不倒推过去。
+- 详情页明确“来源玩家 · 游戏行为模拟”；只展示 Channel roster 带来的公开显示名/头像，不显示城市、bio 或社交账号。
 
 ### 5.9 段位内公平
 
-- 每个 AI 的目标在周初锁定；用户无法通过“少做一点”让 AI 也变弱。
-- 每组 AI 分位分布固定；最强 AI ≤ 段位上限的 93 分位，用户可通过超过上限来确保战胜。
-- AI 会低产、错过打卡、不补签；不是完美机器。
-- AI 升降级与真人同一规则；不因为“剧情需要”保送。
-- AI 角色有真实的跨周履历：随小组升降级后，`weekly_results` 继续累积；未进入活跃小组时暂停，不后台补算。
-- 新加入真人只在 Bronze；不会直接遇到高段 AI。
+- 每个 来源玩家的目标在周初锁定；用户无法通过“少做一点”让 来源玩家也变弱。
+- 每组 来源玩家 分位分布固定；最强 来源玩家 ≤ 段位上限的 93 分位，用户可通过超过上限来确保战胜。
+- 来源玩家会低产、错过打卡、不补签；不是完美机器。
+- 来源玩家 升降级与真人同一规则；不因为“剧情需要”保送。
+- 来源玩家有真实的跨周履历：随小组升降级后，`weekly_results` 继续累积；未进入活跃小组时暂停，不后台补算。
+- 新加入真人只在 Bronze；不会直接遇到高段 来源玩家。
 - 组内没有“动态难度”；跨周强度只由段位和 anchor 决定。
 
 ---
@@ -557,13 +557,13 @@ def advance_opponent(opponent, now):
   渲染独属 SVG；同一颗星逐字节稳定，不把名字写进 SVG。
 - 装备变更即时生效，不消耗资源。
 
-### 6.4 AI 也有称号
+### 6.4 来源玩家也有称号
 
-- AI 与真人共用同一张里程碑表和判定逻辑。
-- AI 只能获得它真实参与并结算的周/日对应的称号；新 AI 没有称号。
-- AI 的称号在小组行、AI 详情、每日动态中可见，旁边始终有“AI”标签。
-- AI 的 `taste` 决定它优先装备哪个已解锁称号/边框；每次周结算后更新一次 loadout，不影响数值。
-- 不给 AI 专属“剧情称号”来假装它很强；称号必须是可验证的事件。
+- 来源玩家与真人共用同一张里程碑表和判定逻辑。
+- 来源玩家只能获得它真实参与并结算的周/日对应的称号；新来源玩家 没有称号。
+- 来源玩家的称号在小组行、玩家详情、每日动态中可见，旁边始终有“来源玩家”标签。
+- 来源玩家的 `taste` 决定它优先装备哪个已解锁称号/边框；每次周结算后更新一次 loadout，不影响数值。
+- 不给 来源玩家 专属“剧情称号”来假装它很强；称号必须是可验证的事件。
 
 ### 6.5 展示位置
 
@@ -574,7 +574,7 @@ def advance_opponent(opponent, now):
 | 个人/对手详情 | `/v1/users/{id}` + `web/app.js` `renderUserDetail()` | 称号、收藏数 |
 | 历史卡 | `web/index.html` `history-page` / `renderHistory()` | 周 XP、名次、升降级、本周获得称号、补签数 |
 | badge/embed | `ghost_league/badge.py` | 称号一行、XP、打卡、余烬；不显示秒 |
-| 每日动态 | 新 `/v1/league/feed` | “AI 青灯-07 今日 210 XP / 补签 / 获得三日不息” |
+| 每日动态 | 新 `/v1/league/feed` | “来源玩家 青灯-07 今日 210 XP / 补签 / 获得三日不息” |
 
 ### 6.6 不做的奖励
 
@@ -607,7 +607,7 @@ FastAPI routers (ghost_league/api.py 拆分)
   ├─ increments     → EventStore (data/api/events.db)
   ├─ game           → GameStore (data/league/league.db)
   │    ├─ calendar     日/周边界、锁、结算时点
-  │    ├─ matchmaking  当前周 15 人组、AI 填充
+  │    ├─ matchmaking  当前周 15 人组、来源玩家填充
   │    ├─ opponents    anchor、周计划、日状态机、动态
   │    ├─ checkin     打卡、补签、Ember 账本
   │    ├─ progression 里程碑、物品、称号、装备
@@ -629,7 +629,7 @@ FastAPI routers (ghost_league/api.py 拆分)
 | --- | --- | --- |
 | `game/rules.py` | XP 换算、段位带、组大小、升降级、余烬公式 | 不读 HTTP、不读 WakaTime |
 | `game/calendar.py` | Asia/Shanghai 日/周锁、结算时点 | 不做业务判定 |
-| `game/matchmaking.py` | 当前周分组、15 人填充、AI 选择 | 不生成未来周 |
+| `game/matchmaking.py` | 当前周分组、15 人填充、来源玩家选择 | 不生成未来周 |
 | `game/opponents.py` | anchor→强度、周计划、日状态机、动态 | 不读用户实时 XP 来调难度 |
 | `game/checkin.py` | 打卡、补签、连胜、Ember 账本 | 不写周名次 |
 | `game/progression.py` | 里程碑、物品、称号、装备 | 不影响数值 |
@@ -637,7 +637,7 @@ FastAPI routers (ghost_league/api.py 拆分)
 | `game/store.py` | SQLite schema/migrations/事务 | 不包含业务规则 |
 | `api/*.py` | HTTP 投影、鉴权、错误码 | 不直接拼 SQL 业务 |
 | `badge.py` | 只读 SVG/HTML | 不访问 token |
-| `wakatime.py` / `fetch.py` | 公开数据缓存/抓取 | 不把 profile 给 AI/其他用户 |
+| `wakatime.py` / `fetch.py` | 公开数据缓存/抓取 | 不把 profile 给 来源玩家/其他用户 |
 
 ### 7.3 表/实体草案
 
@@ -651,7 +651,8 @@ FastAPI routers (ghost_league/api.py 拆分)
 ```text
 meta(key, value)                          -- schema_version, epoch_id, algorithm_version
 epochs(id, started_at, reason, status)    -- reset 审计；不是赛季
-players(id, kind, account_id, codename, joined_week, created_at, is_active)
+players(id, source_kind, source_key_hash, display_name, joined_week,
+        last_seen_week, created_at, is_active)
 anchors(id, source, source_key_hash, anchor_seconds, anchor_week, fetched_at, stale_weeks)
 opponents(player_id, anchor_id, archetype, seed, volatility, burst, fatigue,
           comeback, discipline, pace, taste, created_at)
@@ -739,8 +740,8 @@ diamond_boosts(player_id PRIMARY KEY, multiplier, expires_at, updated_at)
 - SVG 只依赖星记录的 `star_type`/`rarity`/`palette`/`visual_seed`/
   `companion_count`/`catalog_code`，不读名字，不引用外部资源；端点只允许本人读取，
   他人/不存在统一 404。
-- `group_members` 必须满足：每组 15 人（v1），AI 数 = 15 - 真人数；不允许中途移除 AI。
-- 周中新增真人进入**新组**（当前周、14 个 AI），不通过移除已有 AI 塞进旧组；旧组名单周内不变。
+- `group_members` 必须满足：每组 15 人（v1），来源玩家数 = 15 - 真人数；不允许中途移除 来源玩家。
+- 周中新增真人进入**新组**（当前周、14 个 来源玩家），不通过移除已有 来源玩家 塞进旧组；旧组名单周内不变。
 - 组内排名按 seconds 降序，tie-break 用 `player_id` 升序，保证可复现。
 - 升降级按组独立：每个组内成员按 seconds 降序、`player_id` 升序排名，`quota = max(1, (group_size * 3) // 10)`（每组前 30% 晋级、后 30% 降级，向下取整）；`weekly_results.promoted/demoted` 写该组结果，`rank` 仍写组内名次；不做 tier 汇总排名。Bronze 不降级，Diamond 不晋级，少于 2 人不移动。
 - 所有时间字符串统一 `Asia/Shanghai` ISO；周起点为周一。
@@ -763,10 +764,10 @@ diamond_boosts(player_id PRIMARY KEY, multiplier, expires_at, updated_at)
 | `GET /v1/league/standings` | `seconds` + ghost | `week_xp`、`today_xp`、`title`、`streak`、`checkin_state`；不暴露 `kind`/`is_ai` 或未来 target |
 | `GET /v1/me/league` | `week_total_seconds` | 同上；保留 `next_update_at` |
 | `GET /v1/league/history` | 52 周 state | 真实 `weekly_results`；`week_xp`、rank、tier、promoted/demoted、titles、repaired_days；加入前为空 |
-| `GET /v1/league/feed` | 不存在 | 当前组最近 N 条 AI/真人事件；只读、无隐藏目标 |
+| `GET /v1/league/feed` | 不存在 | 当前组最近 N 条 来源玩家/本地账号玩家事件；只读、无隐藏目标 |
 | `GET /v1/me/collection` | 不存在 | 已解锁称号/物品、装备状态 |
 | `PATCH /v1/me/loadout` | 不存在 | 装备 `title_id`/`frame_id`/`backdrop_id` |
-| `GET /v1/users/{id}` | 可返回 WakaTime bio/city | 增加展示用称号/边框；不返回 `kind`/`is_ai`；AI 不返回 WakaTime 资料；真人 WakaTime 资料最多自己可见 |
+| `GET /v1/users/{id}` | 可返回 WakaTime bio/city | 增加展示用称号/边框；不返回 `kind`/`is_ai`；来源玩家不返回 WakaTime 资料；真人 WakaTime 资料最多自己可见 |
 | `GET /v1/me/profile` | 基本可用 | 增加 `equipped_title`；其余不变 |
 | `GET /badge/{user_id}.svg` | 已有 | 路由不变；数据换 XP/称号/余烬；无秒 |
 | `GET /embed/{user_id}` | 已有 | 同上 |
@@ -778,10 +779,10 @@ diamond_boosts(player_id PRIMARY KEY, multiplier, expires_at, updated_at)
 | `accounts.db` | 不动表结构；token 继续有效；新增 `equipped_title` 可选（也可放 `loadouts`） |
 | 增量客户端 | `POST /v1/me/increments` 路径、Bearer、`event_id` 幂等、`occurred_at` 规则不变；只改响应字段。旧客户端若只读 `week_total_seconds` 会失效，需在 beta 内通知并升级 |
 | `events.db` | 表保留；reset 时旧库归档，新建空库；不把旧周带入新 epoch |
-| PWA | 同步更新 `web/app.js`、`web/index.html`、`web/sw.js` 缓存版本；旧缓存通过 `skipWaiting`/版本号清理；新 UI 不显示 AI 标签，只展示 XP/称号/边框 |
+| PWA | 同步更新 `web/app.js`、`web/index.html`、`web/sw.js` 缓存版本；旧缓存通过 `skipWaiting`/版本号清理；新 UI 不显示 来源身份标签，只展示 XP/称号/边框 |
 | badge/embed | URL 不变；只读展示；外部嵌入不破坏；新增称号行需要检查 260/280px 布局 |
-| webhook | 签名/重试协议不变；新增 `checkin.repaired`；`streak.broken` 只在未补签时发；不发送 AI 内部 target |
-| 文档 | `docs/API.md` 改为 XP 字段；README 保留技术沿革，但产品段改 AI 对手 |
+| webhook | 签名/重试协议不变；新增 `checkin.repaired`；`streak.broken` 只在未补签时发；不发送 来源玩家 内部 target |
+| 文档 | `docs/API.md` 改为 XP 字段；README 保留技术沿革，但产品段改 来源玩家 |
 | 命令 | `python -m ghost_league.league_cli` 旧 `bootstrap/report` 删除；新增 `reset/settle-week/seed-anchors/audit` |
 
 ### 7.6 reset 迁移步骤（设计，不在本轮执行）
@@ -799,7 +800,7 @@ data/league/weeks.json               # 旧 52 周：归档
 data/api/social.db                   # 冻结保留
 data/api/webhooks.db                 # 订阅保留
 data/cache/cn-978.json               # 公开榜缓存：只保留匿名锚点
-data/cache/wakatime-profiles.json    # 公开资料：不进入 AI；可保留
+data/cache/wakatime-profiles.json    # 公开资料：不进入 来源玩家；可保留
 data/api/avatars/                    # 头像：保留
 ```
 
@@ -830,10 +831,10 @@ data/api/avatars/                    # 头像：保留
    - 写 `data/archive/reset-<timestamp>/receipt.json`（旧/新 epoch、计数、manifest hash）。
    - 失败则保留旧库和备份，输出回滚命令。
 3. `seed-anchors --from data/cache/cn-978.json`：只插匿名 anchor；`INSERT ... ON CONFLICT DO NOTHING`。
-4. 启动服务；首次请求时 `ensure_player` 创建真人 player；`matchmaking` 创建当前周 Bronze 组 + 14 AI。
+4. 启动服务；首次请求时 `ensure_player` 创建真人 player；`matchmaking` 创建当前周 Bronze 组 + 14 来源玩家。
 5. 验证：
    - `SELECT COUNT(*) FROM groups WHERE week_start = current_week` = 1；
-   - `group_members` = 15，`is_human=1` 的数量 = 真人数，AI = 15 - 真人数；
+   - `group_members` = 15，`is_human=1` 的数量 = 真人数，来源玩家 = 15 - 真人数；
    - `weekly_results` = 0；`/v1/league/history` 返回空；
    - `/v1/me/status` 的 rank 在 1..15，`week_xp=0`，`ember_balance=0`；
    - `/badge/{id}.svg` 200。
@@ -848,9 +849,9 @@ data/api/avatars/                    # 头像：保留
 ### 7.7 独立性与隐私边界
 
 - 产品不依赖任何个人工作流、个人目录、内网 IP、owner 账号；部署参数只从环境/未跟踪配置文件读取。
-- owner 只是普通账号之一；不作为 AI 对手池、不参与难度调整、不拥有隐藏权限。
-- AI 对手的行为只使用 WakaTime **公开周总量**；公开姓名/头像只进入 `channel_players.profile_json` 展示快照，不进入 `players` 表或计分输入，bio/city/社交账号不入库。
-- 真人资料只来自 `accounts.db`；WakaTime profile 不向其他用户展示，AI 也不读取。
+- owner 只是普通账号之一；不作为 来源玩家池、不参与难度调整、不拥有隐藏权限。
+- 来源玩家的行为只使用 WakaTime **公开周总量**；公开姓名/头像只进入 `channel_players.profile_json` 展示快照，不进入 `players` 表或计分输入，bio/city/社交账号不入库。
+- 本地账号资料只来自 `accounts.db`；WakaTime profile 不向其他用户展示，来源玩家也不读取。
 - `docs/`、`README.md`、`web/` 的示例统一用 `your-host.example` 和 `$LEAGUE_TOKEN` 占位，不出现真实主机、路径、令牌。
 - 本轮不做多用户社交、支付、原生客户端、新外部数据源；`social.db` 保留但冻结。
 
@@ -866,24 +867,24 @@ data/api/avatars/                    # 头像：保留
    - `data/league/league.db` 建表；`meta.epoch_id`；`reset --dry-run` / `--confirm`。
    - 验收：重复 reset 不重复创建；`PRAGMA integrity_check` 通过。
 2. **当前周分组**
-   - 真人首次请求时创建 player；当前周 Bronze 组 15 人；14 个 AI 从匿名 anchor 池选。
-   - 不做 52 周；不做未来周；AI 中途不替换。
-3. **AI 周计划/日状态机**
+   - 真人首次请求时创建 player；当前周 Bronze 组 15 人；14 个 来源玩家从匿名 anchor 池选。
+   - 不做 52 周；不做未来周；来源玩家 中途不替换。
+3. **来源玩家 周计划/日状态机**
    - anchor → 段位带 → 周目标；日切只生成今天；2–4 段行动；自动打卡；低产/疲劳/ comeback。
    - 验收：同一 seed/时间重复读取结果一致；刷新不换人。
 4. **打卡 + 余烬补签**
    - 600 秒/100 XP 自动打卡；余烬公式、持有上限 3、每周最多新赚 2、7 天窗口、1–599 秒条件。
-   - 人和 AI 同一套；补签只恢复连胜，不改周名次。
+   - 人和 来源玩家 同一套；补签只恢复连胜，不改周名次。
    - 验收：`POST /v1/me/repair` 幂等；余额不足/超窗/0 XP 被拒。
 5. **周结算**
    - 周一 00:00 锁分、00:05 结算；按每组独立配额升降、写 `weekly_results`、建下周组。
    - 不做重放；旧周的 XP/rank/升降级不可变，补签元数据只追加。
 6. **最小成长层**
-   - 3 个称号 + 3 个物品；装备接口；首页/榜单/详情展示；AI 也按同一表获得一个称号。
+   - 3 个称号 + 3 个物品；装备接口；首页/榜单/详情展示；来源玩家也按同一表获得一个称号。
    - 不做完整赛季/社交；商店与钻石已按单独任务接后端。
 7. **API/PWA 读面与文案**
    - status/standings/feed/history XP 化；补签入口；称号 chip；`badge.py` 称号行与装备边框。
-   - 验收：UI 不出现 ghost/幽灵/synthetic/模拟/伪实时/分钟；也不出现 AI 可见标签。
+   - 验收：UI 不出现 ghost/幽灵/synthetic/模拟/伪实时/分钟；也不出现 来源玩家 可见标签。
 
 ### 8.2 验收命令（建议）
 
@@ -913,7 +914,7 @@ curl -sS "http://127.0.0.1:8095/v1/me/status" \
 
 浏览器手动验收：
 
-- 首页：今日 XP、100 XP 打卡环、余烬余额、名次、AI 今日动态。
+- 首页：今日 XP、100 XP 打卡环、余烬余额、名次、来源玩家今日动态。
 - 小组榜：15 人、称号、每组比例配额升降标记。
 - 历史：空状态；结算后出现真实周，含补签标记。
 - 我的：收藏/称号装备；装备后首页和榜单同步。
@@ -938,14 +939,14 @@ curl -sS "http://127.0.0.1:8095/v1/me/status" \
 
 | 风险 | 影响 | 缓解 |
 | --- | --- | --- |
-| AI 被看成“刚好压我”的假对手 | 用户看穿后失去信任 | 周初锁目标、不读用户实时分数、内部 kind 与分位带用于审计；提供 audit 命令 |
+| 来源玩家被看成“刚好压我”的假对手 | 用户看穿后失去信任 | 周初锁目标、不读用户实时分数、`source_kind` 与分位带用于审计；提供 audit 命令 |
 | 补签被刷 | 连胜/称号失真 | 1–599 XP 条件、7 天窗、每周 2 枚、余额 3、服务端事务、幂等键 |
 | reset 丢账号/旧数据 | 不可逆损失 | 先备份、integrity check、归档不删除、dry-run、receipt、回滚 |
 | 旧 PWA 缓存打新 API | 白屏/字段缺失 | 升 `sw.js` 版本、强制更新提示、保留一版字段映射或明确 beta 破坏性升级 |
-| WakaTime 数据过期/不可用 | AI 没有锚点 | anchor pool 持久化、stale_weeks、无新数据不造；启动不依赖网络 |
+| WakaTime 数据过期/不可用 | 来源玩家没有锚点 | anchor pool 持久化、stale_weeks、无新数据不造；启动不依赖网络 |
 | 命名迁移面过大 | 引入回归 | 先改产品文案，再做机械 rename；保留一版 env/header alias |
 | 奖励变成“导演发糖” | 用户站到导演视角 | 称号与商店物品只来自真实竞争/购买；钻石不凭空发放，正式来源后续接；每日反馈优先于奖励动画 |
-| 工作日/周末节奏不公平 | 用户觉得被算法针对 | 段位带 + 固定分位；不按用户在线时间调 AI |
+| 工作日/周末节奏不公平 | 用户觉得被算法针对 | 段位带 + 固定分位；不按用户在线时间调 来源玩家 |
 
 ### 9.2 需要拍板的 5 个问题（附推荐）
 
@@ -961,7 +962,7 @@ curl -sS "http://127.0.0.1:8095/v1/me/status" \
    - 推荐：归档旧库，新建空库；账号保留。这样新 epoch 从零开始，不把旧 XP 带进 Bronze。
    - 备选：保留事件但加 `epoch_id` 过滤；复杂度更高，首版不推荐。
 
-4. **AI 的 WakaTime anchor 是否每周刷新？**
+4. **来源玩家的 WakaTime anchor 是否每周刷新？**
    - 推荐：可选刷新，默认沿用；只存匿名 `source_key_hash + anchor_seconds + anchor_week`。公开姓名/头像只作为 Channel profile 展示快照给前端，不传 bio 或 raw 周总量。
    - 理由：WakaTime 周更不稳定；刷新是增强，不是运行依赖。
 
@@ -975,39 +976,39 @@ curl -sS "http://127.0.0.1:8095/v1/me/status" \
 
 > 本节优先于第 5 节的 anchor pool + 段位分位描述；下一版设计需要按本节重构 source 层，再重写第 5 节。
 
-用户明确要求：**不要拿整张排行榜当一个隐形的对手池，再按段位生成特殊对手。** 每个 AI 是一个独立 Player，绑定排行榜上的一条具体 source row；真人和 AI 在球员层同构，只在数据源适配器上不同。
+用户明确要求：**不要拿整张排行榜当一个隐形的对手池，再按段位生成特殊对手。** 每个来源行是一个独立普通 Player，绑定排行榜上的一条具体 source row；本地账号玩家与来源玩家在球员层同构，只在 provenance 上不同。
 
-- 真人 source：绘画软件/本机增量 → `LocalIncrementSource`。
-- AI source：WakaTime 排行榜的单个行（周总量）→ `LeaderboardSource`；每个 AI 有自己的 `source_key_hash`，不是整池随机取样。
-- 两者都通过同一个 `ingest_activity` / `activity_events` 入口写入，联赛只读 `weekly_scores`；联赛结算不感知“AI 生成层”，只感知 player 和 source。
-- `player.kind` 或 `source_kind` 可以用于 UI 的“AI 对手”标签和审计，但不要用两套计分/结算逻辑。
-- WakaTime 公开榜只有周总量；单个 AI 的日/小时行为仍然是由该锚点派生的模拟，不是逐小时真实数据。对外说“AI 行为模拟”，不冒充 WakaTime 逐小时。
+- 本地 source：绘画软件/本机增量 → `LocalIncrementSource`。
+- Waka Channel source：排行榜的单个行（周总量）→ `LeaderboardSource`；每个玩家有自己的 `source_key_hash`，不是整池随机取样。
+- 两者都通过同一个 `ingest_activity` / `activity_events` 入口写入，联赛只读 `weekly_scores`；联赛结算不感知 Channel 生成层，只感知 player 和 source。
+- `source_kind` 只用于 provenance、审计和来源排序，不能用于两套计分/结算逻辑；`players` 没有 player identity 列。
+- WakaTime 公开榜只有周总量；单个来源玩家的日/小时行为仍然是由该锚点派生的模拟，不是逐小时真实数据。
 - 绑定稳定性：优先使用 WakaTime 缓存里的稳定 id 做 HMAC，不用 rank 或 display_name；row 消失时只能标 stale/freeze，不能静默换一个人。
-- 网络：一次抓取整张榜快照后在本地绑定，不为每个 AI 发一次 HTTP 请求。
+- 网络：一次抓取整张榜快照后在本地绑定，不为每个来源玩家发一次 HTTP 请求。
 - 段位公平：原始 anchor 只作审计/分位，进入 Bronze 等段位仍要按段位带缩放；否则顶级 WakaTime 的周总量会摧毁低段。
-- 仍需拍板：AI 是否每周重新绑定 source（身份连续 vs 每周换源）；WakaTime 单个用户是否有可用的公开日粒度 stats。若没有，日粒度只能派生。
+- 仍需拍板：来源玩家是否每周重新绑定 source（身份连续 vs 每周换源）；WakaTime 单个用户是否有可用的公开日粒度 stats。若没有，日粒度只能派生。
 
 ---
 
-## 11. 追加：Source 系统 / 游戏系统分离与 AI 行为 v1（2026-10-28，10/28 修正）
+## 11. 追加：Source 系统 / 游戏系统分离与 来源行为 v1（2026-10-28，10/28 修正）
 
 用户进一步明确：把排行榜接入看成**独立的数据源系统**，行为与 `duolingo-poller` 同类；游戏系统只消费它产出的活动/锚点。两层不要混。
 
-**Source 系统（沿用现有投影，不新建 per-AI 抓取）**
+**Source 系统（沿用现有投影，不新建 per-来源玩家 抓取）**
 
 - 现有 WakaTime 周榜快照 + `schedule.py` 的 168 小时投影保持不变；伪实时增量按小时产生，走和真实用户相同的增量入口。唯一的区别是数据来源不同，不是算法不同。
-- 一次抓完整榜、缓存整张快照；初始化/重置时从缓存创建当前周需要的 AI player，每个 AI 绑定一条 source row；不做 per-AI 网络请求，不预生成未来/过去周。
+- 一次抓完整榜、缓存整张快照；初始化/重置时从缓存创建当前周需要的普通 player，每个玩家绑定一条 source row；不做 per-player 网络请求，不预生成未来/过去周。
 - 源数据过期只标 stale，不造数；投影结果必须可复现。
-- **XP 是外生的**：AI 的周总量/每小时增量由排行榜投影决定，行为层不生成、不改写 XP。
+- **XP 是外生的**：来源玩家的周总量/每小时增量由 Channel 投影决定，行为层不生成、不改写 XP。
 
 **游戏系统**
 
-- `Player`：`id / kind(human|ai) / controller(human|ai) / source_id / source_key_hash / joined_week`。
+- `Player`：`id / source_kind / source_key_hash / display_name / joined_week`。
 - `Source` 只负责产生或更新活动锚点/增量；`Game` 只负责打卡、补签、分组、结算、里程碑。
-- `controller` 与 `source` 分开：现在 AI 的 controller=ai、source=leaderboard；将来“AI 托管真人账号”只是 controller 换成 ai，source 仍是真人客户端，不需要第二套 player 模型。
-- 人类和 AI 在球员/事件/结算层同构，标签只用于展示和审计。
+- 不再有 `controller`：来源与账号都只是 provenance / 客户端差异，不进入 Player identity。
+- 本地账号玩家和来源玩家在球员/事件/结算层同构，标签只用于展示和审计。
 
-**AI 行为 v1：反应式，不产生 XP**
+**来源行为 v1：反应式，不产生 XP**
 
 行为输入 = 固定 seed + 已发生的 XP/排名/打卡状态 + 收藏 + 当日时间；行为输出只影响展示、关注关系、称号/外观、补签和动态文案。行为不能改变 XP、周名次或段位。只做 5 个确定性决策：
 
@@ -1019,7 +1020,7 @@ curl -sS "http://127.0.0.1:8095/v1/me/status" \
 
 **固定与变化**
 
-- 固定：seed、archetype、taste、discipline、关注偏好、称号偏好；这些让同一个 AI 跨周仍是同一个人。
+- 固定：seed、archetype、taste、discipline、关注偏好、称号偏好；这些让同一个 来源玩家 跨周仍是同一个人。
 - 变化：最近 XP、排名、连胜、补签记录、已解锁收藏；这些让行为随经历变化，但不会反过来伪造 XP。
 - 复杂的是 source 稳定性、增量幂等和公平性，不是行为本身；v1 不做 LLM、不做实时策略、不做针对用户的动态难度。
 
@@ -1027,14 +1028,14 @@ curl -sS "http://127.0.0.1:8095/v1/me/status" \
 
 ## 12. 追加：社交表情 / 标签与身份投影（2026-10-28）
 
-用户要求 AI 能对玩家“做表情、打标签”，就像给 issue 里的帖子打标签；关注某人的 AI 也会给被关注者打标签。AI 的行为逻辑**不能区分**对方是人还是 AI；但数据库必须保留 `kind`，因为“附近的人”仍只列真人。
+用户要求模拟客户端能对玩家“做表情、打标签”，就像给 issue 里的帖子打标签；关注某人的客户端也会给被关注者打标签。Ghost 的玩家行为逻辑**不区分**对方来自本地账号还是 Channel；数据库没有 player identity 列，查询按账号和 provenance 决定可见范围。
 
 **身份分层**
 
-- 持久层：`players.kind = human | ai`、`controller = human | ai`、`source_kind` 保留，用于 `nearby`、审计、管理操作；公开 UI 不显示 AI 标签。
-- 社交/行为投影：AI 只拿到 `PlayerPublic`（`id / 显示名 / 称号 / 最近 XP / 排名 / 连胜 / 标签 / 帖子`），**不含 kind**；AI 的关注、反应、标签选择不得读取 `kind`。
-- `nearby` 查询显式 `WHERE kind = 'human'`；AI 不会出现在“附近的人”里。小组榜、动态、帖子也不显示 AI 标签。
-- 这样“AI 不知道对方是不是人”和“系统知道谁是真人”同时成立：行为无偏，功能可过滤。
+- 持久层：`players` 没有 `kind` / `controller`；`source_kind` / `source_key_hash` 只作 provenance，用于审计和来源排序。公开 UI 不显示来源身份标签。
+- 社交/行为投影：`PlayerPublic`（`id / 显示名 / 称号 / 最近 XP / 排名 / 连胜 / 标签 / 帖子`）**不含任何身份字段**；关注、反应、标签选择都不得读取 provenance 作为身份。
+- `nearby` 只按本地账号数据查询，不读 player identity。小组榜、动态、帖子也不显示来源身份标签。
+- 行为层不需要身份分类；功能过滤只依赖账号是否存在和 provenance。
 
 **社交对象与表（v1 最小集）**
 
@@ -1050,24 +1051,24 @@ follows(follower_id, target_id, created_at, UNIQUE(follower_id, target_id))
 ```
 
 - 标签用**受控词表**，不是自由文本；避免注入、刷屏和不可渲染字符。
-- 每个 AI 对同一帖子最多 1 个表情、最多 2 个标签；每条帖子最多展示 5 个标签。
-- 只允许关注者给被关注者的帖子打标签；AI 不可以给自己打标签。
+- 每个来源玩家 对同一帖子最多 1 个表情、最多 2 个标签；每条帖子最多展示 5 个标签。
+- 只允许关注者给被关注者的帖子打标签；来源玩家不可以给自己打标签。
 - 标签/表情只影响展示和动态，不影响 XP、排名、段位、资源或里程碑。
 - 用户可隐藏某条标签的展示；不删除审计记录。
 
-**AI 行为 v1 扩展**
+**来源行为 v1 扩展**
 
-- 关注：同组内选 1 个对象，按名次邻近/历史交集/最近 XP 变化；不读 `kind`。
-- 表情：从固定 emoji 集合按 seed + 帖子内容（XP/连胜/排名）选一个；不区分人/AI。
-- 标签：从受控词表里按最近 XP/连胜/排名/称号选 0–2 个；同一 AI 对同一对象每天最多一次。
+- 关注：同组内选 1 个对象，按名次邻近/历史交集/最近 XP 变化；不读身份字段（也不存在身份字段）。
+- 表情：从固定 emoji 集合按 seed + 帖子内容（XP/连胜/排名）选一个；不区分人/来源玩家。
+- 标签：从受控词表里按最近 XP/连胜/排名/称号选 0–2 个；同一 来源玩家 对同一对象每天最多一次。
 - 称号/外观：从已解锁收藏里按 taste 选，纯展示。
 - 资源：只在补签时使用余烬；不改 XP/名次。
 
 **文案边界**
 
-- AI 标签使用中性/正向词表（如“稳定”“夜航”“冲刺”“回归”），不做羞辱性标签；低产不自动贴负面标签。
-- UI 中 AI 始终有 `AI` 标签；帖子上的标签旁边可显示“由某 AI 标记”，但 AI 的行为逻辑不因此看到 `kind`。
-- “附近的人”只列真人；AI 只在联赛小组/动态/帖子里出现。
+- 标签使用中性/正向词表（如“稳定”“夜航”“冲刺”“回归”），不做羞辱性标签；低产不自动贴负面标签。
+- UI 不显示来源身份标签；帖子上的标签旁边可显示标记来源，但行为逻辑不读取身份。
+- “附近的人”只列本地账号；来源玩家只在联赛小组/动态/帖子里出现。
 
 **Task 104 已实现的最小切片**
 
@@ -1077,20 +1078,20 @@ follows(follower_id, target_id, created_at, UNIQUE(follower_id, target_id))
 - 事件只来自真实 `checkins`（`checkin`）和已结算的 `weekly_results`
   （`promoted` / `champion`），不开放自由发帖。`checkin` 事件用当日 XP 写入短句，
   不出现秒/分钟。
-- AI 从事件作者所在小组里按 `hash(event_id + actor_id)` 排序，最多选 3 个 AI；
-  每个 AI 最多 1 个表情、1 个标签。AI 在事件写入时一次性生成，之后新 AI 加入不补历史。
+- 来源玩家从事件作者所在小组里按 `hash(event_id + actor_id)` 排序，最多选 3 个 来源玩家；
+  每个来源玩家 最多 1 个表情、1 个标签。来源玩家在事件写入时一次性生成，之后新来源玩家 加入不补历史。
 - 标签按事件证据限定：`checkin` 可用“稳 / 慢热 / 夜航 / 手稳”，`promoted` 可用
   “敢冲 / 苦行 / 手稳”，`champion` 可用“狠 / 爆发 / 敢冲”；零 XP 事件永不发“爆发”。
 - 公开读模型为 `GET /v1/league/feed`；真人回应走
   `POST /v1/league/feed/{event_id}/reactions`，只对可见事件生效且同一表情幂等。
   可见范围是事件周同组成员、我关注的人和我自己；没有小组时只有自己。
-- v1 不做关注流、AI 自动关注、评论、图片上传；反应/标签只影响展示。
+- v1 不做关注流、来源玩家 自动关注、评论、图片上传；反应/标签只影响展示。
 
 ---
 
-## 13. 修正：排行榜源与 AI 的边界（2026-10-28）
+## 13. 修正：排行榜源与 来源玩家的边界（2026-10-28）
 
-用户指正：排行榜只是我们的数据源，**不应当知道 ghost/AI 的存在**；ghost 也不能回写排行榜。段位带如果落在 source 上，或把 raw anchor 整段替换成段位 target，都是把两个系统耦合了。
+用户指正：排行榜只是我们的数据源，**不应当知道 ghost/来源玩家的存在**；ghost 也不能回写排行榜。段位带如果落在 source 上，或把 raw anchor 整段替换成段位 target，都是把两个系统耦合了。
 
 最终选择：**在源层做通用缩尾，不做 ghost debuff**。
 
@@ -1099,7 +1100,7 @@ follows(follower_id, target_id, created_at, UNIQUE(follower_id, target_id))
 - 原始快照仍保留审计；压缩值只作为联赛输入，不回写外部榜单。
 - 人类自己的事件不经过这个外部源，所以拿第一不会吃 debuff；这不是“人机不同规则”，而是两种数据源各自的归一化。
 - 压缩规则必须是单调的，避免大量顶部分数压成同一个值；具体分位/软上限先用当前 978 行数据模拟，给出前后对照表再定。
-- task87 的“所有 AI 按段位带重算 target”方向撤回；先做源层缩尾，再决定是否还需要任何 ghost 层 cap。
+- task87 的“所有来源玩家 按段位带重算 target”方向撤回；先做源层缩尾，再决定是否还需要任何 ghost 层 cap。
 
 下一步实现前，先在 source 层定义并测试缩尾；ghost 层不改 raw 排序语义。
 
@@ -1112,7 +1113,7 @@ follows(follower_id, target_id, created_at, UNIQUE(follower_id, target_id))
 | `ghost_seconds` | `opponent_anchor_seconds` |
 | `ghost_names` | `opponent_codenames` |
 | `ghost_tiers` | `opponent_tiers` |
-| `ghost_avatar_urls` | 删除旧全局头像表；AI 头像只从 Channel profile 读取 |
+| `ghost_avatar_urls` | 删除旧全局头像表；来源玩家 头像只从 Channel profile 读取 |
 | `_load_ghost_avatars()` | 删除 |
 | `_available_ghosts()` | `_available_opponents()` |
 | `_place_user()` 的 ghost 填充 | `_place_human_with_opponents()` |

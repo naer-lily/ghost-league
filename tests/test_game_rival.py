@@ -38,13 +38,11 @@ def add_player(
     store: GameStore,
     player_id: str,
     *,
-    kind: str = "human",
     power: int | None = None,
     week: str = WEEK,
 ) -> str:
     store.create_player(
         player_id,
-        kind=kind,
         display_name=player_id,
         joined_week=week,
         now=MONDAY,
@@ -154,7 +152,7 @@ def test_monday_candidates_and_manual_change(tmp_path: Path) -> None:
     add_player(store, "h1", power=500)
     add_player(store, "h2", power=600)
     add_player(store, "h3", power=900)
-    add_player(store, "ai-close", kind="ai", power=700)
+    add_player(store, "ai-close", power=700)
     store.create_group(
         WEEK, tier="Bronze", player_ids=["h1", "ai-close"], now=MONDAY
     )

@@ -213,13 +213,13 @@ def test_roster_builds_978_channel_players_and_late_human_rebalances_without_dup
     assert human_group is not None
     assert len(store.group_members(int(human_group["id"]))) == 15
     with sqlite3.connect(tmp_path / "league.db") as connection:
-        players = connection.execute(
-            "SELECT kind, COUNT(*) FROM players GROUP BY kind ORDER BY kind"
-        ).fetchall()
+        player_count = connection.execute(
+            "SELECT COUNT(*) FROM players"
+        ).fetchone()[0]
         memberships = connection.execute(
             "SELECT player_id, COUNT(*) FROM group_members GROUP BY player_id"
         ).fetchall()
-    assert players == [("human", 979)]
+    assert player_count == 979
     assert len(memberships) == 979
     assert {int(row[1]) for row in memberships} == {1}
 
@@ -339,10 +339,8 @@ def test_real_waka_channel_client_end_to_end(tmp_path) -> None:
 
     db_path = tmp_path / "league.db"
     with sqlite3.connect(db_path) as connection:
-        by_kind = dict(
-            connection.execute(
-                "SELECT kind, COUNT(*) FROM players GROUP BY kind"
-            ).fetchall()
+        player_count = int(
+            connection.execute("SELECT COUNT(*) FROM players").fetchone()[0]
         )
         group_count = int(
             connection.execute("SELECT COUNT(*) FROM groups").fetchone()[0]
@@ -361,7 +359,7 @@ def test_real_waka_channel_client_end_to_end(tmp_path) -> None:
             ).fetchall()
         )
 
-    assert by_kind == {"human": 979}
+    assert player_count == 979
     assert group_count == 66
     assert _group_sizes(db_path) == [15] * 55 + [14] * 11
     assert human_group_size == 15

@@ -5,9 +5,9 @@ League client. It provisions normal accounts through Ghost's provisioning API,
 stores their tokens locally, and then calls only public `/v1/me/*` and
 `/v1/shop*` endpoints.
 
-Ghost sees normal accounts and normal game rows (`kind='human'`). This package
-owns the simulated identity and policy; Ghost never imports it and never learns
-which accounts are simulated.
+Ghost sees normal accounts and ordinary player rows. It has no player identity
+column and never learns which accounts are simulated. This package owns the
+simulated identity and policy; Ghost never imports it.
 
 ## Setup
 
@@ -33,7 +33,7 @@ The setup requires Ghost to run with `GHOST_LEAGUE_PROVISIONING_TOKEN` (or
 disabled. The live service is already configured and the route is enabled: the
 token is in the service environment and `ai_channel/config.json` (both `0600`,
 untracked). `ai_channel` can use the route, and its local token DB already holds
-the 1074 adopted accounts. Never print or commit the token.
+the 1074 ordinary accounts. Never print or commit the token.
 
 The example `state_db` path (`ai_channel/data/ai_accounts.db`) is relative to
 the repository root. If you run from another directory, adjust it or pass an
@@ -73,10 +73,9 @@ backfills.
 
 ## V1 scope
 
-- The package itself only provisions new simulated accounts. The 2026-11-05
-  live migration of legacy Waka `kind='ai'` rows was completed separately
-  through the provisioning endpoint's `adopt_existing_player`; those rows are
-  now ordinary `kind='human'` accounts.
+- The package itself only provisions new simulated accounts. Ghost has no
+  `adopt_existing_player`; the player-identity schema migration preserves the
+  existing ordinary players, and this package never writes Ghost's database.
 - One XP increment per account per hour, default 900 seconds.
 - Optional one cheapest affordable star purchase per day.
 - No bets, tasks, rival selection, or multi-account coordination.
@@ -84,4 +83,4 @@ backfills.
 - CLI-driven only: there is no resident scheduler or full behavior policy yet.
 
 See [`../docs/AI_ACCOUNTS.md`](../docs/AI_ACCOUNTS.md) for the architecture,
-migration results and remaining cleanup.
+player-identity migration and remaining cleanup.

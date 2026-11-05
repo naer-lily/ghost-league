@@ -41,7 +41,7 @@ Channel token；`/v1/provisioning/accounts` 使用独立的 provisioning token�
 | POST | `/v1/me/bets` | 下注周注、任一组注盘口或日注 |
 | GET | `/v1/me/stars/{star_id}/svg` | 自己一颗星的独属 SVG |
 | POST | `/v1/me/increments` | 写入真人活动增量 |
-| POST | `/v1/provisioning/accounts` | 受控创建普通账号；可 adoption 现有 AI 玩家（独立 provisioning token） |
+| POST | `/v1/provisioning/accounts` | 受控创建普通账号（独立 provisioning token） |
 | POST | `/v1/channels/{channel_id}/roster` | Channel 全量周名单 |
 | POST | `/v1/channels/{channel_id}/increments` | Channel 小时增量 |
 | GET | `/v1/me/league` | 自己的小组与本周数据 |
@@ -85,7 +85,8 @@ token 只以 SHA-256 哈希保存在 `data/api/accounts.db`，不会出现在 AP
 它不能调用 `/v1/me/*`，普通账号 token 也不能调用 provisioning 接口；缺少 token 配置
 时该路由保持禁用。live 服务已配置该 token，provisioning 路由已启用并按 Bearer 鉴权；
 token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），不打印、不提交。
-账号创建后第一次调用 `/v1/me/*` 仍走普通真人路径，不写入 AI 标记。
+账号创建后第一次调用 `/v1/me/*` 仍走普通玩家路径；Ghost 没有 player identity 列，
+也不写入 AI 标记。
 
 请求体：
 
@@ -93,23 +94,15 @@ token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored）�
 {
   "user_id": "sim-0001",
   "display_name": "Sim One",
-  "activity_label": "练习",
-  "adopt_existing_player": false
+  "activity_label": "练习"
 }
 ```
 
 - `user_id` 为 1–80 字符，首字符须为字母或数字，其余只允许字母、数字、点、下划线、
-  短横线。旧 AI id 为 `ch-` 加 64 位 hex（67 字符），在 provisioning 限制内。
-- `adopt_existing_player` 默认 `false`：只创建新账号，不写游戏行。
-- 设为 `true` 时，`user_id` 必须是已存在的 `kind='ai'` 玩家。接口会在同一个联赛
-  事务中把该玩家原地升级为 `kind='human'` / `controller='human'` /
-  `source_kind='local_increment'`，保留 player id、`source_key_hash`、周标记、XP/
-  历史、小组关系和 `channel_players` 映射，并补建钻石钱包。返回的仍是普通账号
-  token，之后第一次 `/v1/me/*` 走普通真人路径。
-- 玩家不存在返回 `404`；玩家已经是真人返回 `409 player already human`；已有账号
-  （包括重复 adoption）返回 `409`；owner 返回 `422`。adoption 按玩家原地执行，
-  可对不同玩家重复调用；2026-11-05 的线上迁移已用它把 1074 个 legacy AI 玩家全部
-  转为普通账号，当前线上是 0 AI / 1076 human，1074 条 Channel 映射均为 `human`。
+  短横线。
+- 已有账号返回 `409`；未知字段（包括旧 `adopt_existing_player`）返回 `422`；
+  owner 返回 `422`。
+- 只创建账号，不写游戏行；现有玩家不会被 provisioning 转换。
 
 账号管理：
 
@@ -285,8 +278,9 @@ Bearer 鉴权。`event_id` 在单个账号内幂等；同一账号重复发送�
 ## Channel ingest
 
 Channel 适配层只向 Ghost 发送匿名 `player_ref`、展示 profile 和已经投影好的小时增量。
-Ghost 不知道 provider，不读取 source 快照、anchor 或 raw 周总量，也不接受 AI 标识。
-`channel_id` 是路由/认证用的不透明标识，Ghost 不按它切换业务逻辑。
+Ghost 不知道 provider，不读取 source 快照、anchor 或 raw 周总量，也不接收 player
+identity 字段。`source_kind` / `source_key_hash` 只是 provenance。`channel_id` 是
+路由/认证用的不透明标识，Ghost 不按它切换业务逻辑。
 
 认证使用独立的 Channel token（部署配置 `GHOST_LEAGUE_CHANNEL_TOKEN`），不能用普通
 账号 token：
@@ -299,8 +293,8 @@ Authorization: Bearer <channel-token>
 
 按 `(channel_id, player_ref)` 幂等创建/更新普通 player。请求体只允许 `players`；每个
 player 只允许 `player_ref`、`profile`，未知字段（包括旧 `kind`）返回 `422`。也可以
-直接发送 player 数组。Ghost 的 Channel 边界没有 AI 标识；AI 只存在于 Channel 自己的
-状态里。
+直接发送 player 数组。Ghost 没有 player identity class；来源身份只存在于 Channel
+自己的状态里。
 
 ```json
 {
@@ -313,15 +307,16 @@ player 只允许 `player_ref`、`profile`，未知字段（包括旧 `kind`）�
 }
 ```
 
-- 新建和刷新映射一律是普通 player，Channel 路径不会写入 `players.kind='ai'`；
+- 新建和刷新映射一律是普通 player；`players` 没有 `kind` / `controller` 列，
+  `channel_players` 没有 `kind` 列；
 - 同一 `player_ref` 在不同 `channel_id` 下是不同 player；
-- 已存在的普通映射和已 adoption 的 human 不会被后续 roster 刷新降级；
+- 已存在的映射不会被刷新删除或降级，只更新展示名、profile、`last_seen_week` 和活跃状态；
 - profile 只存展示快照，更新 profile 不换 `player_id`、不改历史分数；
 - Channel player 的 `display_name` / `avatar_url` 从 Channel profile 读取；本地账号
   资料优先于 Channel 快照；
 - 外部 `avatar_url` 不写入 `players` 表，也不作为游戏输入；
 - 内部 `player_id` 稳定，响应会返回 `player_ref`、`player_id`、`profile`，不含
-  `kind`。
+  player identity 字段。
 
 ### `POST /v1/channels/{channel_id}/increments`
 
@@ -404,8 +399,8 @@ API 启动只初始化账号、social 和 `league.db`，确保本地真人存在
 
 榜单每行返回展示用 `title`、`frame`、`backdrop`、`power` 和当前名次对应的
 `promoted`/`demoted` 标记；`me` 对象也带 `power`。`power` 为 `null` 表示该玩家
-还没有任何可用周，不伪造 1000。榜单不返回内部 `kind`、`is_ai`、target、source key、
-channel_id 或原始秒数。成员按 XP 降序排名。战力只是派生展示字段，不改变排名、
+还没有任何可用周，不伪造 1000。榜单不返回 player `kind` / `is_ai`、target、source
+key、channel_id 或原始秒数。成员按 XP 降序排名。战力只是派生展示字段，不改变排名、
 分组、升降级或结算。
 
 ### `GET /v1/league/history`
@@ -793,7 +788,8 @@ AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 A
 ```
 
 `GET /v1/users/{id}` 增加 `equipped_title`、`frame`、`backdrop`、`badge_accent`。
-公开响应不返回内部 `kind` 或 `is_ai`。AI 的 loadout 由稳定 taste 从它已解锁的项中选择，不读取实时 XP。
+公开响应不返回 player `kind` 或 `is_ai`。来源玩家的 loadout 由稳定 taste 从已解锁的项
+中选择，不读取实时 XP；本地账号的 loadout 保持用户选择。
 
 ## 余烬与打卡
 
@@ -1846,8 +1842,8 @@ paid_stake`，`free_stake = 20`，`paid_stake` 原样保存；下注只扣 `paid
 `followers_count`、`following_count`、`comparison` 和 `recent_xp`。未知 user_id
 返回 `404`；无 token 返回 `401`。
 
-`handle` 只对本地人类账号返回其 `user_id`；Channel/AI 玩家返回 `null`，前端不得把
-随机 `ch-...` 标识当作 handle 展示。`power` 是公开的当前战力，没有可用周数据时为
+`handle` 只对本地账号返回其 `user_id`；Channel 玩家返回 `null`，前端不得把随机
+`ch-...` 标识当作 handle 展示。`power` 是公开的当前战力，没有可用周数据时为
 `null`。
 
 `comparison` 在查看自己时为 `null`（前端不渲染“我和我对比”），查看他人时稳定返回：

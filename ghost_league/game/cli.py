@@ -43,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reset.add_argument("--at")
 
-    seed = sub.add_parser("seed-roster", help="bind AI players to cached anchors")
+    seed = sub.add_parser("seed-roster", help="bind source players to cached anchors")
     seed.add_argument("--db", default=str(DEFAULT_DB_PATH))
     seed.add_argument("--week", required=True)
     seed.add_argument("--count", type=int, default=14)

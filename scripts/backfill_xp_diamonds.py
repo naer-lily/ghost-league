@@ -37,10 +37,10 @@ BACKFILL_KEY_PREFIX = "xp-diamond-backfill-v1"
 
 def _players_with_lifetime_xp(conn) -> list[Any]:
     return conn.execute(
-        "SELECT p.id AS player_id, p.kind AS kind, "
+        "SELECT p.id AS player_id, "
         "COALESCE(SUM(w.xp), 0) AS lifetime_xp "
         "FROM weekly_scores w JOIN players p ON p.id = w.player_id "
-        "GROUP BY p.id, p.kind ORDER BY p.id"
+        "GROUP BY p.id ORDER BY p.id"
     ).fetchall()
 
 
@@ -72,16 +72,13 @@ def backfill_xp_diamonds(
             shortfall = target - already_credited
             entry: dict[str, Any] = {
                 "player_id": player_id,
-                "kind": str(row["kind"]),
                 "lifetime_xp": lifetime_xp,
                 "target": target,
                 "already_credited": already_credited,
                 "shortfall": shortfall,
                 "credited": 0,
             }
-            if str(row["kind"]) != "human":
-                entry["status"] = "skipped_non_human"
-            elif shortfall <= 0:
+            if shortfall <= 0:
                 entry["status"] = "up_to_date"
             elif dry_run:
                 entry["status"] = "would_credit"
@@ -151,10 +148,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(
                 f"{player_id}: +{entry['credited']} diamonds (target {target})"
             )
-        elif status == "up_to_date":
-            print(f"{player_id}: 0 (target {target})")
         else:
-            print(f"{player_id}: skipped non-human (target {target})")
+            print(f"{player_id}: 0 (target {target})")
     prefix = "dry-run" if result["dry_run"] else "backfill"
     print(
         f"{prefix}: {result['credited']} diamonds to "

@@ -369,9 +369,7 @@ def rival_outcome(my_xp: int, rival_xp: int) -> str:
     return OUTCOME_DRAW
 
 
-def rival_reward(outcome: str, *, is_human: bool) -> int:
-    if not is_human:
-        return 0
+def rival_reward(outcome: str) -> int:
     if outcome == OUTCOME_WIN:
         return RIVAL_WIN_REWARD
     if outcome == OUTCOME_DRAW:

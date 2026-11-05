@@ -136,7 +136,7 @@ def test_978_channel_players_form_66_balanced_groups_and_replay_is_idempotent(
     assert human_group is not None
     human_members = store.group_members(int(human_group["id"]))
     assert len(human_members) == 15
-    assert all(member["kind"] == "human" for member in human_members)
+    assert all(member["is_human"] == 1 for member in human_members)
     members = flat_members(with_human)
     assert len(members) == 979
     assert len(set(members)) == 979
@@ -163,7 +163,7 @@ def test_1000_channel_players_plus_one_human_form_67_groups(tmp_path) -> None:
     assert human_group is not None
     human_members = store.group_members(int(human_group["id"]))
     assert len(human_members) == 15
-    assert all(member["kind"] == "human" for member in human_members)
+    assert all(member["is_human"] == 1 for member in human_members)
     assert len(set(flat_members(groups))) == 1001
 
 

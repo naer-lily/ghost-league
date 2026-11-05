@@ -46,7 +46,6 @@ def make_store(tmp_path: Path) -> GameStore:
 def add_player(store: GameStore, player_id: str) -> None:
     store.create_player(
         player_id,
-        kind="human",
         display_name=player_id,
         joined_week=WEEK,
         now=datetime(2026, 11, 2, 8, 0, 0, tzinfo=TZ),
