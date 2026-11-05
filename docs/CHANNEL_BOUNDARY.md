@@ -217,8 +217,8 @@ python3 -m waka_channel.cli tick
   不存在 `SOURCE_AI`。
 - live 服务已配置 provisioning token，`/v1/provisioning/accounts` 已启用并鉴权；
   token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），不打印、
-  不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074 个普通账号，但还没有
-  常驻 scheduler 或完整行为策略。见 [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
+  不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074 个普通账号，并已有
+  `serve` 常驻 scheduler；完整行为策略仍待后续。见 [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
 
 ## Player identity live migration
 

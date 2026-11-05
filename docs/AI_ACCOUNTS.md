@@ -167,7 +167,8 @@ V1 policy:
   tick from double-buying.
 - No bets, tasks, rival selection or multi-account coordination.
 - No Ghost DB access and no private endpoints.
-- CLI-driven only: there is no resident scheduler or full behavior policy yet.
+- `serve` runs the tick loop residently; the behavior policy itself is still deliberately
+  small.
 
 ## Current scope and remaining cleanup
 
@@ -190,8 +191,8 @@ Remaining cleanup:
   environment and `ai_channel/config.json` (both `0600`, untracked), so
   `ai_channel` can use the route and its token DB already holds the 1074
   ordinary accounts. Keep the token out of logs and Git.
-- `ai_channel/` has tokens and a CLI, but there is no resident scheduler or
-  full behavior policy yet.
+- `ai_channel/` has tokens, one-shot commands and a resident `serve` loop;
+  a full behavior policy remains future work.
 
 The long-term design remains in the `ghost-league` skill reference
 `references/agent-symmetry.md`.

@@ -11,9 +11,12 @@ from typing import Any
 import pytest
 
 from ai_channel.cli import (
+    DEFAULT_SERVE_PREFIX,
+    build_parser,
     list_accounts,
     next_user_ids,
     provision_accounts,
+    serve,
     tick,
 )
 from ai_channel.client import AIClient, AIChannelHTTPError
@@ -264,3 +267,132 @@ def test_next_user_ids_continues_existing_sequence() -> None:
         "sim-0004",
         "sim-0005",
     ]
+
+
+def test_store_prefix_filter_is_exact_and_escapes_like_wildcards(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    _seed(store, "sim-0001", "token-sim-one")
+    _seed(store, "sim-0002", "token-sim-two")
+    _seed(store, "sim_0001", "token-underscore")
+    _seed(store, "ch-waka-0001", "token-waka")
+
+    assert [row["user_id"] for row in store.list_accounts("sim-")] == [
+        "sim-0001",
+        "sim-0002",
+    ]
+    assert [row["user_id"] for row in store.list_accounts("sim_")] == [
+        "sim_0001"
+    ]
+    assert [row["user_id"] for row in store.list_accounts("ch-")] == [
+        "ch-waka-0001"
+    ]
+    assert len(store.list_accounts()) == 4
+    assert [row["user_id"] for row in store.list_accounts("sim-", include_tokens=True)] == [
+        "sim-0001",
+        "sim-0002",
+    ]
+
+
+def test_parser_accepts_serve_and_prefix_filters() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["serve", "--config", "config.json"])
+    assert args.command == "serve"
+    assert args.config == "config.json"
+    assert args.interval == 3600
+    assert args.seconds is None
+    assert args.buy_stars is False
+    assert args.prefix == DEFAULT_SERVE_PREFIX == "sim-"
+    assert args.cycles == 0
+    assert args.at is None
+
+    tick_args = parser.parse_args(["tick", "--prefix", "sim-"])
+    assert tick_args.command == "tick"
+    assert tick_args.prefix == "sim-"
+    assert parser.parse_args(["tick"]).prefix is None
+
+    list_args = parser.parse_args(["list", "--prefix", "sim-"])
+    assert list_args.command == "list"
+    assert list_args.prefix == "sim-"
+
+
+def test_serve_empty_prefix_makes_no_http_request(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed(store, "ch-waka-0001", "waka-account-token")
+    client = FakeClient()
+    lines: list[str] = []
+
+    summary = serve(
+        client,
+        store,
+        interval=3600,
+        seconds=900,
+        prefix="sim-",
+        cycles=1,
+        at=AT,
+        out=lines.append,
+    )
+
+    assert summary["cycles"] == 1
+    assert summary["accounts"] == 0
+    assert summary["increments"] == 0
+    assert client.increment_calls == []
+    assert client.status_calls == []
+    assert client.shop_calls == []
+    assert client.purchase_calls == []
+    output = "\n".join(lines)
+    assert "accounts=0" in output
+    assert "waka-account-token" not in output
+
+
+def test_tick_prefix_only_touches_matching_accounts(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed(store, "sim-0001", "token-sim-one")
+    _seed(store, "sim-0002", "token-sim-two")
+    _seed(store, "ch-waka-0001", "token-waka")
+    client = FakeClient()
+
+    summary = tick(
+        client,
+        store,
+        seconds=900,
+        prefix="sim-",
+        at=AT,
+        out=lambda _line: None,
+    )
+
+    assert summary["accounts"] == 2
+    assert summary["increments"] == 2
+    assert [call[0] for call in client.increment_calls] == [
+        "token-sim-one",
+        "token-sim-two",
+    ]
+
+
+@pytest.mark.parametrize("interval", [0, -1])
+def test_serve_rejects_invalid_interval(tmp_path: Path, interval: int) -> None:
+    store = _store(tmp_path)
+    with pytest.raises(ValueError, match="interval"):
+        serve(
+            FakeClient(),
+            store,
+            interval=interval,
+            seconds=900,
+            cycles=1,
+            out=lambda _line: None,
+        )
+
+
+@pytest.mark.parametrize("seconds", [0, -1])
+def test_serve_rejects_invalid_seconds(tmp_path: Path, seconds: int) -> None:
+    store = _store(tmp_path)
+    with pytest.raises(ValueError, match="seconds"):
+        serve(
+            FakeClient(),
+            store,
+            interval=3600,
+            seconds=seconds,
+            cycles=1,
+            out=lambda _line: None,
+        )

@@ -100,14 +100,34 @@ class StateStore:
             ).fetchone()
         return dict(row) if row is not None else None
 
-    def list_accounts(self, *, include_tokens: bool = False) -> list[dict[str, Any]]:
+    def list_accounts(
+        self,
+        prefix: str | None = None,
+        *,
+        include_tokens: bool = False,
+    ) -> list[dict[str, Any]]:
+        """List accounts, optionally restricted to a ``user_id`` prefix.
+
+        Filtering happens in SQLite so a resident run never loads unrelated
+        account tokens (for example Waka channel rows) even transiently.
+        ``%`` / ``_`` in the prefix are treated literally.
+        """
+
+        if prefix is not None and not isinstance(prefix, str):
+            raise ValueError("prefix must be a string or None")
         columns = "user_id, display_name, created_at"
         if include_tokens:
             columns += ", token"
+        query = f"SELECT {columns} FROM accounts"
+        parameters: tuple[Any, ...] = ()
+        if prefix is not None:
+            # ``substr`` keeps the prefix comparison case-sensitive and treats
+            # LIKE wildcards such as ``_`` as ordinary characters.
+            query += " WHERE substr(user_id, 1, ?) = ?"
+            parameters = (len(prefix), prefix)
+        query += " ORDER BY created_at, user_id"
         with closing(self._connect()) as connection:
-            rows = connection.execute(
-                f"SELECT {columns} FROM accounts ORDER BY created_at, user_id"
-            ).fetchall()
+            rows = connection.execute(query, parameters).fetchall()
         return [dict(row) for row in rows]
 
     def record_run(

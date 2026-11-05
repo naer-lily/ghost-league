@@ -1,14 +1,16 @@
 """CLI for the account-backed AI channel.
 
 Commands only use Ghost's public HTTP API.  Tokens live in the local state DB
-and are never printed by ``list``, ``provision`` or ``tick``.
+and are never printed by ``list``, ``provision``, ``tick`` or ``serve``.
 """
 
 from __future__ import annotations
 
 import argparse
 import re
+import signal
 import sys
+import threading
 from datetime import datetime
 from typing import Any, Callable, Sequence
 
@@ -20,6 +22,9 @@ from .store import StateStore
 
 Output = Callable[[str], None]
 
+DEFAULT_SERVE_INTERVAL_SECONDS = 3600
+DEFAULT_SERVE_PREFIX = "sim-"
+
 
 def _valid_prefix(prefix: str) -> str:
     if not isinstance(prefix, str) or not prefix:
@@ -29,6 +34,18 @@ def _valid_prefix(prefix: str) -> str:
             "prefix may contain letters, digits, dot, underscore and dash"
         )
     return prefix
+
+
+def _validate_optional_prefix(prefix: str | None) -> str | None:
+    if prefix is None:
+        return None
+    return _valid_prefix(prefix)
+
+
+def _positive_int(name: str, value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
 
 
 def next_user_ids(
@@ -83,10 +100,16 @@ def provision_accounts(
     return created
 
 
-def list_accounts(store: StateStore, *, out: Output = print) -> list[dict[str, Any]]:
+def list_accounts(
+    store: StateStore,
+    *,
+    prefix: str | None = None,
+    out: Output = print,
+) -> list[dict[str, Any]]:
     """Print account ids and names only; tokens never leave the store silently."""
 
-    accounts = store.list_accounts()
+    prefix = _validate_optional_prefix(prefix)
+    accounts = store.list_accounts(prefix)
     out("user_id\tdisplay_name")
     for account in accounts:
         out(f"{account['user_id']}\t{account['display_name']}")
@@ -100,14 +123,20 @@ def tick(
     seconds: int,
     buy_stars: bool = False,
     at: datetime | str | None = None,
+    prefix: str | None = None,
     out: Output = print,
 ) -> dict[str, Any]:
-    """Send one hourly increment per account, then optionally buy a star."""
+    """Send one hourly increment per matching account, then buy stars.
 
-    if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds <= 0:
-        raise ValueError("seconds must be a positive integer")
+    ``prefix=None`` keeps the one-shot default of every local account.  The
+    resident ``serve`` command defaults to ``sim-`` instead so Waka channel
+    tokens stored in the same local DB are never touched.
+    """
+
+    seconds = _positive_int("seconds", seconds)
+    prefix = _validate_optional_prefix(prefix)
     moment = parse_at(at)
-    accounts = store.list_accounts(include_tokens=True)
+    accounts = store.list_accounts(prefix, include_tokens=True)
     summary: dict[str, Any] = {
         "at": moment.isoformat(),
         "accounts": len(accounts),
@@ -194,6 +223,115 @@ def tick(
     return summary
 
 
+def _install_stop_handlers(stop_event: threading.Event) -> dict[int, Any]:
+    """Turn SIGINT/SIGTERM into a flag so the wait loop can unwind cleanly."""
+
+    previous: dict[int, Any] = {}
+    if threading.current_thread() is not threading.main_thread():
+        return previous
+
+    def _stop(_signum: int, _frame: Any) -> None:
+        stop_event.set()
+
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        try:
+            previous[signum] = signal.getsignal(signum)
+            signal.signal(signum, _stop)
+        except (ValueError, OSError):  # pragma: no cover - platform dependent
+            continue
+    return previous
+
+
+def _restore_stop_handlers(previous: dict[int, Any]) -> None:
+    for signum, handler in previous.items():
+        try:
+            signal.signal(signum, handler)
+        except (ValueError, OSError):  # pragma: no cover - platform dependent
+            continue
+
+
+def serve(
+    client: AIClient,
+    store: StateStore,
+    *,
+    interval: int = DEFAULT_SERVE_INTERVAL_SECONDS,
+    seconds: int,
+    buy_stars: bool = False,
+    prefix: str | None = DEFAULT_SERVE_PREFIX,
+    cycles: int = 0,
+    at: datetime | str | None = None,
+    out: Output = print,
+    stop_event: threading.Event | None = None,
+) -> dict[str, Any]:
+    """Run ``tick`` every ``interval`` seconds until stopped or cycles end.
+
+    ``cycles=0`` is the resident service mode (run forever).  Bounded runs are
+    for tests and manual dry runs; the last cycle never sleeps, so
+    ``--cycles 1`` returns immediately.  An empty account set costs no HTTP
+    request at all: ``tick`` still logs its zero summary, then the loop waits.
+    """
+
+    interval = _positive_int("interval", interval)
+    seconds = _positive_int("seconds", seconds)
+    if isinstance(cycles, bool) or not isinstance(cycles, int) or cycles < 0:
+        raise ValueError("cycles must be a non-negative integer")
+    prefix = _validate_optional_prefix(prefix)
+    moment = parse_at(at)
+
+    event = stop_event if stop_event is not None else threading.Event()
+    handlers = _install_stop_handlers(event)
+    totals: dict[str, Any] = {
+        "cycles": 0,
+        "prefix": prefix,
+        "interval": interval,
+        "accounts": 0,
+        "increments": 0,
+        "duplicates": 0,
+        "purchases": 0,
+        "errors": 0,
+    }
+    try:
+        while not event.is_set():
+            if cycles and totals["cycles"] >= cycles:
+                break
+            summary = tick(
+                client,
+                store,
+                seconds=seconds,
+                buy_stars=buy_stars,
+                at=moment,
+                prefix=prefix,
+                out=out,
+            )
+            totals["cycles"] += 1
+            for key in (
+                "accounts",
+                "increments",
+                "duplicates",
+                "purchases",
+                "errors",
+            ):
+                totals[key] += int(summary.get(key, 0))
+            out(
+                f"serve: cycle={totals['cycles']} prefix={prefix or '*'} "
+                f"accounts={summary['accounts']} increments={summary['increments']} "
+                f"purchases={summary['purchases']} errors={summary['errors']}"
+            )
+            if cycles and totals["cycles"] >= cycles:
+                break
+            if event.wait(interval):
+                break
+    finally:
+        _restore_stop_handlers(handlers)
+    out(
+        f"serve: stopped cycles={totals['cycles']} prefix={prefix or '*'} "
+        f"accounts={totals['accounts']} increments={totals['increments']} "
+        f"duplicates={totals['duplicates']} purchases={totals['purchases']} "
+        f"errors={totals['errors']}"
+    )
+    return totals
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m ai_channel")
     parser.add_argument(
@@ -212,6 +350,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     listing = subparsers.add_parser("list", help="list account ids and names")
     listing.add_argument("--config", default="config.json")
+    listing.add_argument(
+        "--prefix",
+        default=None,
+        help="only show user ids with this prefix",
+    )
 
     tick_parser = subparsers.add_parser(
         "tick", help="send one increment per account and optionally buy a star"
@@ -225,6 +368,45 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tick_parser.add_argument("--buy-stars", action="store_true")
     tick_parser.add_argument(
+        "--prefix",
+        default=None,
+        help="only tick user ids with this prefix (default: all accounts)",
+    )
+    tick_parser.add_argument(
+        "--at",
+        default=None,
+        help="ISO-8601 simulation time (default: now)",
+    )
+
+    serve_parser = subparsers.add_parser(
+        "serve", help="run tick every interval until SIGINT/SIGTERM"
+    )
+    serve_parser.add_argument("--config", default="config.json")
+    serve_parser.add_argument(
+        "--interval",
+        type=int,
+        default=DEFAULT_SERVE_INTERVAL_SECONDS,
+        help="seconds between ticks (default: 3600)",
+    )
+    serve_parser.add_argument(
+        "--seconds",
+        type=int,
+        default=None,
+        help="increment seconds (default: config default_seconds)",
+    )
+    serve_parser.add_argument("--buy-stars", action="store_true")
+    serve_parser.add_argument(
+        "--prefix",
+        default=DEFAULT_SERVE_PREFIX,
+        help="only tick user ids with this prefix (default: sim-)",
+    )
+    serve_parser.add_argument(
+        "--cycles",
+        type=int,
+        default=0,
+        help="bounded number of ticks; 0 means forever (default: 0)",
+    )
+    serve_parser.add_argument(
         "--at",
         default=None,
         help="ISO-8601 simulation time (default: now)",
@@ -255,7 +437,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 prefix=args.prefix,
             )
         elif args.command == "list":
-            list_accounts(store)
+            list_accounts(store, prefix=args.prefix)
         elif args.command == "tick":
             seconds = (
                 config.default_seconds if args.seconds is None else args.seconds
@@ -265,6 +447,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 store,
                 seconds=seconds,
                 buy_stars=bool(args.buy_stars),
+                at=args.at,
+                prefix=args.prefix,
+            )
+            if summary["errors"]:
+                return 1
+        elif args.command == "serve":
+            seconds = (
+                config.default_seconds if args.seconds is None else args.seconds
+            )
+            summary = serve(
+                client,
+                store,
+                interval=args.interval,
+                seconds=seconds,
+                buy_stars=bool(args.buy_stars),
+                prefix=args.prefix,
+                cycles=args.cycles,
                 at=args.at,
             )
             if summary["errors"]:
@@ -289,5 +488,6 @@ __all__ = [
     "main",
     "next_user_ids",
     "provision_accounts",
+    "serve",
     "tick",
 ]
