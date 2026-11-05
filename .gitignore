@@ -27,6 +27,10 @@ data/api.backup-*/
 data/widgets/*
 !data/widgets/.gitkeep
 
+# Print queue SQLite/WAL runtime data; only the directory marker is tracked.
+print-service/data/*
+!print-service/data/.gitkeep
+
 
 # Internal TLS leaf certificate and private key stay local.
 deploy/tls/

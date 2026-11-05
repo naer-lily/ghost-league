@@ -169,6 +169,19 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
 - 详细 schema、条件规则、v2→v3 迁移、API 表、生产 URL 和测试命令见
   [`docs/WIDGET_STUDIO.md`](docs/WIDGET_STUDIO.md)。
 
+## Thermal printing
+
+`print-service/` 是独立的 FastAPI + SQLite 打印队列（租约、重试、去重、补打、
+打印机心跳），只接收已经渲染好的 ESC/POS 字节；`print-daemon/` 是仅用标准库的
+PC 端守护进程，轮询服务、认领任务并通过 TCP 9100 直接打印。服务端不连接打印机，
+打印机不需要暴露到公网。
+
+- 服务端入口：`print_service.app:create_app`；生产使用独立 token 和独立数据库。
+- 客户端：`python -m print_daemon --config config.json`，支持 `--once` 和
+  `--print-test`，Windows 可用 Task Scheduler 或 NSSM。
+- 完整架构、鉴权边界、状态机、API 和部署说明见
+  [`docs/PRINT_QUEUE.md`](docs/PRINT_QUEUE.md)。
+
 ## 数据与隐私
 
 仓库只包含代码、文档和通用示例，**不提交**：
@@ -202,6 +215,8 @@ ghost_league/
   fetch.py            # 公开榜抓取（只写 cache）
   runtime_jobs.py     # 调度任务与 Channel/Source 的运行时装配
 waka_channel/         # 独立 WakaTime Channel 包
+print-service/        # 独立 FastAPI + SQLite 打印队列（ESC/POS 原始字节）
+print-daemon/         # PC 端纯标准库打印守护进程
 web/                  # 旧 PWA 静态资源（生产默认入口，保留回滚；含 web/widget-studio/）
 frontend/             # 星图前端 React/TypeScript 源码
 web-next/             # frontend 构建产物（gitignore；切流时由 pwa.py 挂载）
