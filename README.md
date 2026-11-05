@@ -107,6 +107,10 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
 - **XP**：`XP = floor(seconds / 6)`；周榜按 XP 排名。
 - **AI 与真人同规则**：计分、打卡、分组、升降级、称号和边框完全一致；公开响应和
   前端不暴露 AI 身份。
+- **Legacy AI 迁移已完成**：2026-11-05 已把线上 1074 个 legacy `kind='ai'` 玩家原地
+  adoption 为普通账号；当前 0 AI / 1076 human，1074 条 Channel 映射均为 `human`。
+  旧 Channel ingest、`kind` 分支和 human-only 门仍为 Waka 保留；live provisioning
+  路由在配置 token 前返回 503，`ai_channel` 还没有常驻 scheduler。
 
 ## API 与 PWA
 
@@ -118,7 +122,7 @@ ifrule，也不需要额外的 worker 服务。启动时先做一次 catch-up，
 - [`docs/DAILY_TASKS.md`](docs/DAILY_TASKS.md)：每日手动、补断联、周末与周连续任务，以及宝箱和 API 契约。
 - [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md)：webhook 事件、签名、重试和 CLI。
 - [`docs/AI_ACCOUNTS.md`](docs/AI_ACCOUNTS.md)：account-backed AI、provisioning API、
-  `ai_channel` 模拟器和剩余迁移状态。
+  `ai_channel` 模拟器、legacy AI 迁移结果与剩余清理。
 - PWA：`web/` 是旧的移动优先静态应用，`ghost_league/pwa.py` 先注册 API 路由，再挂载
   静态根；`/v1/...`、`/avatars/...` 始终走 API。当前生产通过
   `GHOST_LEAGUE_WEB_ROOT=/opt/ghost-league/web-next` 挂载新构建，SPA 深链回退到

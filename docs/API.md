@@ -83,8 +83,9 @@ token 只以 SHA-256 哈希保存在 `data/api/accounts.db`，不会出现在 AP
 账号 provisioning 接口使用**独立的 provisioning token**（环境变量
 `GHOST_LEAGUE_PROVISIONING_TOKEN`），只负责创建普通账号并一次性返回账号 token。
 它不能调用 `/v1/me/*`，普通账号 token 也不能调用 provisioning 接口；未配置时返回
-`503 service_token_not_configured`。账号创建后第一次调用 `/v1/me/*` 仍走普通真人
-路径，不写入 AI 标记。
+`503 service_token_not_configured`。live 服务当前未配置该 token，因此线上 provisioning
+路由返回 503，直到运维补上。账号创建后第一次调用 `/v1/me/*` 仍走普通真人路径，
+不写入 AI 标记。
 
 请求体：
 
@@ -106,8 +107,9 @@ token 只以 SHA-256 哈希保存在 `data/api/accounts.db`，不会出现在 AP
   历史、小组关系和 `channel_players` 映射，并补建钻石钱包。返回的仍是普通账号
   token，之后第一次 `/v1/me/*` 走普通真人路径。
 - 玩家不存在返回 `404`；玩家已经是真人返回 `409 player already human`；已有账号
-  （包括重复 adoption）返回 `409`；owner 返回 `422`。adoption 是一次一个玩家的
-  迁移原语，不是全量迁移。
+  （包括重复 adoption）返回 `409`；owner 返回 `422`。adoption 按玩家原地执行，
+  可对不同玩家重复调用；2026-11-05 的线上迁移已用它把 1074 个 legacy AI 玩家全部
+  转为普通账号，当前线上是 0 AI / 1076 human，1074 条 Channel 映射均为 `human`。
 
 账号管理：
 
@@ -313,6 +315,8 @@ player 数组。
 
 - `kind` 只落库/用于身份投影，不参与计分或分组；
 - 同一 `player_ref` 在不同 `channel_id` 下是不同 player；
+- 已存在的 human 映射不会被后续 roster 中的 `kind='ai'` 降级；新映射仍按传入
+  `kind` 创建；
 - profile 只存展示快照，更新 profile 不换 `player_id`、不改历史分数；
 - AI 的 `display_name` / `avatar_url` 从 Channel profile 读取；真人仍优先本地账号资料；
 - 外部 `avatar_url` 不写入 `players` 表，也不作为游戏输入；
@@ -985,7 +989,8 @@ resolver，`source` 即其 `checkin_source`；该接口用于 PWA 列出最近�
   而变化；钻石钱包现在由同一条 lifetime XP 规则写入真账本。
 - `diamonds` 是独立钻石钱包余额。新真人钱包初始 1000，`diamond_cap` 初始 1000、
   `diamond_cap_level` 初始 0。旧库中已有钱包保留余额并补 1000 上限；没有钱包记录的
-  真人补 1000/1000。AI 没有钱包。XP 里程碑、宿敌奖励、下注派彩和管理命令都会充值。
+  真人补 1000/1000。新建的 `kind='ai'` 玩家仍没有钱包。XP 里程碑、宿敌奖励、下注派彩
+  和管理命令都会充值。
 - XP 换钻石：每累计 10 lifetime XP 入 1 钻石，`reason='xp_milestone'`、
   `ref_type='lifetime_xp'`、`ref_id=floor(lifetime_xp / 10)`，幂等键为
   `xp-diamond:{player_id}:{milestone}`，按里程碑去重。经验宝生效时这部分钻石按当前
@@ -1037,7 +1042,7 @@ curl -sS "https://your-host.example/v1/me/status" \
 
 钻石是独立于 `gems` 的货币，只属于真人。新真人钱包初始 1000 钻石、1000 软上限；
 旧库已有钱包保留余额并补 1000 上限、0 级、`last_decay_at` 置为迁移时间；缺失的真人
-钱包补 1000/1000。AI 没有钱包、不能购买，也不会出现在他人视角。
+钱包补 1000/1000。新建的 `kind='ai'` 玩家没有钱包、不能购买，也不会出现在他人视角。
 
 钻石是**软上限**，不是硬截断：
 

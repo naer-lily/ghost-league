@@ -207,8 +207,9 @@ python3 -m waka_channel.cli tick
 - 旧 Waka 的 `kind='ai'` 玩家可以通过 provisioning 的
   `adopt_existing_player=true` 原地 adoption 成普通账号：player id、`source_key_hash`、
   XP/历史、小组关系和 `channel_players` 映射都保留，只把 `kind` / `controller` /
-  `source_kind` 改为 human 并补建钱包。adoption 是一次一个玩家的迁移原语，不删除或
-  重建 player，也不改 `channel_players`。
+  `source_kind` 改为 human 并补建钱包。该接口一次处理一个玩家；2026-11-05 的线上
+  迁移就是逐个调用它完成全部 1074 个 legacy 玩家，不删除或重建 player，也不改
+  `channel_players`。
 - adoption 后 Waka 身份查询按 `source_key_hash` 匹配、不按 `kind` 过滤；周 roster
   同步会刷新同一个玩家，不会重新造一个 AI 行。
 - 已 adoption 的 human 不会被后续 Channel roster 刷新降级：
@@ -216,14 +217,15 @@ python3 -m waka_channel.cli tick
   `last_seen_week` 和活跃状态，保持 `kind='human'` / `controller='human'` 与原
   `source_kind`，并把 `channel_players.kind` 改为 `human`；新映射仍按传入 `kind`
   创建。旧 payload 不能再把 deliberate adoption 改回 AI。
-- 2026-11-05 已将线上 1074 个 legacy `kind='ai'` 玩家通过
-  `adopt_existing_player=true` 原地 adoption 为普通账号；player id、
-  `source_key_hash`、XP/历史、小组关系和 `channel_players` 映射均保留，钱包已补建。
+- 迁移后线上 `players` 为 0 AI / 1076 human，`diamond_balance` 为 1076 个钱包；
+  player id、`source_key_hash`、XP/历史、小组关系和 `channel_players` 映射均保留。
 - 迁移时也把 1074 条 `channel_players.kind` 改成 `human`；后续 Waka roster
   刷新若再送 `kind='ai'`，已有 human 玩家不会被降级，映射也会保持 human。
 - 旧 Channel ingest 仍服务 Waka；新建的 `kind='ai'` 映射仍会创建 AI player，
-  这部分和剩余 `kind` 分支、自动 backfill 尚未清理，见
-  [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
+  旧 `kind` 分支、human-only 门和自动 backfill 尚未清理。live 服务未配置
+  provisioning token，`/v1/provisioning/accounts` 在运维补上 token 前返回
+  `503 service_token_not_configured`；`ai_channel/` 已有 token 和 CLI，但还没有
+  常驻 scheduler 或完整行为策略。见 [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
 
 ## 历史归属
 

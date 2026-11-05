@@ -70,12 +70,15 @@ backfills.
 
 ## V1 scope
 
-- Only new simulated accounts. No migration of legacy Waka `kind='ai'` rows or
-  `channel_players`.
+- The package itself only provisions new simulated accounts. The 2026-11-05
+  live migration of legacy Waka `kind='ai'` rows was completed separately
+  through the provisioning endpoint's `adopt_existing_player`; those rows are
+  now ordinary `kind='human'` accounts.
 - One XP increment per account per hour, default 900 seconds.
 - Optional one cheapest affordable star purchase per day.
 - No bets, tasks, rival selection, or multi-account coordination.
 - No direct database writes and no private Ghost endpoints.
+- CLI-driven only: there is no resident scheduler or full behavior policy yet.
 
-See [`../docs/AI_ACCOUNTS.md`](../docs/AI_ACCOUNTS.md) for the architecture and
-migration status.
+See [`../docs/AI_ACCOUNTS.md`](../docs/AI_ACCOUNTS.md) for the architecture,
+migration results and remaining cleanup.

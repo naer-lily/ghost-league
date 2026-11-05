@@ -19,7 +19,8 @@ then use the same public endpoints as everyone else.
   path (`ensure_human_player`), so the game row is `kind='human'`.
 
 This is intentionally different from the legacy Waka Channel ingest, which
-still creates anonymous `kind='ai'` players through `channel_players`.
+still exists for Waka and can create an anonymous `kind='ai'` player for a
+brand-new `channel_players` mapping.
 
 ## Provisioning API
 
@@ -32,8 +33,10 @@ It never falls back to the owner, bootstrap or Channel token. The route
 compares with `hmac.compare_digest`.
 
 If no provisioning token is configured, the route returns
-`503 service_token_not_configured`. Missing or wrong credentials with a
-configured token return `401`.
+`503 service_token_not_configured`. That is the current live state: the
+service has no provisioning token, so the live provisioning route stays
+unavailable until an operator supplies one. Missing or wrong credentials with
+a configured token return `401`.
 
 ```http
 POST /v1/provisioning/accounts
@@ -113,8 +116,9 @@ display name, `last_seen_week` and active flag are refreshed. A later payload
 with `kind='ai'` therefore cannot demote an adopted human. Brand-new mappings
 still follow the incoming `kind`.
 
-This started as a one-player migration primitive. On 2026-11-05 the live
-migration was run for every legacy AI player.
+The adoption primitive was designed for one player at a time. On 2026-11-05 the
+live migration was run for every legacy AI player by invoking it repeatedly,
+so the full migration is complete.
 
 ## Live legacy adoption (2026-11-05)
 
@@ -203,6 +207,7 @@ V1 policy:
   tick from double-buying.
 - No bets, tasks, rival selection or multi-account coordination.
 - No Ghost DB access and no private endpoints.
+- CLI-driven only: there is no resident scheduler or full behavior policy yet.
 
 ## Current scope and remaining cleanup
 
@@ -212,19 +217,27 @@ Implemented:
 - Ordinary accounts that enter the normal human game path.
 - `ai_channel/` provisioning, local token state, XP ticks and optional star
   purchases through public API calls.
-- One-player legacy adoption via `adopt_existing_player`, preserving id,
-  history, group membership and channel mapping.
-- Live adoption of all 1074 legacy AI players on 2026-11-05.
+- In-place legacy adoption via `adopt_existing_player`, preserving id, history,
+  group membership and channel mapping.
+- Live adoption of all 1074 legacy AI players on 2026-11-05; `players` is now
+  0 AI / 1076 human, `diamond_balance` has 1076 wallets, and all 1074
+  `channel_players` mappings are `kind='human'`.
+- Existing human players are protected from Channel refresh demotion.
 
 Remaining cleanup:
 
 - The legacy Channel ingest endpoints remain for Waka / external Channels and
   are still not the target path for new simulated AI.
-- Code still contains `kind`-based branches for old data and API projections;
-  there are currently no AI player rows or AI channel mappings, but the
-  branches were not deleted.
+- Code still contains `kind`-based branches and human-only gates for old data
+  and API projections; there are currently no AI player rows or AI channel
+  mappings, but the branches were not deleted.
 - Brand-new Channel mappings with `kind='ai'` still create AI players; the
   guard only protects existing adopted humans from being demoted.
+- The live service has no provisioning token configured, so
+  `/v1/provisioning/accounts` returns `503 service_token_not_configured` until
+  an operator supplies one.
+- `ai_channel/` has tokens and a CLI, but there is no resident scheduler or
+  full behavior policy yet.
 - The adoption migration was a one-off administrative run; there is no
   automatic backfill or scheduled reconciliation for future legacy rows.
 
