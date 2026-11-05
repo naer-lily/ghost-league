@@ -63,7 +63,7 @@ class TestChannelIngest:
     def teardown_method(self) -> None:
         self._temp.cleanup()
 
-    def app(self):
+    def app(self, **overrides):
         return create_app(
             game_db_path=self.game_db_path,
             cache_path=self.cache_path,
@@ -76,6 +76,7 @@ class TestChannelIngest:
             token=TOKEN,
             channel_token=CHANNEL_TOKEN,
             now_fn=lambda: NOW,
+            **overrides,
         )
 
     @contextmanager
@@ -165,6 +166,123 @@ class TestChannelIngest:
             assert response.status_code == 200, response.text
             assert response.json()["count"] == 1
             assert response.json()["players"][0]["player_ref"] == "array-ref"
+
+    def test_ai_channel_player_switch_defaults_on(self, monkeypatch) -> None:
+        monkeypatch.delenv(
+            "GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS", raising=False
+        )
+        app = self.app()
+        assert app.state.game_service.allow_new_ai_channel_players is True
+        with TestClient(app) as client:
+            response = self.post_roster(
+                client, [{"player_ref": "default-ai", "kind": "ai"}]
+            )
+            assert response.status_code == 200, response.text
+
+    def test_new_ai_channel_player_is_rejected_when_switch_is_off(self) -> None:
+        with TestClient(self.app(allow_new_ai_channel_players=False)) as client:
+            response = self.post_roster(
+                client, [{"player_ref": "blocked-ai", "kind": "ai"}]
+            )
+            assert response.status_code == 422, response.text
+            assert response.json()["detail"] == "new_ai_channel_player_disabled"
+
+        assert self.scalar(
+            "SELECT COUNT(*) FROM channel_players WHERE player_ref = 'blocked-ai'"
+        ) == 0
+        assert self.scalar("SELECT COUNT(*) FROM players WHERE kind = 'ai'") == 0
+
+    def test_switch_off_rejects_whole_roster_before_creating_new_ai(self) -> None:
+        with self.client() as client:
+            seeded = self.post_roster(client, [PLAYERS[2]])
+            assert seeded.status_code == 200, seeded.text
+            human_id = seeded.json()["players"][0]["player_id"]
+
+        with TestClient(self.app(allow_new_ai_channel_players=False)) as client:
+            response = self.post_roster(
+                client,
+                [PLAYERS[2], {"player_ref": "new-ai", "kind": "ai"}],
+            )
+            assert response.status_code == 422, response.text
+            assert response.json()["detail"] == "new_ai_channel_player_disabled"
+
+        assert self.scalar(
+            "SELECT COUNT(*) FROM channel_players WHERE player_ref = 'new-ai'"
+        ) == 0
+        assert self.scalar(
+            "SELECT COUNT(*) FROM channel_players WHERE player_id = ?",
+            (human_id,),
+        ) == 1
+
+    def test_new_human_channel_player_remains_allowed_when_switch_is_off(self) -> None:
+        with TestClient(self.app(allow_new_ai_channel_players=False)) as client:
+            response = self.post_roster(
+                client, [{"player_ref": "new-human", "kind": "human"}]
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["created"] == 1
+            player_id = response.json()["players"][0]["player_id"]
+
+        with sqlite3.connect(self.game_db_path) as connection:
+            row = connection.execute(
+                "SELECT kind, controller FROM players WHERE id = ?", (player_id,)
+            ).fetchone()
+        assert row == ("human", "human")
+
+    def test_switch_off_still_refreshes_existing_human_as_human(self) -> None:
+        with self.client() as client:
+            seeded = self.post_roster(client, [PLAYERS[2]])
+            assert seeded.status_code == 200, seeded.text
+            player_id = seeded.json()["players"][0]["player_id"]
+
+        with TestClient(self.app(allow_new_ai_channel_players=False)) as client:
+            response = self.post_roster(
+                client,
+                [
+                    {
+                        **PLAYERS[2],
+                        "kind": "ai",
+                        "profile": {"display_name": "Still Human"},
+                    }
+                ],
+            )
+            assert response.status_code == 200, response.text
+
+        with sqlite3.connect(self.game_db_path) as connection:
+            player = connection.execute(
+                "SELECT kind, controller, display_name FROM players WHERE id = ?",
+                (player_id,),
+            ).fetchone()
+            mapping_kind = connection.execute(
+                "SELECT kind FROM channel_players WHERE player_id = ?",
+                (player_id,),
+            ).fetchone()[0]
+        assert player == ("human", "human", "Still Human")
+        assert mapping_kind == "human"
+
+    def test_create_app_reads_ai_channel_switch_from_env(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS", "0")
+        app = self.app()
+        assert app.state.game_service.allow_new_ai_channel_players is False
+        with TestClient(app) as client:
+            response = self.post_roster(
+                client, [{"player_ref": "env-blocked-ai", "kind": "ai"}]
+            )
+            assert response.status_code == 422, response.text
+            assert response.json()["detail"] == "new_ai_channel_player_disabled"
+            human = self.post_roster(
+                client, [{"player_ref": "env-human", "kind": "human"}]
+            )
+            assert human.status_code == 200, human.text
+
+    def test_create_app_parameter_overrides_ai_channel_switch_env(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS", "0")
+        app = self.app(allow_new_ai_channel_players=True)
+        assert app.state.game_service.allow_new_ai_channel_players is True
 
     def test_same_player_ref_in_different_channels_does_not_conflict(self) -> None:
         player = {"player_ref": "shared-ref", "kind": "ai"}

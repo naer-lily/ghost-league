@@ -74,6 +74,10 @@ POST /v1/channels/{channel_id}/roster
 
 - roster 是**本周名单**，以 `(week_start, channel_id)` 为键全量替换；
 - 按 `(channel_id, player_ref)` 幂等创建/更新；重复 roster 不创建新 player；
+- 新建 `kind='ai'` 映射受 `GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS` 控制
+  （默认 `true`，live 为 `0`）；关闭时返回 `422`
+  `new_ai_channel_player_disabled`，已有映射和新建 `kind='human'` 映射不受影响；
+- 开关校验在写入前完成：reject 时不会先创建前面的 player，也不会替换本周名单；
 - 同一 `player_ref` 在不同 `channel_id` 下是两个不同的 Ghost player；
 - Ghost 内部 `player_id` 由 `(channel_id, player_ref)` 稳定派生，不随 profile 改变；
 - 本周不在 roster 的 player 只是不参赛；不删身份、不写 dormant/absent 状态；
@@ -215,18 +219,21 @@ python3 -m waka_channel.cli tick
 - 已 adoption 的 human 不会被后续 Channel roster 刷新降级：
   `upsert_channel_player` 刷新已存在映射时，若 `players.kind='human'`，只更新展示名、
   `last_seen_week` 和活跃状态，保持 `kind='human'` / `controller='human'` 与原
-  `source_kind`，并把 `channel_players.kind` 改为 `human`；新映射仍按传入 `kind`
-  创建。旧 payload 不能再把 deliberate adoption 改回 AI。
+  `source_kind`，并把 `channel_players.kind` 改为 `human`；新
+  `kind='human'` 映射仍按传入 `kind` 创建，新 `kind='ai'` 映射在 live switch
+  关闭时返回 `422`。旧 payload 不能再把 deliberate adoption 改回 AI。
 - 迁移后线上 `players` 为 0 AI / 1076 human，`diamond_balance` 为 1076 个钱包；
   player id、`source_key_hash`、XP/历史、小组关系和 `channel_players` 映射均保留。
 - 迁移时也把 1074 条 `channel_players.kind` 改成 `human`；后续 Waka roster
   刷新若再送 `kind='ai'`，已有 human 玩家不会被降级，映射也会保持 human。
-- 旧 Channel ingest 仍服务 Waka；新建的 `kind='ai'` 映射仍会创建 AI player，
-  旧 `kind` 分支、human-only 门和自动 backfill 尚未清理。live 服务已配置
-  provisioning token，`/v1/provisioning/accounts` 已启用并鉴权；token 只在服务 env
-  与 `ai_channel/config.json`（均 0600、Git-ignored），不打印、不提交。`ai_channel/`
-  可用该路由，本地 token DB 已有 1074 个 adopted 账号，但还没有常驻 scheduler 或
-  完整行为策略。见 [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
+- 旧 Channel ingest 仍服务 Waka；新建 `kind='ai'` 映射已被 live switch
+  `GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS=0` 关闭（测试/dev 默认 on），legacy
+  code path 仍留在代码里供测试。旧 `kind` 分支、human-only 门和自动 backfill
+  尚未清理。live 服务已配置 provisioning token，`/v1/provisioning/accounts`
+  已启用并鉴权；token 只在服务 env 与 `ai_channel/config.json`（均 0600、
+  Git-ignored），不打印、不提交。`ai_channel/` 可用该路由，本地 token DB 已有
+  1074 个 adopted 账号，但还没有常驻 scheduler 或完整行为策略。见
+  [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
 
 ## 历史归属
 

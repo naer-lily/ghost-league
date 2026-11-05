@@ -56,6 +56,7 @@ from .game.rules import (
     DuplicateIdempotencyKey,
     GameError,
     InsufficientDiamonds,
+    NewAIChannelPlayerDisabled,
     PlayerNotFound,
     RepairRejected,
     ShopCooldown,
@@ -112,6 +113,15 @@ TASK_PROOF_LONG_EDGE_STEPS = (2400, 1600, 1200, 800)
 MAX_TASK_PROOF_BYTES = 1_000_000
 MAX_TASK_PROOF_UPLOAD_BYTES = 8 * 1024 * 1024
 SAFE_USER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """Read a boolean environment switch; blank or unset keeps ``default``."""
+
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
 class FutureTimestampError(ValueError):
@@ -579,6 +589,7 @@ class GameService:
         secret_path: str | Path = DEFAULT_SECRET_PATH,
         now_fn: Callable[[], datetime] | None = None,
         game_now_fn: Callable[[], datetime] | None = None,
+        allow_new_ai_channel_players: bool | None = None,
     ) -> None:
         self.game_db_path = Path(game_db_path)
         self.cache_path = Path(cache_path)
@@ -610,6 +621,13 @@ class GameService:
             if provisioning_token is not None
             else os.environ.get("GHOST_LEAGUE_PROVISIONING_TOKEN")
         ) or None
+        # New anonymous AI identities are a legacy Channel-ingest path.  Keep
+        # the default on for tests/dev; live deployments set the env to ``0``.
+        self.allow_new_ai_channel_players = (
+            allow_new_ai_channel_players
+            if allow_new_ai_channel_players is not None
+            else _env_flag("GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS", True)
+        )
         self.store: GameStore | None = None
         self._week_iso: str | None = None
         self._lock = threading.RLock()
@@ -1320,6 +1338,24 @@ class GameService:
         seen_refs: set[str] = set()
         created_count = 0
         with self._lock:
+            # Validate the whole roster before any upsert.  A blocked new AI
+            # identity must not leave earlier players or the weekly manifest
+            # partially applied.
+            if not self.allow_new_ai_channel_players:
+                checked_refs: set[str] = set()
+                for item in players:
+                    player_ref = str(item["player_ref"])
+                    if player_ref in checked_refs:
+                        continue
+                    checked_refs.add(player_ref)
+                    if (
+                        str(item["kind"]) == "ai"
+                        and self.store.get_channel_player(channel_id, player_ref)
+                        is None
+                    ):
+                        raise NewAIChannelPlayerDisabled(
+                            "new_ai_channel_player_disabled"
+                        )
             for item in players:
                 player_ref = str(item["player_ref"])
                 if player_ref in seen_refs:
@@ -2207,6 +2243,7 @@ def create_app(
     scheduler_tick_seconds: float = 20.0,
     scheduler_startup_grace_seconds: float = 0.25,
     scheduler_shutdown_timeout_seconds: float = 15.0,
+    allow_new_ai_channel_players: bool | None = None,
 ) -> FastAPI:
     """Application factory used by production and tests.
 
@@ -2246,6 +2283,7 @@ def create_app(
         secret_path=secret_path,
         now_fn=now_fn,
         game_now_fn=game_now_fn,
+        allow_new_ai_channel_players=allow_new_ai_channel_players,
     )
     widget_store = WidgetStore(
         widgets_dir

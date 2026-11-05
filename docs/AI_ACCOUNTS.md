@@ -19,8 +19,22 @@ then use the same public endpoints as everyone else.
   path (`ensure_human_player`), so the game row is `kind='human'`.
 
 This is intentionally different from the legacy Waka Channel ingest, which
-still exists for Waka and can create an anonymous `kind='ai'` player for a
-brand-new `channel_players` mapping.
+still exists for Waka and retains a test/dev code path that can create an
+anonymous `kind='ai'` player for a brand-new `channel_players` mapping. Live
+deployments disable that path with
+`GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS=0`; the switch defaults to on for
+tests/dev.
+
+## New AI Channel mapping switch
+
+`GameService` / `create_app` expose `allow_new_ai_channel_players`, backed by
+`GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS` (default `true`; the live service
+sets `0`). When off, `POST /v1/channels/{channel_id}/roster` rejects a
+brand-new `kind='ai'` mapping with `422` and detail
+`new_ai_channel_player_disabled`. The whole roster is validated before any
+upsert, so a rejected request does not partially apply players or the weekly
+manifest. Existing mappings still refresh (and the existing guard keeps
+adopted humans human), and brand-new `kind='human'` mappings remain allowed.
 
 ## Provisioning API
 
@@ -112,8 +126,9 @@ Adoption is also protected from Channel refreshes. When
 `kind='human'`, it keeps `kind='human'` and `controller='human'`, leaves
 `source_kind` untouched, and marks the mapping row `kind='human'`; only the
 display name, `last_seen_week` and active flag are refreshed. A later payload
-with `kind='ai'` therefore cannot demote an adopted human. Brand-new mappings
-still follow the incoming `kind`.
+with `kind='ai'` therefore cannot demote an adopted human. Brand-new
+`kind='human'` mappings remain allowed; a brand-new `kind='ai'` mapping is
+rejected with `422 new_ai_channel_player_disabled` when the switch is off.
 
 The adoption primitive was designed for one player at a time. On 2026-11-05 the
 live migration was run for every legacy AI player by invoking it repeatedly,
@@ -230,8 +245,10 @@ Remaining cleanup:
 - Code still contains `kind`-based branches and human-only gates for old data
   and API projections; there are currently no AI player rows or AI channel
   mappings, but the branches were not deleted.
-- Brand-new Channel mappings with `kind='ai'` still create AI players; the
-  guard only protects existing adopted humans from being demoted.
+- Brand-new Channel mappings with `kind='ai'` are disabled by the live switch
+  (`GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS=0`; default on for tests/dev); the
+  legacy code path remains for tests, and the guard still protects existing
+  adopted humans from being demoted.
 - Live provisioning is enabled: the token is configured in the service
   environment and `ai_channel/config.json` (both `0600`, untracked), so
   `ai_channel` can use the route and its token DB already holds the 1074

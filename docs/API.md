@@ -315,8 +315,12 @@ player 数组。
 
 - `kind` 只落库/用于身份投影，不参与计分或分组；
 - 同一 `player_ref` 在不同 `channel_id` 下是不同 player；
-- 已存在的 human 映射不会被后续 roster 中的 `kind='ai'` 降级；新映射仍按传入
-  `kind` 创建；
+- 已存在的 human 映射不会被后续 roster 中的 `kind='ai'` 降级；
+- 新建 `kind='ai'` 映射由 `GHOST_LEAGUE_ALLOW_NEW_AI_CHANNEL_PLAYERS` 控制
+  （也可用 `create_app(allow_new_ai_channel_players=...)`；默认 `true`，live
+  为 `0`）。关闭时整份 roster 在任何写入前返回 `422`，detail 为
+  `new_ai_channel_player_disabled`，不会创建前面的 player，也不会替换本周名单；
+- 新建 `kind='human'` 映射始终允许，已有映射仍可刷新；
 - profile 只存展示快照，更新 profile 不换 `player_id`、不改历史分数；
 - AI 的 `display_name` / `avatar_url` 从 Channel profile 读取；真人仍优先本地账号资料；
 - 外部 `avatar_url` 不写入 `players` 表，也不作为游戏输入；
@@ -989,8 +993,8 @@ resolver，`source` 即其 `checkin_source`；该接口用于 PWA 列出最近�
   而变化；钻石钱包现在由同一条 lifetime XP 规则写入真账本。
 - `diamonds` 是独立钻石钱包余额。新真人钱包初始 1000，`diamond_cap` 初始 1000、
   `diamond_cap_level` 初始 0。旧库中已有钱包保留余额并补 1000 上限；没有钱包记录的
-  真人补 1000/1000。新建的 `kind='ai'` 玩家仍没有钱包。XP 里程碑、宿敌奖励、下注派彩
-  和管理命令都会充值。
+  真人补 1000/1000。旧 Channel 路径（仅测试/dev 开启新建 AI 时）创建的
+  `kind='ai'` 玩家没有钱包。XP 里程碑、宿敌奖励、下注派彩和管理命令都会充值。
 - XP 换钻石：每累计 10 lifetime XP 入 1 钻石，`reason='xp_milestone'`、
   `ref_type='lifetime_xp'`、`ref_id=floor(lifetime_xp / 10)`，幂等键为
   `xp-diamond:{player_id}:{milestone}`，按里程碑去重。经验宝生效时这部分钻石按当前
@@ -1042,7 +1046,8 @@ curl -sS "https://your-host.example/v1/me/status" \
 
 钻石是独立于 `gems` 的货币，只属于真人。新真人钱包初始 1000 钻石、1000 软上限；
 旧库已有钱包保留余额并补 1000 上限、0 级、`last_decay_at` 置为迁移时间；缺失的真人
-钱包补 1000/1000。新建的 `kind='ai'` 玩家没有钱包、不能购买，也不会出现在他人视角。
+钱包补 1000/1000。旧 Channel 路径（仅测试/dev 开启新建 AI 时）创建的
+`kind='ai'` 玩家没有钱包、不能购买，也不会出现在他人视角。
 
 钻石是**软上限**，不是硬截断：
 
@@ -1922,7 +1927,7 @@ store 的 `daily_xp_between()` resolver 返回：该日有 `checkins` 行时取 
 | `409` | 幂等键或 `event_id` 被另一个目标占用；宿敌/下注窗口关闭、已下注、无宿敌、钻石不足 |
 | `413` | 头像超过 2MB |
 | `415` | 头像不是 PNG / JPEG / WebP |
-| `422` | 请求体校验失败、未来时间、资料名不合法、宿敌/下注参数或业务规则拒绝 |
+| `422` | 请求体校验失败、未来时间、资料名不合法、宿敌/下注参数或业务规则拒绝、新建 AI Channel 映射被 switch 拒绝 |
 
 ## 边界
 
