@@ -153,5 +153,5 @@ service or timer in the repository that starts it automatically.
 - One-shot commands plus a resident loop; behavior policy is still deliberately
   small.
 
-See [`../docs/AI_ACCOUNTS.md`](../docs/AI_ACCOUNTS.md) for the architecture,
+See [`../docs/CHANNEL_ACCOUNTS.md`](../docs/CHANNEL_ACCOUNTS.md) for the architecture,
 player-identity migration and remaining cleanup.

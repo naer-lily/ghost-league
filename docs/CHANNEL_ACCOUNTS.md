@@ -1,10 +1,10 @@
-# Account-backed AI channel (v1)
+# Channel account simulation (v1)
 
-This document describes the account-backed simulator and the Ghost player model
-it relies on. Simulated clients act through Ghost's public API using ordinary
-accounts, exactly like any other client.
+This document describes the account-backed Channel simulator and the Ghost
+player model it relies on. Simulated clients act through Ghost's public API
+using ordinary accounts, exactly like any other client.
 
-## Why account-backed clients
+## Why account-backed Channel clients
 
 Ghost has no player identity class. Its game path does not need a human / ai
 branch to produce XP, check-ins, stars, ranks or settlements. The cleanest way

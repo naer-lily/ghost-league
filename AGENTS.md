@@ -33,7 +33,7 @@ Ghost (通用联赛引擎)
   `player_ref` / `event_id` / `seconds` / `occurred_at`；未知字段（含旧 `kind`）422。
 - `group_members.is_human` 仅为兼容旧 UI 保留，所有普通成员都写 1；不得用它恢复
   新的身份分类或分支。
-- **Account-backed AI（v1）**：新模拟 AI 是普通账号，由独立 `ai_channel/` 通过
+- **Channel account simulation（v1）**：模拟客户端是普通账号，由独立 `ai_channel/` 通过
   `POST /v1/provisioning/accounts` 创建，之后只调用 `/v1/me/*` 与 `/v1/shop*`；
   账号第一次读取走既有 `ensure_human_player`，写普通 player 行。Ghost 不写 AI
   标记，也不为模拟器新增私有接口或数据库旁路。身份和策略只留在 `ai_channel/`
@@ -105,7 +105,7 @@ Ghost (通用联赛引擎)
   跑 `PYTHONPATH=. python3 scripts/migrate_player_identity.py --db data/league/league.db`
   （脚本只初始化并打印校验结果），确认 `PRAGMA integrity_check` 与玩家/映射/小组计数，
   再启动服务。回滚时停服务、恢复备份文件后回退代码。详见 `docs/CHANNEL_BOUNDARY.md`
-  与 `docs/AI_ACCOUNTS.md`。
+  与 `docs/CHANNEL_ACCOUNTS.md`。
 - live 服务已配置 provisioning token，`POST /v1/provisioning/accounts` 已启用并按
   Bearer 鉴权；token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），
   不打印、不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074 个普通账号，但

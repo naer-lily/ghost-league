@@ -273,7 +273,7 @@ Bearer 鉴权。`event_id` 在单个账号内幂等；同一账号重复发送�
 
 同一 `event_id` 重发时 `duplicate` 为 `true`，周累计不重复增加。不同账号可以使用
 相同的 `event_id`，互不影响。事件写入 `data/league/league.db` 的
-`activity_events`，按 `(player_id, event_id)` 幂等；这是人类账号路径。
+`activity_events`，按 `(player_id, event_id)` 幂等；这是本地账号路径。
 
 ## Channel ingest
 
@@ -343,9 +343,9 @@ Channel 路径使用 `channel_players` / `channel_events`，不读取旧 source 
 旧投影。旧 source 兼容代码不在 API/ingest 主路径，也不应被新增代码 import。
 
 API 启动只初始化账号、social 和 `league.db`，确保本地真人存在并建当前周记录；它不读
-`data/cache`、不创建 AI、不建组。本周名单到达后，roster 接口写入名单并调用一次
+`data/cache`、不创建 Channel player、不建组。本周名单到达后，roster 接口写入名单并调用一次
 `ensure_all_groups`，把 Channel player 与已存在的本地真人一起分组；真人晚于 roster
-到达时，下一次读取会把它补进已有组，不复制 AI、不改已有身份。
+到达时，下一次读取会把它补进已有组，不复制玩家、不改已有身份。
 
 没有 Channel roster 时是空/等待状态，不是错误：`GET /v1/me/status` 返回
 `group=null`、`group_size=0`、`rank=null`；`GET /v1/league/standings` 返回空
@@ -698,7 +698,7 @@ Body 与创建相同，只允许 owner。修改会同步当天仍为 `active` �
 ```
 
 `kind` 为 `checkin`（今日打卡）、`promoted`（本周晋级）或 `champion`（本周第一）。
-AI 回应由确定性规则生成：同一事件最多 3 个同组 AI，每个 AI 最多 1 个表情和
+同组回应由确定性规则生成：同一事件最多 3 个同组玩家，每个玩家最多 1 个表情和
 1 个标签。表情池为“盯 / 卷 / 递茶 / 记下了 / 肃然起敬 / 同行”；标签池为
 “稳 / 狠 / 慢热 / 夜航 / 爆发 / 苦行 / 手稳 / 敢冲”，标签必须能由事件本身解释。
 
@@ -1639,7 +1639,7 @@ odds = clamp(1.2, 15.0, 1.2 + 0.8 * ratio ** 1.4)
   "candidates": [
     {
       "user_id": "ch-...",
-      "display_name": "AI-1234ABCD",
+      "display_name": "Waka-1234ABCD",
       "avatar_url": null,
       "group_no": 3,
       "tier": "Bronze",
@@ -1897,7 +1897,7 @@ store 的 `daily_xp_between()` resolver 返回：该日有 `checkins` 行时取 
 - `DELETE /v1/me/follows/{user_id}`：幂等取消，成功返回 `204`。
 - `GET /v1/me/follows`、`GET /v1/me/followers`：返回用户卡片数组。
 - `GET /v1/me/friends/standings`：返回 `{week_start, members}`，成员按 XP 降序；
-  每个成员带公开的 `power` 与 `handle`（人类账号为 `user_id`，AI/Channel 为 `null`）。
+  每个成员带公开的 `power` 与 `handle`（本地账号为 `user_id`，Channel 玩家为 `null`）。
 - `GET /v1/discover/people`：只列出本地账号，不含 Channel player；排除自己。
 
 ### 公开卡片

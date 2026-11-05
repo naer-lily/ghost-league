@@ -11,15 +11,15 @@ Ghost League 是一个自托管周联赛：
 3. 数据由 Source 提供、Channel 归一化并投影成匿名小时增量；Ghost 不知道来源是
    WakaTime、Duolingo 还是 Krita。
 4. 游戏层包含打卡、余烬补签、周榜升降、称号/边框、表情和标签。
-5. 模拟玩家的行为由它自己的 Channel/客户端策略决定，可以随 XP、排名、连胜变化，
+5. Channel/客户端的模拟行为由它自己的策略决定，可以随 XP、排名、连胜变化，
    但不能反过来改 XP；强度由源数据决定，不针对用户实时调难度。
 
 ## 当前实现
 
 - Channel ingest 使用 `POST /v1/channels/{channel_id}/roster` 和
   `POST /v1/channels/{channel_id}/increments`；请求字段固定，未知字段返回 `422`。
-- Ghost 用 `(channel_id, player_ref)` 映射稳定 `player_id`；Channel 边界没有 AI 标识，
-  roster 一律创建/刷新普通 player，AI 只存在于 Channel 自己的状态里。
+- Ghost 用 `(channel_id, player_ref)` 映射稳定 `player_id`；Channel 边界没有身份标识，
+  roster 一律创建/刷新普通 player，模拟只存在于 Channel 自己的状态里。
 - 周 roster 是 `(week_start, channel_id)` 的全量名单；名单到达后
   `ensure_all_groups` 把 Channel player 与本地真人合并分组。
 - API 启动只初始化账号、social 和 `league.db`，不读 cache、不投影旧 source、不提前建组。

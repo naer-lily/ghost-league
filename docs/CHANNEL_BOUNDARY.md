@@ -199,7 +199,7 @@ python3 -m waka_channel.cli tick
 `sync-roster` 每次发送当前全量名单：新行加入，消失行本周不出现，回归行复用同一
 `player_ref`。`tick` 默认处理 `--at` 所在周，也可用 `--week-start` 显式补推上一周。
 
-## Account-backed channel (v1)
+## Channel account simulation (v1)
 
 新的模拟客户端不走 Channel ingest，而是像普通客户端一样使用账号和公开 API：
 
@@ -212,13 +212,13 @@ python3 -m waka_channel.cli tick
 - 账号第一次调用 `/v1/me/*` 时走既有 `ensure_human_player` 路径，写普通 player 行；
   Ghost 没有 player identity 列，也不写 AI 标记。provisioning 不提供
   `adopt_existing_player`。
-- Waka 仍是 Channel，其排行榜玩家是普通参赛者，不是 Ghost 级 AI 类。Waka 的
+- Waka 仍是 Channel，其排行榜玩家是普通参赛者；Ghost 没有来源身份分类。Waka 的
   provenance 常量是 `SOURCE_WAKA`（值仍为 `wakatime_public_leaderboard`），
   不存在 `SOURCE_AI`。
 - live 服务已配置 provisioning token，`/v1/provisioning/accounts` 已启用并鉴权；
   token 只在服务 env 与 `ai_channel/config.json`（均 0600、Git-ignored），不打印、
   不提交。`ai_channel/` 可用该路由，本地 token DB 已有 1074 个普通账号，并已有
-  `serve` 常驻 scheduler；完整行为策略仍待后续。见 [`AI_ACCOUNTS.md`](AI_ACCOUNTS.md)。
+  `serve` 常驻 scheduler；完整行为策略仍待后续。见 [`CHANNEL_ACCOUNTS.md`](CHANNEL_ACCOUNTS.md)。
 
 ## Player identity live migration
 
