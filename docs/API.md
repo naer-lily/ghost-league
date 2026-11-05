@@ -14,7 +14,8 @@
 ## 路由总览
 
 除特别标注外，`/v1/...` 接口都需要普通账号 Bearer token；Channel 接口使用独立
-Channel token。`/badge/...`、`/embed/...`、`/health` 和 `/avatars/...` 公开。
+Channel token；`/v1/provisioning/accounts` 使用独立的 provisioning token。
+`/badge/...`、`/embed/...`、`/health` 和 `/avatars/...` 公开。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -40,6 +41,7 @@ Channel token。`/badge/...`、`/embed/...`、`/health` 和 `/avatars/...` 公�
 | POST | `/v1/me/bets` | 下注周注、任一组注盘口或日注 |
 | GET | `/v1/me/stars/{star_id}/svg` | 自己一颗星的独属 SVG |
 | POST | `/v1/me/increments` | 写入真人活动增量 |
+| POST | `/v1/provisioning/accounts` | 受控创建普通账号（独立 provisioning token） |
 | POST | `/v1/channels/{channel_id}/roster` | Channel 全量周名单 |
 | POST | `/v1/channels/{channel_id}/increments` | Channel 小时增量 |
 | GET | `/v1/me/league` | 自己的小组与本周数据 |
@@ -77,6 +79,12 @@ Channel ingest 接口使用**独立的 Channel token**，不能复用账号 toke
 “Channel ingest”。缺失或错误 token 返回 `401`。`GET /health` 和
 `GET /avatars/{user_id}` 不需要 token。
 token 只以 SHA-256 哈希保存在 `data/api/accounts.db`，不会出现在 API 响应或日志中。
+
+账号 provisioning 接口使用**独立的 provisioning token**（环境变量
+`GHOST_LEAGUE_PROVISIONING_TOKEN`），只负责创建普通账号并一次性返回账号 token。
+它不能调用 `/v1/me/*`，普通账号 token 也不能调用 provisioning 接口；未配置时返回
+`503 service_token_not_configured`。账号创建后第一次调用 `/v1/me/*` 仍走普通真人
+路径，不写入 AI 标记。
 
 账号管理：
 
