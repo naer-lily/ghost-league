@@ -177,6 +177,47 @@ def test_duplicate_owner_and_malformed_bodies_are_rejected(tmp_path: Path) -> No
         assert blank_name.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "user_id",
+    [
+        "sim-0001",
+        "a",
+        "a" * 64,
+        "a" * 80,
+    ],
+    ids=["short", "single-character", "legacy-64", "max-80"],
+)
+def test_user_ids_up_to_80_characters_are_accepted(
+    tmp_path: Path,
+    user_id: str,
+) -> None:
+    app, _ = _make_app(tmp_path)
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/provisioning/accounts",
+            headers=_headers(PROVISIONING_TOKEN),
+            json=_payload(user_id=user_id),
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["account"]["user_id"] == user_id
+
+        status_response = client.get("/v1/me/status", headers=_headers(body["token"]))
+        assert status_response.status_code == 200, status_response.text
+        assert status_response.json()["user_id"] == user_id
+
+
+def test_81_character_user_id_is_rejected(tmp_path: Path) -> None:
+    app, _ = _make_app(tmp_path)
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/provisioning/accounts",
+            headers=_headers(PROVISIONING_TOKEN),
+            json=_payload(user_id="a" * 81),
+        )
+        assert response.status_code == 422, response.text
+
+
 def test_token_namespaces_do_not_cross_authorize(tmp_path: Path) -> None:
     app, _ = _make_app(tmp_path)
     with TestClient(app) as client:

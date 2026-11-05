@@ -99,6 +99,31 @@ def _seed_legacy_ai(game_db: Path) -> str:
     return player_id
 
 
+def _seed_legacy_ai_with_id(
+    game_db: Path,
+    player_id: str,
+    source_hash: str,
+) -> str:
+    store = GameStore(game_db, epoch_reason="test")
+    store.ensure_week(WEEK)
+    with store.transaction() as conn:
+        conn.execute(
+            "INSERT INTO players "
+            "(id, kind, controller, source_kind, source_key_hash, display_name, "
+            "joined_week, last_seen_week, created_at, is_active) "
+            "VALUES (?, 'ai', 'ai', ?, ?, 'AI-LEGACY', ?, ?, ?, 1)",
+            (
+                player_id,
+                SOURCE_AI,
+                source_hash,
+                WEEK,
+                WEEK,
+                NOW.isoformat(),
+            ),
+        )
+    return player_id
+
+
 def _payload(player_id: str, **overrides) -> dict:
     payload = {
         "user_id": player_id,
@@ -255,6 +280,52 @@ def test_adopt_ai_preserves_identity_history_and_waka_sync(tmp_path: Path) -> No
         ).fetchone()[0]
     assert player_count_after == player_count_before
     assert matching == 1
+
+
+def test_67_character_legacy_id_can_be_provisioned_and_adopted(
+    tmp_path: Path,
+) -> None:
+    legacy_id = "ch-" + "0123456789abcdef" * 4
+    assert len(legacy_id) == 67
+    player_id = _seed_legacy_ai_with_id(
+        tmp_path / "league.db",
+        legacy_id,
+        "legacy-ch-source-hash",
+    )
+    app, game_db, accounts_db = _make_app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/provisioning/accounts",
+            headers=_headers(PROVISIONING_TOKEN),
+            json=_payload(player_id),
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["account"]["user_id"] == legacy_id
+        assert body["token"]
+
+        status_response = client.get(
+            "/v1/me/status", headers=_headers(body["token"])
+        )
+        assert status_response.status_code == 200, status_response.text
+        assert status_response.json()["user_id"] == legacy_id
+
+    with sqlite3.connect(game_db) as conn:
+        kind = conn.execute(
+            "SELECT kind FROM players WHERE id = ?", (legacy_id,)
+        ).fetchone()[0]
+        wallet_count = conn.execute(
+            "SELECT COUNT(*) FROM diamond_balance WHERE player_id = ?",
+            (legacy_id,),
+        ).fetchone()[0]
+    with sqlite3.connect(accounts_db) as conn:
+        account_count = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE user_id = ?", (legacy_id,)
+        ).fetchone()[0]
+    assert kind == "human"
+    assert wallet_count == 1
+    assert account_count == 1
 
 
 def test_adoption_errors_missing_human_owner_and_duplicate(tmp_path: Path) -> None:

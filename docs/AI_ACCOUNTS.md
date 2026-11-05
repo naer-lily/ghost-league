@@ -49,7 +49,10 @@ Content-Type: application/json
 
 Rules:
 
-- `user_id` must match Ghost's `SAFE_USER_ID` pattern and must not be the owner.
+- `user_id` must match Ghost's `SAFE_USER_ID` pattern (1-80 characters, leading
+  letter or digit, then letters/digits/dot/underscore/dash) and must not be the
+  owner. Live legacy AI ids are `ch-` plus a 64-hex source key, 67 characters,
+  so they fit the provisioning limit.
 - Duplicate ids return `409`; malformed or unknown fields return `422`.
 - `display_name` is non-empty and at most 80 characters.
 - The response is `201 {"account": {...}, "token": "..."}`.

@@ -43,7 +43,7 @@ OWNER_USER_ID = (
 )
 # Deprecated alias kept for existing imports/tests.
 CURRENT_USER_ID = OWNER_USER_ID
-USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 DEFAULT_ACTIVITY_LABEL = "练习"
 LEGACY_ACTIVITY_LABEL = "画画"
 
@@ -70,7 +70,7 @@ def normalize_activity_label(value: str) -> str:
 def validate_user_id(user_id: str) -> str:
     if not isinstance(user_id, str) or not USER_ID_PATTERN.fullmatch(user_id):
         raise ValueError(
-            "user_id must be 1-64 characters: letters, digits, dot, underscore or dash"
+            "user_id must be 1-80 characters: letters, digits, dot, underscore or dash"
         )
     return user_id
 

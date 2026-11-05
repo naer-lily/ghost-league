@@ -111,7 +111,7 @@ TASK_PROOF_QUALITY_STEPS = (90, 75, 60, 45)
 TASK_PROOF_LONG_EDGE_STEPS = (2400, 1600, 1200, 800)
 MAX_TASK_PROOF_BYTES = 1_000_000
 MAX_TASK_PROOF_UPLOAD_BYTES = 8 * 1024 * 1024
-SAFE_USER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+SAFE_USER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 
 
 class FutureTimestampError(ValueError):
@@ -139,7 +139,7 @@ class ProvisioningAccountRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    user_id: str = Field(min_length=1, max_length=64)
+    user_id: str = Field(min_length=1, max_length=80)
     display_name: str = Field(min_length=1, max_length=80)
     activity_label: str = Field(default=DEFAULT_ACTIVITY_LABEL)
     adopt_existing_player: bool = False

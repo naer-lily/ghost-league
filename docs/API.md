@@ -97,6 +97,8 @@ token 只以 SHA-256 哈希保存在 `data/api/accounts.db`，不会出现在 AP
 }
 ```
 
+- `user_id` 为 1–80 字符，首字符须为字母或数字，其余只允许字母、数字、点、下划线、
+  短横线。旧 AI id 为 `ch-` 加 64 位 hex（67 字符），在 provisioning 限制内。
 - `adopt_existing_player` 默认 `false`：只创建新账号，不写游戏行。
 - 设为 `true` 时，`user_id` 必须是已存在的 `kind='ai'` 玩家。接口会在同一个联赛
   事务中把该玩家原地升级为 `kind='human'` / `controller='human'` /
